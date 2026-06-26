@@ -1,0 +1,108 @@
+import { GatewayError } from "../../kernel/errors.js";
+import type { ModelDescriptor, ReasoningEffort } from "../../domain/model.js";
+import type { ModelToolDefinition } from "../../domain/tool.js";
+
+export interface GenerationOptions {
+  maxOutputTokens: number;
+  temperature?: number;
+  reasoningEffort?: ReasoningEffort;
+  responseFormat?: "text" | "json_object" | "json_schema";
+  strictJsonSchema?: boolean;
+}
+
+export interface CapabilityPolicy {
+  tools: boolean;
+  structuredOutput: boolean;
+  reasoning: boolean;
+  images: boolean;
+  audio: boolean;
+}
+
+export interface CapabilityNegotiationRequest {
+  model: ModelDescriptor;
+  tools: readonly ModelToolDefinition[];
+  generation: GenerationOptions;
+  policy: CapabilityPolicy;
+}
+
+export interface CapabilityNegotiationResult {
+  tools: readonly ModelToolDefinition[];
+  generation: GenerationOptions;
+}
+
+function requireSupported(value: string, code: string, message: string): void {
+  if (value !== "supported") {
+    throw new GatewayError(code, message, { support: value });
+  }
+}
+
+export function negotiateCapabilities(request: CapabilityNegotiationRequest): CapabilityNegotiationResult {
+  const { model, tools, generation, policy } = request;
+
+  if (tools.length > 0) {
+    if (!policy.tools) {
+      throw new GatewayError("CAPABILITY_NOT_ALLOWED", "Tool calling is disabled by profile policy");
+    }
+
+    requireSupported(
+      model.capabilities.toolCalling.support,
+      "CAPABILITY_UNSUPPORTED",
+      "Tool calling is not supported by the selected model"
+    );
+
+    if (tools.some((tool) => tool.strict)) {
+      requireSupported(
+        model.capabilities.toolCalling.strictSchema,
+        "CAPABILITY_UNSUPPORTED",
+        "Strict tool schema is not supported by the selected model"
+      );
+    }
+  }
+
+  if (generation.responseFormat === "json_schema" || generation.strictJsonSchema) {
+    if (!policy.structuredOutput) {
+      throw new GatewayError("CAPABILITY_NOT_ALLOWED", "Structured output is disabled by profile policy");
+    }
+
+    requireSupported(
+      model.capabilities.structuredOutput.jsonSchema,
+      "CAPABILITY_UNSUPPORTED",
+      "JSON Schema output is not supported by the selected model"
+    );
+
+    if (generation.strictJsonSchema) {
+      requireSupported(
+        model.capabilities.structuredOutput.strictSchema,
+        "CAPABILITY_UNSUPPORTED",
+        "Strict JSON Schema output is not supported by the selected model"
+      );
+    }
+  }
+
+  if (generation.reasoningEffort) {
+    if (!policy.reasoning) {
+      throw new GatewayError("CAPABILITY_NOT_ALLOWED", "Reasoning controls are disabled by profile policy");
+    }
+
+    requireSupported(
+      model.capabilities.reasoning.support,
+      "CAPABILITY_UNSUPPORTED",
+      "Reasoning controls are not supported by the selected model"
+    );
+
+    if (!model.capabilities.reasoning.allowedEfforts.includes(generation.reasoningEffort)) {
+      throw new GatewayError("CAPABILITY_UNSUPPORTED", "Requested reasoning effort is not supported by the selected model", {
+        reasoningEffort: generation.reasoningEffort
+      });
+    }
+  }
+
+  if (model.capabilities.maxOutputTokens && generation.maxOutputTokens > model.capabilities.maxOutputTokens) {
+    throw new GatewayError("OUTPUT_LIMIT_EXCEEDED", "Requested output tokens exceed the selected model limit", {
+      requested: generation.maxOutputTokens,
+      max: model.capabilities.maxOutputTokens
+    });
+  }
+
+  return { tools, generation };
+}

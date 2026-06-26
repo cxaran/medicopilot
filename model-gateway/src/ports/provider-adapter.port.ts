@@ -1,0 +1,60 @@
+import type { CanonicalMessage } from "../domain/message.js";
+import type { ModelDescriptor, ProviderProtocol } from "../domain/model.js";
+import type { ModelToolDefinition, ToolCallResult, ToolCallRequest } from "../domain/tool.js";
+import type { TurnUsage } from "../domain/usage.js";
+import type { GenerationOptions } from "../application/capabilities/capability-negotiator.js";
+
+export interface ProviderCredentialLease {
+  leaseId: string;
+  secret: string;
+  expiresAt: Date;
+}
+
+export interface CredentialVerification {
+  valid: boolean;
+  reason?: string;
+}
+
+export interface TokenEstimationInput {
+  messages: CanonicalMessage[];
+  tools: ModelToolDefinition[];
+}
+
+export interface TokenEstimate {
+  inputTokens: number;
+  confidence: "exact" | "estimated";
+}
+
+export interface ProviderTurnInput {
+  turnId: string;
+  model: ModelDescriptor;
+  credential: ProviderCredentialLease;
+  messages: CanonicalMessage[];
+  tools: ModelToolDefinition[];
+  options: GenerationOptions;
+  signal: AbortSignal;
+}
+
+export interface ProviderResumeInput {
+  turnId: string;
+  model: ModelDescriptor;
+  credential: ProviderCredentialLease;
+  toolResults: ToolCallResult[];
+  continuationState: unknown | null;
+  signal: AbortSignal;
+}
+
+export type ProviderEvent =
+  | { type: "text.delta"; delta: string }
+  | { type: "tool_call.ready"; call: ToolCallRequest; continuationState?: unknown }
+  | { type: "reasoning.summary"; summary: string }
+  | { type: "completed"; usage: TurnUsage };
+
+export interface ProviderAdapter {
+  readonly protocol: ProviderProtocol;
+  verifyCredential(credential: ProviderCredentialLease): Promise<CredentialVerification>;
+  discoverModels(credential: ProviderCredentialLease): Promise<ModelDescriptor[]>;
+  estimateTokens?(input: TokenEstimationInput): Promise<TokenEstimate>;
+  startTurn(input: ProviderTurnInput): AsyncIterable<ProviderEvent>;
+  resumeTurn(input: ProviderResumeInput): AsyncIterable<ProviderEvent>;
+}
