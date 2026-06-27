@@ -393,5 +393,65 @@ class ResourcesOpenApiTest(unittest.TestCase):
             self.assertIn(name, schemas)
 
 
+class DoctorsCapabilityTest(unittest.TestCase):
+    def test_doctor_resource_contract_is_renderable(self) -> None:
+        with _As("doctors:read", "doctors:create", "doctors:update", "doctors:delete"):
+            cap = client.get("/api/v1/resources/doctors").json()
+        self.assertEqual(cap["name"], "doctors")
+        self.assertEqual(cap["label"], "Médicos")
+        self.assertEqual(cap["view"], "table")
+        self.assertEqual(cap["detail"]["url_template"], "/api/v1/doctors/{id}")
+        self.assertEqual(cap["item_reference"]["field"], "id")
+
+        labels = {f["name"]: f["label"] for f in cap["list"]["fields"]}
+        self.assertEqual(labels["professional_license_number"], "Cédula")
+        self.assertEqual(labels["status"], "Estado")
+
+        # El filtro de status publica opciones en español desde el contrato.
+        status_filter = next(f for f in cap["list"]["filters"] if f["field"] == "status")
+        self.assertEqual(status_filter["widget"], "select")
+        values = {o["value"] for o in status_filter["options"]}
+        self.assertEqual(values, {"active", "inactive", "suspended"})
+
+        self.assertEqual(cap["forms"]["create"]["method"], "POST")
+        self.assertEqual(cap["forms"]["update"]["method"], "PATCH")
+        action_names = {a["name"] for a in cap["actions"]}
+        self.assertIn("delete", action_names)
+
+    def test_doctors_hidden_without_read_permission(self) -> None:
+        with _As("patients:read"):
+            names = [r["name"] for r in client.get("/api/v1/resources").json()]
+        self.assertNotIn("doctors", names)
+
+    def test_doctor_forms_gated_by_permission(self) -> None:
+        with _As("doctors:read"):
+            cap = client.get("/api/v1/resources/doctors").json()
+        self.assertNotIn("forms", cap)
+        self.assertEqual(cap["actions"], [])
+
+
+class PatientsCapabilityTest(unittest.TestCase):
+    def test_patient_resource_contract_is_renderable(self) -> None:
+        with _As("patients:read", "patients:create", "patients:update", "patients:delete"):
+            cap = client.get("/api/v1/resources/patients").json()
+        self.assertEqual(cap["name"], "patients")
+        self.assertEqual(cap["label"], "Pacientes")
+
+        list_field_names = {f["name"] for f in cap["list"]["fields"]}
+        self.assertIn("record_number", list_field_names)
+
+        # record_number es de sólo lectura: nunca aparece en los formularios.
+        create_fields = {f["name"] for f in cap["forms"]["create"]["fields"]}
+        update_fields = {f["name"] for f in cap["forms"]["update"]["fields"]}
+        self.assertNotIn("record_number", create_fields)
+        self.assertNotIn("record_number", update_fields)
+
+        action_names = {a["name"] for a in cap["actions"]}
+        self.assertEqual(action_names, {"archive", "delete"})
+        archive = next(a for a in cap["actions"] if a["name"] == "archive")
+        self.assertEqual(archive["method"], "PATCH")
+        self.assertEqual(archive["request"]["fixed_body"], {"status": "archived"})
+
+
 if __name__ == "__main__":
     unittest.main()

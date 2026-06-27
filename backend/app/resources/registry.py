@@ -52,9 +52,9 @@ from backend.app.schemas.capabilities import (
 from backend.app.schemas.appointment import AppointmentListItem
 from backend.app.schemas.consultation import ConsultationListItem
 from backend.app.schemas.consultation_diagnosis import ConsultationDiagnosisListItem
-from backend.app.schemas.doctor import DoctorListItem
+from backend.app.schemas.doctor import DoctorCreate, DoctorListItem, DoctorUpdate
 from backend.app.schemas.medical_history_version import MedicalHistoryVersionListItem
-from backend.app.schemas.patient import PatientListItem
+from backend.app.schemas.patient import PatientCreate, PatientListItem, PatientUpdate
 from backend.app.schemas.patient_clinical_item import PatientClinicalItemListItem
 from backend.app.schemas.prescription import (
     PrescriptionItemListItem,
@@ -67,6 +67,8 @@ from backend.app.schemas.user_admin import (
     UserAdminListItem,
     UserAdminUpdate,
 )
+from backend.app.security.groups.doctors import DoctorPermissions
+from backend.app.security.groups.patients import PatientPermissions
 from backend.app.security.groups.permissions import PermissionPermissions
 from backend.app.security.groups.roles import RolePermissions
 from backend.app.security.groups.users import UserPermissions
@@ -564,6 +566,85 @@ RESOURCE_REGISTRY: tuple[ResourceDefinition, ...] = (
                 options_value_field="access",
                 options_label_field="label",
                 permission=RolePermissions.MANAGE_PERMISSIONS,
+            ),
+        ),
+    ),
+    ResourceDefinition(
+        name="doctors",
+        label="Médicos",
+        api_path="/api/v1/doctors",
+        view=ResourceView.TABLE,
+        read_permission=DoctorPermissions.READ,
+        list_query=DOCTORS,
+        list_schema=DoctorListItem,
+        create_schema=DoctorCreate,
+        update_schema=DoctorUpdate,
+        create_permission=DoctorPermissions.CREATE,
+        update_permission=DoctorPermissions.UPDATE,
+        detail_url_template="/api/v1/doctors/{id}",
+        actions=(
+            ActionDef(
+                name="delete",
+                label="Eliminar",
+                method=HttpMethod.DELETE,
+                url_template="/api/v1/doctors/{id}",
+                scope=ActionScope.ITEM,
+                danger=True,
+                permission=DoctorPermissions.DELETE,
+                confirmation=ConfirmationDef(
+                    title="Eliminar médico",
+                    message="El perfil médico se dará de baja lógica.",
+                    confirm_label="Eliminar",
+                    destructive=True,
+                ),
+            ),
+        ),
+    ),
+    ResourceDefinition(
+        name="patients",
+        label="Pacientes",
+        api_path="/api/v1/patients",
+        view=ResourceView.TABLE,
+        read_permission=PatientPermissions.READ,
+        list_query=PATIENTS,
+        list_schema=PatientListItem,
+        create_schema=PatientCreate,
+        update_schema=PatientUpdate,
+        create_permission=PatientPermissions.CREATE,
+        update_permission=PatientPermissions.UPDATE,
+        detail_url_template="/api/v1/patients/{id}",
+        actions=(
+            # Archivar reutiliza el PATCH de actualización con cuerpo fijo (status).
+            ActionDef(
+                name="archive",
+                label="Archivar",
+                method=HttpMethod.PATCH,
+                url_template="/api/v1/patients/{id}",
+                scope=ActionScope.ITEM,
+                danger=True,
+                permission=PatientPermissions.UPDATE,
+                fixed_body={"status": "archived"},
+                confirmation=ConfirmationDef(
+                    title="Archivar paciente",
+                    message="El paciente quedará archivado y fuera de la operación diaria.",
+                    confirm_label="Archivar",
+                    destructive=True,
+                ),
+            ),
+            ActionDef(
+                name="delete",
+                label="Eliminar",
+                method=HttpMethod.DELETE,
+                url_template="/api/v1/patients/{id}",
+                scope=ActionScope.ITEM,
+                danger=True,
+                permission=PatientPermissions.DELETE,
+                confirmation=ConfirmationDef(
+                    title="Eliminar paciente",
+                    message="El expediente se dará de baja lógica.",
+                    confirm_label="Eliminar",
+                    destructive=True,
+                ),
             ),
         ),
     ),
