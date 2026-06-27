@@ -1,4 +1,7 @@
 from backend.app.security.groups.doctors import DoctorPermissions
+from backend.app.security.groups.medical_history_versions import (
+    MedicalHistoryVersionPermissions,
+)
 from backend.app.security.groups.patient_clinical_items import (
     PatientClinicalItemPermissions,
 )
@@ -15,6 +18,7 @@ SECURITY_GROUPS: list[type[SecurityGroup]] = [
     DoctorPermissions,
     PatientPermissions,
     PatientClinicalItemPermissions,
+    MedicalHistoryVersionPermissions,
     PermissionPermissions,
 ]
 

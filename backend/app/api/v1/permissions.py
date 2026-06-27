@@ -19,6 +19,7 @@ _GROUP_LABELS = {
     "doctors": "Médicos",
     "patients": "Pacientes",
     "patient_clinical_items": "Datos clínicos de pacientes",
+    "medical_history_versions": "Historia clínica",
     "permissions": "Permisos",
 }
 
@@ -31,6 +32,7 @@ def _group_name(group: type[SecurityGroup]) -> str:
         "doctor": "doctors",
         "patient": "patients",
         "patientclinicalitem": "patient_clinical_items",
+        "medicalhistoryversion": "medical_history_versions",
         "permission": "permissions",
     }.get(singular, singular)
 

@@ -14,6 +14,7 @@ from typing import Optional
 from pydantic import BaseModel
 
 from backend.app.models.doctor import Doctor
+from backend.app.models.medical_history import MedicalHistoryVersion
 from backend.app.models.patient import Patient
 from backend.app.models.patient_clinical_item import PatientClinicalItem
 from backend.app.models.user import Role, User
@@ -44,6 +45,7 @@ from backend.app.schemas.capabilities import (
     ResourceView,
 )
 from backend.app.schemas.doctor import DoctorListItem
+from backend.app.schemas.medical_history_version import MedicalHistoryVersionListItem
 from backend.app.schemas.patient import PatientListItem
 from backend.app.schemas.patient_clinical_item import PatientClinicalItemListItem
 from backend.app.schemas.role import RoleCreate, RoleListItem, RoleRead, RoleUpdate
@@ -157,6 +159,22 @@ PATIENT_CLINICAL_ITEMS = ResourceQuery(
         filter_fields=("patient_id", "item_type", "status", "severity"),
         sort_fields=("created_at", "updated_at", "title", "started_on"),
         search_fields=("title", "details"),
+        in_fields=("id",),
+        default_sort="-created_at",
+    ),
+)
+
+MEDICAL_HISTORY_VERSIONS = ResourceQuery(
+    name="MedicalHistoryVersionQuery",
+    model=MedicalHistoryVersion,
+    schema=MedicalHistoryVersionListItem,
+    options=QueryOptions(
+        # ``patient_id`` (UUID) por igualdad: la historia se consulta por paciente;
+        # ``status`` (enum no-nativo) por igualdad (p. ej. ?status=current). No se
+        # habilita búsqueda libre sobre los campos narrativos (datos sensibles).
+        # Los listados excluyen eliminados (``deleted_at``) vía stmt base en el router.
+        filter_fields=("patient_id", "status"),
+        sort_fields=("version_number", "created_at", "updated_at", "reviewed_at"),
         in_fields=("id",),
         default_sort="-created_at",
     ),

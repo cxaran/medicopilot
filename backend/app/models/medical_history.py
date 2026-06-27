@@ -42,6 +42,12 @@ class MedicalHistoryVersion(Base):
         default=MedicalHistoryVersionStatus.DRAFT,
         comment="Estado de la versión: borrador, vigente o sustituida.",
     )
+    based_on_version_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("medical_history_versions.id", ondelete="RESTRICT"),
+        nullable=True,
+        comment="Versión vigente desde la cual nació este borrador; nulo sólo en la primera versión.",
+    )
     family_history: Mapped[Optional[str]] = mapped_column(
         Text, nullable=True, comment="Antecedentes heredofamiliares."
     )
@@ -57,10 +63,10 @@ class MedicalHistoryVersion(Base):
     hospitalizations: Mapped[Optional[str]] = mapped_column(
         Text, nullable=True, comment="Hospitalizaciones."
     )
-    relevant_habits_notes: Mapped[Optional[str]] = mapped_column(
+    relevant_habits: Mapped[Optional[str]] = mapped_column(
         Text,
         nullable=True,
-        comment="Narrativa adicional sobre hábitos. El resumen vigente vive en patient_clinical_items.",
+        comment="Hábitos relevantes (narrativa). El resumen vigente vive en patient_clinical_items.",
     )
     gyneco_obstetric_history: Mapped[Optional[str]] = mapped_column(
         Text,
@@ -69,9 +75,6 @@ class MedicalHistoryVersion(Base):
     )
     clinical_observations: Mapped[Optional[str]] = mapped_column(
         Text, nullable=True, comment="Observaciones clínicas generales."
-    )
-    change_reason: Mapped[Optional[str]] = mapped_column(
-        Text, nullable=True, comment="Motivo de creación o actualización de la versión."
     )
     reviewed_by_doctor_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         PG_UUID(as_uuid=True),
@@ -119,6 +122,11 @@ class MedicalHistoryVersion(Base):
     )
 
     patient = relationship("Patient", back_populates="medical_history_versions")
+    based_on_version = relationship(
+        "MedicalHistoryVersion",
+        remote_side=[id],
+        foreign_keys=[based_on_version_id],
+    )
     reviewed_by_doctor = relationship(
         "Doctor",
         back_populates="reviewed_medical_history_versions",
@@ -137,10 +145,19 @@ class MedicalHistoryVersion(Base):
         Index("ix_medical_history_versions_patient", "patient_id"),
         Index("ix_medical_history_versions_status", "status"),
         Index("ix_medical_history_versions_reviewed_by", "reviewed_by_doctor_id"),
+        Index("ix_medical_history_versions_based_on", "based_on_version_id"),
+        # Índices parciales únicos: a lo sumo una versión vigente y a lo sumo un
+        # borrador no eliminado por paciente. Las versiones superseded no se limitan.
         Index(
             "uq_medical_history_versions_current_patient",
             "patient_id",
             unique=True,
             postgresql_where=text("status = 'current' AND deleted_at IS NULL"),
+        ),
+        Index(
+            "uq_medical_history_versions_draft_patient",
+            "patient_id",
+            unique=True,
+            postgresql_where=text("status = 'draft' AND deleted_at IS NULL"),
         ),
     )
