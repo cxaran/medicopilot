@@ -43,6 +43,7 @@ _CREATED_AT_OPERATORS = (
     Operator.BETWEEN,
 )
 from backend.app.schemas.capabilities import (
+    ActionCondition,
     ActionScope,
     HttpMethod,
     OptionsSourceType,
@@ -338,7 +339,16 @@ class ActionDef:
     ``fixed_body`` declara el cuerpo exacto que el frontend debe enviar (p. ej.
     ``{"is_active": False}`` para reutilizar el PATCH de actualización como
     desactivación). El frontend no puede modificarlo ni reutilizar la acción para
-    otro payload."""
+    otro payload.
+
+    ``input_schema`` declara, en su lugar, un formulario de entrada (un schema Pydantic
+    con ``extra="forbid"``) que el frontend debe presentar y enviar. ``fixed_body`` e
+    ``input_schema`` son excluyentes: una acción tiene cuerpo fijo, o formulario, o
+    ningún cuerpo (jamás los dos).
+
+    ``visible_when``/``enabled_when`` son condiciones de estado (DSL serializable de
+    capabilities) que el frontend usa como guía; el backend revalida siempre. El permiso
+    nunca se expresa en estas condiciones: es la propiedad ``permission``."""
 
     name: str
     label: str
@@ -348,7 +358,23 @@ class ActionDef:
     danger: bool
     permission: SecurityGroup
     fixed_body: Optional[dict[str, object]] = None
+    input_schema: Optional[type[BaseModel]] = None
     confirmation: Optional[ConfirmationDef] = None
+    visible_when: Optional[ActionCondition] = None
+    enabled_when: Optional[ActionCondition] = None
+
+    def __post_init__(self) -> None:
+        # Falla temprano (al definir el recurso), no al proyectar la capability.
+        if self.fixed_body is not None and self.input_schema is not None:
+            raise ValueError(
+                f"La acción '{self.name}' no puede declarar 'fixed_body' e 'input_schema' a la vez."
+            )
+        if self.input_schema is not None:
+            extra = self.input_schema.model_config.get("extra")
+            if extra != "forbid":
+                raise ValueError(
+                    f"El input_schema de la acción '{self.name}' debe usar extra='forbid'."
+                )
 
 
 @dataclass(frozen=True)

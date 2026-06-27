@@ -16,7 +16,7 @@ Reglas del contrato:
 from enum import Enum
 from typing import Any, Optional
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from backend.app.schemas.base import ApiReadSchema
 
@@ -29,6 +29,7 @@ class FieldValueType(str, Enum):
     DECIMAL = "decimal"
     BOOLEAN = "boolean"
     DATE = "date"
+    TIME = "time"
     DATETIME = "datetime"
     ENUM = "enum"
     ARRAY = "array"
@@ -48,6 +49,7 @@ class WidgetType(str, Enum):
     DATE = "date"
     DATERANGE = "daterange"
     DATETIME = "datetime"
+    TIME = "time"
 
 
 class FilterOperator(str, Enum):
@@ -222,6 +224,11 @@ class ResourceFormFieldCapability(ApiReadSchema):
     # editables; el indicador deja el contrato preparado para campos de solo lectura.
     editable: bool = True
     widget: Optional[WidgetType] = None
+    # Opciones cerradas de un campo de selección (enum o ``ui.options``), con la misma
+    # forma ``{value, label}`` que los filtros. ``None`` cuando el campo no declara un
+    # universo de opciones (texto libre, número, fecha, etc.). El ``value`` se serializa
+    # como string aunque el tipo real sea entero/booleano (misma convención que filtros).
+    options: Optional[list[ResourceFilterOption]] = None
 
 
 class ResourceFormCapability(ApiReadSchema):
@@ -259,6 +266,84 @@ class ActionConfirmation(ApiReadSchema):
     destructive: bool
 
 
+class ActionInputSchema(ApiReadSchema):
+    """Formulario declarado de entrada de una acción (B2).
+
+    Sólo se publica cuando la acción declara un ``input_schema`` (en vez de un cuerpo
+    fijo). Reusa exactamente la misma proyección de formularios que ``create``/``update``:
+    cada campo es un ``ResourceFormFieldCapability`` (label, tipo, widget, obligatoriedad
+    y opciones). Nunca se serializan defaults, validadores ni la clase Python."""
+
+    fields: list[ResourceFormFieldCapability]
+
+
+class ActionConditionOperator(str, Enum):
+    """Operadores del DSL serializable de condiciones (``visible_when``/``enabled_when``).
+
+    Es un contrato de datos, no un lenguaje evaluable: nunca se publican expresiones,
+    JavaScript, Python ni lambdas."""
+
+    EQ = "eq"
+    NEQ = "neq"
+    IN = "in"
+    NOT_IN = "not_in"
+    IS_NULL = "is_null"
+    NOT_NULL = "not_null"
+
+
+class ActionConditionPredicate(ApiReadSchema):
+    """Predicado atómico: compara el campo ``field`` del item con ``value``.
+
+    ``value`` es escalar para ``eq``/``neq``, una lista para ``in``/``not_in`` y se
+    omite para ``is_null``/``not_null``. La validez se comprueba al construir el
+    predicado (en el registro de la acción), no al evaluarlo."""
+
+    field: str
+    operator: ActionConditionOperator
+    value: Optional[Any] = None
+
+    @model_validator(mode="after")
+    def _validate_shape(self) -> "ActionConditionPredicate":
+        if not self.field or not self.field.strip():
+            raise ValueError("El predicado de condición requiere un 'field' no vacío.")
+        op = self.operator
+        if op in (ActionConditionOperator.EQ, ActionConditionOperator.NEQ):
+            if self.value is None:
+                raise ValueError(
+                    f"El operador '{op.value}' requiere un 'value'."
+                )
+        elif op in (ActionConditionOperator.IN, ActionConditionOperator.NOT_IN):
+            if not isinstance(self.value, list) or len(self.value) == 0:
+                raise ValueError(
+                    f"El operador '{op.value}' requiere un 'value' de lista no vacía."
+                )
+        else:  # is_null / not_null
+            if self.value is not None:
+                raise ValueError(
+                    f"El operador '{op.value}' no admite 'value'."
+                )
+        return self
+
+
+class ActionCondition(ApiReadSchema):
+    """Condición de estado de una acción: conjunción (``all``) de predicados.
+
+    Sólo se soporta ``all`` (todos los predicados deben cumplirse). El permiso es una
+    propiedad aparte (``permission`` en el registro) y nunca se expresa aquí. El backend
+    sigue siendo la autoridad final: si el frontend no puede evaluar la condición, debe
+    comportarse de forma conservadora."""
+
+    # ``all`` es builtin de Python: el atributo se llama ``all_`` y se serializa/valida
+    # como ``all`` vía alias (con ``populate_by_name`` se construye con cualquiera).
+    all_: list[ActionConditionPredicate] = Field(alias="all")
+
+    @model_validator(mode="after")
+    def _validate_non_empty(self) -> "ActionCondition":
+        if not self.all_:
+            raise ValueError("La condición 'all' no puede estar vacía.")
+        return self
+
+
 class ResourceActionCapability(ApiReadSchema):
     name: str
     label: str
@@ -267,8 +352,16 @@ class ResourceActionCapability(ApiReadSchema):
     scope: ActionScope
     danger: bool
     request: Optional[ActionRequestSpec] = None
+    # Formulario de entrada (B2). Excluyente con ``request``: una acción declara un
+    # cuerpo fijo o un formulario, nunca ambos.
+    input_schema: Optional[ActionInputSchema] = None
     confirmation: Optional[ActionConfirmation] = None
     success_behavior: ActionSuccessBehavior = ActionSuccessBehavior.REFRESH
+    # Condiciones de estado (B3). ``visible_when``: si no se cumple, la acción no se
+    # muestra. ``enabled_when``: si no se cumple, se muestra deshabilitada. Ambas son el
+    # DSL serializable; el permiso se filtra antes (la acción ni siquiera se proyecta).
+    visible_when: Optional[ActionCondition] = None
+    enabled_when: Optional[ActionCondition] = None
 
 
 class RelationOptionsSource(ApiReadSchema):

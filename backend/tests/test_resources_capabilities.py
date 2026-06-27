@@ -418,6 +418,27 @@ class DoctorsCapabilityTest(unittest.TestCase):
         action_names = {a["name"] for a in cap["actions"]}
         self.assertIn("delete", action_names)
 
+    def test_doctor_form_select_publishes_enum_options(self) -> None:
+        # B1: el campo de selección del formulario publica sus opciones {value,label}
+        # con labels en español desde el mismo contrato (no sólo el filtro de lista).
+        with _As("doctors:read", "doctors:create"):
+            cap = client.get("/api/v1/resources/doctors").json()
+        status_field = next(
+            f for f in cap["forms"]["create"]["fields"] if f["name"] == "status"
+        )
+        self.assertEqual(status_field["widget"], "select")
+        options = {o["value"]: o["label"] for o in status_field["options"]}
+        self.assertEqual(options, {
+            "active": "Activo",
+            "inactive": "Inactivo",
+            "suspended": "Suspendido",
+        })
+        # Un campo de texto libre no publica opciones (se omite por exclude_none).
+        name_field = next(
+            f for f in cap["forms"]["create"]["fields"] if f["name"] == "professional_name"
+        )
+        self.assertNotIn("options", name_field)
+
     def test_doctors_hidden_without_read_permission(self) -> None:
         with _As("patients:read"):
             names = [r["name"] for r in client.get("/api/v1/resources").json()]

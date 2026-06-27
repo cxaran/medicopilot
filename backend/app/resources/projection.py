@@ -6,7 +6,7 @@ capacidades técnicas (sortable/searchable/operadores/orden/límites) vienen del
 ``SecurityControl.check(current_user)``; nunca se serializan permisos ni internals.
 """
 
-from datetime import date, datetime
+from datetime import date, datetime, time
 from decimal import Decimal
 from enum import Enum
 from types import UnionType
@@ -28,6 +28,7 @@ from backend.app.resources.registry import (
 )
 from backend.app.schemas.capabilities import (
     ActionConfirmation,
+    ActionInputSchema,
     ActionRequestSpec,
     ActionSuccessBehavior,
     FieldValueType,
@@ -129,6 +130,8 @@ def _value_type(annotation: Any) -> FieldValueType:
         return FieldValueType.DATETIME
     if inner is date:
         return FieldValueType.DATE
+    if inner is time:
+        return FieldValueType.TIME
     if isinstance(inner, type) and issubclass(inner, Enum):
         return FieldValueType.ENUM
     raise CapabilityConfigError(f"Tipo no mapeable a capability: {inner!r}")
@@ -187,38 +190,46 @@ def _sort_capability(plan: CompiledQueryPlan, sort_max_length: Optional[int]) ->
 # --- Construcción de capabilities ---
 
 
+def _declared_options(field_name: str, raw: Any) -> list[ResourceFilterOption]:
+    """Valida y construye la lista de opciones ``{value, label}`` declarada en ``ui``.
+
+    Fuente única para filtros (``ui.filter.options``) y formularios (``ui.options``):
+    misma forma y mismas reglas (value string no vacío, label explícito, sin duplicados)."""
+    if not isinstance(raw, list) or len(raw) == 0:
+        raise CapabilityConfigError(
+            f"El campo '{field_name}' (select) requiere al menos una opción."
+        )
+    options: list[ResourceFilterOption] = []
+    seen: set[str] = set()
+    for entry in raw:
+        if not isinstance(entry, dict):
+            raise CapabilityConfigError(f"El campo '{field_name}' tiene una opción inválida.")
+        value = entry.get("value")
+        label = entry.get("label")
+        if not isinstance(value, str) or value == "":
+            raise CapabilityConfigError(
+                f"El campo '{field_name}' tiene una opción con value vacío o no string."
+            )
+        if not isinstance(label, str) or label.strip() == "":
+            raise CapabilityConfigError(
+                f"El campo '{field_name}' tiene una opción sin label explícito."
+            )
+        if value in seen:
+            raise CapabilityConfigError(
+                f"El campo '{field_name}' tiene el value de opción duplicado: {value}."
+            )
+        seen.add(value)
+        options.append(ResourceFilterOption(value=value, label=label))
+    return options
+
+
 def _filter_options(
     field_name: str, widget: WidgetType, raw: Any
 ) -> Optional[list[ResourceFilterOption]]:
     if widget != WidgetType.SELECT:
         # Los widgets sin opciones (futuros) no las llevan en este alcance.
         return None
-    if not isinstance(raw, list) or len(raw) == 0:
-        raise CapabilityConfigError(
-            f"El filtro '{field_name}' (select) requiere al menos una opción."
-        )
-    options: list[ResourceFilterOption] = []
-    seen: set[str] = set()
-    for entry in raw:
-        if not isinstance(entry, dict):
-            raise CapabilityConfigError(f"El filtro '{field_name}' tiene una opción inválida.")
-        value = entry.get("value")
-        label = entry.get("label")
-        if not isinstance(value, str) or value == "":
-            raise CapabilityConfigError(
-                f"El filtro '{field_name}' tiene una opción con value vacío o no string."
-            )
-        if not isinstance(label, str) or label.strip() == "":
-            raise CapabilityConfigError(
-                f"El filtro '{field_name}' tiene una opción sin label explícito."
-            )
-        if value in seen:
-            raise CapabilityConfigError(
-                f"El filtro '{field_name}' tiene el value de opción duplicado: {value}."
-            )
-        seen.add(value)
-        options.append(ResourceFilterOption(value=value, label=label))
-    return options
+    return _declared_options(field_name, raw)
 
 
 def _filter_capabilities(
@@ -560,6 +571,27 @@ def _list_capability(definition: ResourceDefinition) -> ResourceListCapability:
     )
 
 
+def _form_field_options(
+    field_name: str, field_info: FieldInfo, value_type: FieldValueType
+) -> Optional[list[ResourceFilterOption]]:
+    """Opciones cerradas de un campo de formulario.
+
+    Prioriza ``ui.options`` (fuente con labels en español). Si no hay declaración pero
+    el campo es un enum, deriva las opciones desde sus miembros (value y label = valor
+    del enum) para no dejar selects sin universo. Texto/número/fecha → ``None``."""
+    raw = _ui(field_info).get("options")
+    if raw is not None:
+        return _declared_options(field_name, raw)
+    if value_type is FieldValueType.ENUM:
+        enum_type = _unwrap(field_info.annotation)
+        if isinstance(enum_type, type) and issubclass(enum_type, Enum):
+            return [
+                ResourceFilterOption(value=str(member.value), label=str(member.value))
+                for member in enum_type
+            ]
+    return None
+
+
 def _form_fields(write_schema: type[BaseModel]) -> list[ResourceFormFieldCapability]:
     fields: list[ResourceFormFieldCapability] = []
     for name, field_info in write_schema.model_fields.items():
@@ -567,15 +599,17 @@ def _form_fields(write_schema: type[BaseModel]) -> list[ResourceFormFieldCapabil
         if not ui.get("form", False):
             continue
         widget_raw = ui.get("widget")
+        value_type = _value_type(field_info.annotation)
         fields.append(
             ResourceFormFieldCapability(
                 name=name,
                 label=_require_label(field_info, name),
                 description=field_info.description,
-                type=_value_type(field_info.annotation),
+                type=value_type,
                 required=field_info.is_required(),
                 editable=True,
                 widget=WidgetType(widget_raw) if widget_raw is not None else None,
+                options=_form_field_options(name, field_info, value_type),
             )
         )
     return fields
@@ -620,6 +654,13 @@ def _action_capability(action: ActionDef) -> ResourceActionCapability:
         if action.fixed_body is not None
         else None
     )
+    # ``fixed_body`` e ``input_schema`` son excluyentes (validado en ActionDef). El
+    # formulario reusa exactamente la misma proyección que create/update.
+    input_schema = (
+        ActionInputSchema(fields=_form_fields(action.input_schema))
+        if action.input_schema is not None
+        else None
+    )
     confirmation = (
         ActionConfirmation(
             required=action.confirmation.required,
@@ -639,8 +680,13 @@ def _action_capability(action: ActionDef) -> ResourceActionCapability:
         scope=action.scope,
         danger=action.danger,
         request=request,
+        input_schema=input_schema,
         confirmation=confirmation,
         success_behavior=ActionSuccessBehavior.REFRESH,
+        # ``visible_when``/``enabled_when`` ya son ``ActionCondition`` validados; se
+        # publican tal cual (el permiso se filtró antes en ``_build_capability``).
+        visible_when=action.visible_when,
+        enabled_when=action.enabled_when,
     )
 
 
