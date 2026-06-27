@@ -45,7 +45,7 @@ DEV_ENV = {
 os.environ.update(DEV_ENV)
 
 from fastapi.testclient import TestClient  # noqa: E402
-from sqlalchemy import create_engine, delete  # noqa: E402
+from sqlalchemy import create_engine, delete, func, select  # noqa: E402
 from sqlmodel import Session  # noqa: E402
 
 from backend.app.auth.auth_dependencies import get_current_user  # noqa: E402
@@ -57,6 +57,7 @@ from backend.app.models.clinical_document import ClinicalDocument  # noqa: E402
 from backend.app.models.consultation import Consultation  # noqa: E402
 from backend.app.models.doctor import Doctor  # noqa: E402
 from backend.app.models.enums import (  # noqa: E402
+    ClinicalDocumentStatus,
     ConsultationStatus,
     PatientStatus,
     RecordStatus,
@@ -414,6 +415,85 @@ class ClinicalDocumentRoutesTest(unittest.TestCase):
             self.client.get(f"{_BASE}/{missing}/download").status_code, 404
         )
         self.assertEqual(self.client.post(f"{_BASE}/{missing}/archive").status_code, 404)
+
+    # --- integridad referencial: paciente/consulta soft-deleted ---
+
+    def _document_count(self) -> int:
+        with Session(self.engine) as session:
+            return int(
+                session.scalar(select(func.count()).select_from(ClinicalDocument)) or 0
+            )
+
+    def _soft_delete(self, model: type, entity_id: uuid.UUID) -> None:
+        with Session(self.engine) as session:
+            entity = session.get(model, entity_id)
+            assert entity is not None
+            entity.deleted_at = utc_now()
+            entity.deleted_by = self.actor_id
+            session.add(entity)
+            session.commit()
+
+    def test_upload_to_soft_deleted_patient_404_and_not_created(self) -> None:
+        deleted_patient = self._seed_patient(
+            full_name="Paciente Borrado",
+            deleted_at=utc_now(),
+            deleted_by=self.actor_id,
+        )
+        response = self.client.post(
+            _BASE,
+            data={"patient_id": str(deleted_patient), "document_type": "pdf"},
+            files={"file": ("r.pdf", _PDF, "application/pdf")},
+        )
+        self.assertEqual(response.status_code, 404, response.text)
+        self.assertEqual(self._document_count(), 0)
+
+    def test_upload_to_soft_deleted_consultation_404_and_not_created(self) -> None:
+        self._soft_delete(Consultation, self.consultation_id)
+        response = self._upload(consultation_id=str(self.consultation_id))
+        self.assertEqual(response.status_code, 404, response.text)
+        self.assertEqual(self._document_count(), 0)
+
+    # --- soft-delete: invisibilidad y bloqueo de update/acciones ---
+
+    def test_soft_deleted_document_excluded_and_locked(self) -> None:
+        document_id = self._upload().json()["id"]
+        self.assertEqual(self.client.delete(f"{_BASE}/{document_id}").status_code, 200)
+
+        listed = self.client.get(_BASE, params={"patient_id": str(self.patient_id)}).json()
+        self.assertEqual(listed["pagination"]["total"], 0)
+        self.assertEqual(listed["items"], [])
+
+        # Acción/edición sobre un documento existente pero eliminado: load_visible -> 404.
+        self.assertEqual(
+            self.client.patch(
+                f"{_BASE}/{document_id}", json={"description": "x"}
+            ).status_code,
+            404,
+        )
+        self.assertEqual(self.client.post(f"{_BASE}/{document_id}/archive").status_code, 404)
+
+        # La fila sigue eliminada en la base: los intentos rechazados no mutaron el estado.
+        with Session(self.engine) as session:
+            row = session.get(ClinicalDocument, document_id)
+            self.assertIsNotNone(row)
+            assert row is not None
+            self.assertEqual(row.status, ClinicalDocumentStatus.DELETED)
+            self.assertIsNotNone(row.deleted_at)
+
+    # --- transición prohibida: restaurar un documento archivado (no eliminado) ---
+
+    def test_restore_archived_document_rejected_and_state_unchanged(self) -> None:
+        document_id = self._upload().json()["id"]
+        self.assertEqual(
+            self.client.post(f"{_BASE}/{document_id}/archive").status_code, 200
+        )
+        forced = self.client.post(f"{_BASE}/{document_id}/restore")
+        self.assertEqual(forced.status_code, 409, forced.text)
+        self.assertEqual(forced.json()["code"], "clinical_document_state_invalid")
+        # No se reactivó: sigue archivado.
+        self.assertEqual(
+            self.client.get(f"{_BASE}/{document_id}").json()["status"], "archived"
+        )
 
     # --- RBAC ---
 
