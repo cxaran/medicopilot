@@ -27,6 +27,7 @@ from backend.app.models.medication_template import MedicationTemplate
 from backend.app.models.patient import Patient
 from backend.app.models.patient_clinical_item import PatientClinicalItem
 from backend.app.models.prescription import Prescription, PrescriptionItem
+from backend.app.models.setup import PlatformSetup
 from backend.app.models.user import Role, RoleAccess, User, UserRole
 from backend.app.models.vital_sign import VitalSign
 
@@ -54,6 +55,7 @@ __all__ = [
     "PatientClinicalItem",
     "PatientClinicalItemType",
     "PatientStatus",
+    "PlatformSetup",
     "Prescription",
     "PrescriptionItem",
     "PrescriptionStatus",

@@ -1,12 +1,20 @@
 import uuid
-from datetime import datetime
 from typing import Optional
-
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, UniqueConstraint, func
+from datetime import datetime
+from sqlalchemy import (
+    String,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    UniqueConstraint,
+    Index,
+    func
+)
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from backend.app.models.base import Base
+from .base import Base
+
 
 
 class User(Base):
@@ -44,7 +52,6 @@ class User(Base):
     )
     updated_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime,
-        onupdate=func.now(),
         nullable=True,
         comment="Fecha y hora de la última modificación.",
     )
@@ -82,7 +89,6 @@ class Role(Base):
     )
     updated_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime,
-        onupdate=func.now(),
         nullable=True,
         comment="Fecha y hora de la última modificación.",
     )
@@ -132,7 +138,6 @@ class UserRole(Base):
     )
     updated_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime,
-        onupdate=func.now(),
         nullable=True,
         comment="Fecha y hora de la última modificación.",
     )
@@ -154,8 +159,6 @@ class UserRole(Base):
 
 
 class RoleAccess(Base):
-    """Modelo de permisos asignados a roles."""
-
     __tablename__ = "role_access"
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -179,7 +182,6 @@ class RoleAccess(Base):
     )
     updated_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime,
-        onupdate=func.now(),
         nullable=True,
         comment="Fecha y hora de la última modificación.",
     )

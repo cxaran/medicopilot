@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Optional
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, Text, func
+from sqlalchemy import JSON, DateTime, ForeignKey, Index, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -39,7 +39,7 @@ class AuditEvent(Base):
         comment="Usuario que ejecutó la acción. Puede ser nulo para procesos automáticos del sistema.",
     )
     changed_fields: Mapped[Optional[dict[str, Any]]] = mapped_column(
-        JSONB,
+        JSONB().with_variant(JSON(), "sqlite"),
         nullable=True,
         comment="Resumen de los campos modificados.",
     )

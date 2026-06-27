@@ -7,6 +7,8 @@ __pycache__/
 .mypy_cache/
 .pyright/
 node_modules/
+.next/
 dist/
 coverage/
+test-results/
 *.tsbuildinfo

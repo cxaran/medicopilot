@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Optional
 
-from sqlalchemy import DateTime, Enum as SAEnum, ForeignKey, Index, String, Text, func
+from sqlalchemy import JSON, DateTime, Enum as SAEnum, ForeignKey, Index, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -67,7 +67,7 @@ class ConsultationAiOutput(Base):
         comment="Versión o configuración relevante del modelo utilizado.",
     )
     generation_metadata: Mapped[Optional[dict[str, Any]]] = mapped_column(
-        JSONB,
+        JSONB().with_variant(JSON(), "sqlite"),
         nullable=True,
         comment="Metadatos técnicos mínimos de la generación.",
     )

@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import Any, Optional
 
 from sqlalchemy import (
+    JSON,
     CheckConstraint,
     DateTime,
     Enum as SAEnum,
@@ -60,7 +61,7 @@ class Prescription(Base):
         comment="Estado de la receta: borrador, aprobada o anulada.",
     )
     doctor_snapshot: Mapped[Optional[dict[str, Any]]] = mapped_column(
-        JSONB,
+        JSONB().with_variant(JSON(), "sqlite"),
         nullable=True,
         comment="Captura de los datos profesionales del médico al momento de aprobación.",
     )

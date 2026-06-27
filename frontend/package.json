@@ -1,0 +1,47 @@
+{
+  "name": "medicopilot-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=24.0.0 <25.0.0",
+    "npm": ">=11.0.0"
+  },
+  "scripts": {
+    "dev": "next dev -H 0.0.0.0",
+    "build": "next build",
+    "start": "next start -H 0.0.0.0",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test:bootstrap": "node --no-warnings --test src/core/bootstrap/bootstrap-form.test.ts",
+    "test:actions": "node --no-warnings --test src/core/resources/resource-action.test.ts",
+    "test:public-auth": "node --no-warnings --test src/core/auth/public-auth.test.ts",
+    "test:filters": "node --no-warnings --test src/core/resources/filterable.test.ts",
+    "test:e2e:bootstrap": "node scripts/run-e2e-bootstrap.mjs",
+    "check:canonical": "npm run check:api && npm run lint && npm run typecheck && npm run test:bootstrap && npm run test:actions && npm run test:public-auth && npm run test:filters && npm run build",
+    "generate:api": "node scripts/generate-openapi.mjs",
+    "check:api": "node scripts/generate-openapi.mjs --check"
+  },
+  "dependencies": {
+    "@tailwindcss/postcss": "4.3.1",
+    "next": "16.2.9",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "tailwindcss": "4.3.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.1",
+    "@types/node": "26.0.1",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "eslint": "9.39.4",
+    "eslint-config-next": "16.2.9",
+    "openapi-typescript": "7.13.0",
+    "postcss": "8.5.15",
+    "typescript": "5.9.3"
+  },
+  "overrides": {
+    "next": {
+      "postcss": "8.5.15"
+    }
+  }
+}
