@@ -30,6 +30,7 @@ DEV_ENV = {
 os.environ.update(DEV_ENV)
 
 from backend.app.security.catalog import SECURITY_GROUPS  # noqa: E402
+from backend.app.security.groups.consultations import ConsultationPermissions  # noqa: E402
 from backend.app.security.groups.doctors import DoctorPermissions  # noqa: E402
 from backend.app.security.groups.medical_history_versions import (  # noqa: E402
     MedicalHistoryVersionPermissions,
@@ -55,6 +56,7 @@ class SecurityCatalogTest(unittest.TestCase):
                 PatientPermissions,
                 PatientClinicalItemPermissions,
                 MedicalHistoryVersionPermissions,
+                ConsultationPermissions,
                 PermissionPermissions,
             ],
         )
@@ -93,6 +95,11 @@ class SecurityCatalogTest(unittest.TestCase):
                 "medical_history_versions:update",
                 "medical_history_versions:delete",
                 "medical_history_versions:finalize",
+                "consultations:read",
+                "consultations:create",
+                "consultations:update",
+                "consultations:delete",
+                "consultations:finalize",
                 "permissions:read",
             ],
         )

@@ -170,6 +170,7 @@ def _group_name(class_name: str) -> str:
         "patient": "patients",
         "patientclinicalitem": "patient_clinical_items",
         "medicalhistoryversion": "medical_history_versions",
+        "consultation": "consultations",
         "permission": "permissions",
     }.get(singular, singular)
 
@@ -182,5 +183,6 @@ def _group_label(group_name: str) -> str:
         "patients": "Pacientes",
         "patient_clinical_items": "Datos clínicos de pacientes",
         "medical_history_versions": "Historia clínica",
+        "consultations": "Consultas médicas",
         "permissions": "Permisos",
     }.get(group_name, group_name.capitalize())

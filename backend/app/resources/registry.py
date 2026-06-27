@@ -13,6 +13,7 @@ from typing import Optional
 
 from pydantic import BaseModel
 
+from backend.app.models.consultation import Consultation
 from backend.app.models.doctor import Doctor
 from backend.app.models.medical_history import MedicalHistoryVersion
 from backend.app.models.patient import Patient
@@ -44,6 +45,7 @@ from backend.app.schemas.capabilities import (
     RelationCardinality,
     ResourceView,
 )
+from backend.app.schemas.consultation import ConsultationListItem
 from backend.app.schemas.doctor import DoctorListItem
 from backend.app.schemas.medical_history_version import MedicalHistoryVersionListItem
 from backend.app.schemas.patient import PatientListItem
@@ -177,6 +179,25 @@ MEDICAL_HISTORY_VERSIONS = ResourceQuery(
         sort_fields=("version_number", "created_at", "updated_at", "reviewed_at"),
         in_fields=("id",),
         default_sort="-created_at",
+    ),
+)
+
+CONSULTATIONS = ResourceQuery(
+    name="ConsultationQuery",
+    model=Consultation,
+    schema=ConsultationListItem,
+    options=QueryOptions(
+        # ``patient_id``/``attending_doctor_id`` (UUID) y ``status`` (enum) por
+        # igualdad. ``consulted_at`` admite rango de calendario (on/before/after/
+        # between). La búsqueda libre se limita a ``reason_for_visit``: el resto de
+        # las notas clínicas son sensibles y no se indexan. Los listados excluyen
+        # eliminadas (``deleted_at``) vía stmt base en el router.
+        filter_fields=("patient_id", "attending_doctor_id", "status"),
+        sort_fields=("consulted_at", "created_at", "updated_at"),
+        search_fields=("reason_for_visit",),
+        in_fields=("id",),
+        field_operators={"consulted_at": _CREATED_AT_OPERATORS},
+        default_sort="-consulted_at",
     ),
 )
 

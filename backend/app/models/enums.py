@@ -79,7 +79,6 @@ class ConsultationStatus(str, Enum):
 
     DRAFT = "draft"
     FINALIZED = "finalized"
-    CANCELLED = "cancelled"
 
 
 class ConsultationAiOutputType(str, Enum):

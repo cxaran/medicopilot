@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, Enum as SAEnum, ForeignKey, Index, Text, UniqueConstraint, func
+from sqlalchemy import CheckConstraint, DateTime, Enum as SAEnum, ForeignKey, Index, Text, func
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -24,12 +24,6 @@ class Consultation(Base):
         nullable=False,
         comment="Paciente atendido en la consulta.",
     )
-    appointment_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        PG_UUID(as_uuid=True),
-        ForeignKey("appointments.id", ondelete="RESTRICT"),
-        nullable=True,
-        comment="Cita de origen, si la consulta deriva de una cita agendada.",
-    )
     attending_doctor_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("doctors.id", ondelete="RESTRICT"),
@@ -41,8 +35,8 @@ class Consultation(Base):
         nullable=False,
         comment="Fecha y hora de la atención médica.",
     )
-    reason_for_visit: Mapped[Optional[str]] = mapped_column(
-        Text, nullable=True, comment="Motivo de consulta."
+    reason_for_visit: Mapped[str] = mapped_column(
+        Text, nullable=False, comment="Motivo de consulta."
     )
     current_illness: Mapped[Optional[str]] = mapped_column(
         Text, nullable=True, comment="Padecimiento actual."
@@ -89,7 +83,7 @@ class Consultation(Base):
         ),
         nullable=False,
         default=ConsultationStatus.DRAFT,
-        comment="Estado de la consulta: borrador, finalizada o cancelada.",
+        comment="Estado de la consulta: borrador o finalizada.",
     )
     finalized_by_doctor_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         PG_UUID(as_uuid=True),
@@ -137,7 +131,6 @@ class Consultation(Base):
     )
 
     patient = relationship("Patient", back_populates="consultations")
-    appointment = relationship("Appointment", foreign_keys=[appointment_id])
     attending_doctor = relationship(
         "Doctor",
         back_populates="attended_consultations",
@@ -157,7 +150,20 @@ class Consultation(Base):
     clinical_documents = relationship("ClinicalDocument", back_populates="consultation")
 
     __table_args__ = (
-        UniqueConstraint("appointment_id", name="uq_consultations_appointment_id"),
+        # Coherencia estado/finalización: un borrador no lleva datos de cierre; una
+        # consulta finalizada exige ambos y que el finalizador sea el médico tratante.
+        CheckConstraint(
+            "(status = 'draft' AND finalized_by_doctor_id IS NULL AND finalized_at IS NULL)"
+            " OR (status = 'finalized' AND finalized_by_doctor_id IS NOT NULL"
+            " AND finalized_at IS NOT NULL"
+            " AND finalized_by_doctor_id = attending_doctor_id)",
+            name="ck_consultations_finalization_state",
+        ),
+        # La próxima cita sugerida no puede ser anterior a la atención.
+        CheckConstraint(
+            "next_appointment_at IS NULL OR next_appointment_at >= consulted_at",
+            name="ck_consultations_next_appointment_after_consulted",
+        ),
         Index("ix_consultations_patient", "patient_id"),
         Index("ix_consultations_attending_doctor", "attending_doctor_id"),
         Index("ix_consultations_status", "status"),
