@@ -20,6 +20,7 @@ from backend.app.models.consultation import Consultation
 from backend.app.models.consultation_diagnosis import ConsultationDiagnosis
 from backend.app.models.doctor import Doctor
 from backend.app.models.medical_history import MedicalHistoryVersion
+from backend.app.models.medication_template import MedicationTemplate
 from backend.app.models.patient import Patient
 from backend.app.models.patient_clinical_item import PatientClinicalItem
 from backend.app.models.prescription import Prescription, PrescriptionItem
@@ -84,6 +85,11 @@ from backend.app.schemas.medical_history_version import (
     MedicalHistoryVersionListItem,
     MedicalHistoryVersionUpdate,
 )
+from backend.app.schemas.medication_template import (
+    MedicationTemplateCreate,
+    MedicationTemplateListItem,
+    MedicationTemplateUpdate,
+)
 from backend.app.schemas.patient import PatientCreate, PatientListItem, PatientUpdate
 from backend.app.schemas.patient_clinical_item import (
     PatientClinicalItemCreate,
@@ -118,6 +124,9 @@ from backend.app.security.groups.appointments import AppointmentPermissions
 from backend.app.security.groups.consultations import ConsultationPermissions
 from backend.app.security.groups.medical_history_versions import (
     MedicalHistoryVersionPermissions,
+)
+from backend.app.security.groups.medication_templates import (
+    MedicationTemplatePermissions,
 )
 from backend.app.security.groups.prescriptions import PrescriptionPermissions
 from backend.app.security.groups.doctors import DoctorPermissions
@@ -198,6 +207,23 @@ DOCTORS = ResourceQuery(
             "created_at": _CREATED_AT_OPERATORS,
         },
         default_sort="-created_at",
+    ),
+)
+
+MEDICATION_TEMPLATES = ResourceQuery(
+    name="MedicationTemplateQuery",
+    model=MedicationTemplate,
+    schema=MedicationTemplateListItem,
+    options=QueryOptions(
+        # ``doctor_id`` (UUID), ``status`` (enum no-nativo) y ``medication_name``
+        # (texto) por igualdad. Búsqueda libre sobre nombre/presentación/indicaciones
+        # (metadata del catálogo, no datos de paciente). Los listados excluyen las
+        # plantillas eliminadas (``deleted_at``) vía stmt base en el router.
+        filter_fields=("doctor_id", "status", "medication_name"),
+        sort_fields=("medication_name", "use_count", "created_at", "updated_at"),
+        search_fields=("medication_name", "presentation", "default_instructions"),
+        in_fields=("id",),
+        default_sort="medication_name",
     ),
 )
 
@@ -709,6 +735,37 @@ RESOURCE_REGISTRY: tuple[ResourceDefinition, ...] = (
                 confirmation=ConfirmationDef(
                     title="Eliminar médico",
                     message="El perfil médico se dará de baja lógica.",
+                    confirm_label="Eliminar",
+                    destructive=True,
+                ),
+            ),
+        ),
+    ),
+    ResourceDefinition(
+        name="medication_templates",
+        label="Plantillas de medicamentos",
+        api_path="/api/v1/medication-templates",
+        view=ResourceView.TABLE,
+        read_permission=MedicationTemplatePermissions.READ,
+        list_query=MEDICATION_TEMPLATES,
+        list_schema=MedicationTemplateListItem,
+        create_schema=MedicationTemplateCreate,
+        update_schema=MedicationTemplateUpdate,
+        create_permission=MedicationTemplatePermissions.CREATE,
+        update_permission=MedicationTemplatePermissions.UPDATE,
+        detail_url_template="/api/v1/medication-templates/{id}",
+        actions=(
+            ActionDef(
+                name="delete",
+                label="Eliminar",
+                method=HttpMethod.DELETE,
+                url_template="/api/v1/medication-templates/{id}",
+                scope=ActionScope.ITEM,
+                danger=True,
+                permission=MedicationTemplatePermissions.DELETE,
+                confirmation=ConfirmationDef(
+                    title="Eliminar plantilla",
+                    message="La plantilla de medicamento se dará de baja lógica.",
                     confirm_label="Eliminar",
                     destructive=True,
                 ),

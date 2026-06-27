@@ -623,6 +623,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/medication-templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Medication Templates */
+        get: operations["list_medication_templates_api_v1_medication_templates_get"];
+        put?: never;
+        /** Create Medication Template */
+        post: operations["create_medication_template_api_v1_medication_templates_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/medication-templates/{template_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Medication Template */
+        get: operations["get_medication_template_api_v1_medication_templates__template_id__get"];
+        put?: never;
+        post?: never;
+        /** Delete Medication Template */
+        delete: operations["delete_medication_template_api_v1_medication_templates__template_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Medication Template */
+        patch: operations["update_medication_template_api_v1_medication_templates__template_id__patch"];
+        trace?: never;
+    };
     "/api/v1/patient-clinical-items": {
         parameters: {
             query?: never;
@@ -1151,6 +1188,12 @@ export interface components {
          * @enum {string}
          */
         ActionSuccessBehavior: "refresh";
+        /**
+         * ActiveInactiveStatus
+         * @description Estado reusable para catálogos simples activables.
+         * @enum {string}
+         */
+        ActiveInactiveStatus: "active" | "inactive";
         /**
          * AppointmentCancel
          * @description Cuerpo de la cancelación: motivo opcional, no vacío si se envía.
@@ -2376,6 +2419,140 @@ export interface components {
             /** Observaciones clínicas */
             clinical_observations?: string | null;
         };
+        /**
+         * MedicationTemplateCreate
+         * @description Alta de una plantilla de medicamento frecuente de un médico.
+         *
+         *     ``use_count``, la auditoría y el soft-delete los gobierna el servidor; no se
+         *     aceptan (``extra="forbid"``). ``status`` es el estado operativo del catálogo
+         *     (activa/inactiva), distinto de la baja lógica.
+         */
+        MedicationTemplateCreate: {
+            /**
+             * Médico
+             * Format: uuid
+             * @description Médico propietario de la plantilla (inmutable tras la creación).
+             */
+            doctor_id: string;
+            /** Medicamento */
+            medication_name: string;
+            /** Presentación */
+            presentation?: string | null;
+            /** Dosis sugerida */
+            default_dose?: string | null;
+            /** Frecuencia sugerida */
+            default_frequency?: string | null;
+            /** Duración sugerida */
+            default_duration?: string | null;
+            /** Indicaciones sugeridas */
+            default_instructions?: string | null;
+            /**
+             * Estado
+             * @default active
+             */
+            status: components["schemas"]["ActiveInactiveStatus"];
+        };
+        /**
+         * MedicationTemplateListItem
+         * @description Versión de listado compatible con ``ResourceQuery``.
+         */
+        MedicationTemplateListItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Médico
+             * Format: uuid
+             */
+            doctor_id: string;
+            /** Medicamento */
+            medication_name: string;
+            /** Presentación */
+            presentation?: string | null;
+            /** Dosis */
+            default_dose?: string | null;
+            /** Frecuencia */
+            default_frequency?: string | null;
+            /** Duración */
+            default_duration?: string | null;
+            /** Indicaciones */
+            default_instructions?: string | null;
+            /** Usos */
+            use_count: number;
+            /** Estado */
+            status: components["schemas"]["ActiveInactiveStatus"];
+            /**
+             * Creada
+             * Format: date-time
+             */
+            created_at: string;
+            /** Actualizada */
+            updated_at?: string | null;
+        };
+        /**
+         * MedicationTemplateRead
+         * @description Representación completa de una plantilla de medicamento.
+         */
+        MedicationTemplateRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Doctor Id
+             * Format: uuid
+             */
+            doctor_id: string;
+            /** Medication Name */
+            medication_name: string;
+            /** Presentation */
+            presentation?: string | null;
+            /** Default Dose */
+            default_dose?: string | null;
+            /** Default Frequency */
+            default_frequency?: string | null;
+            /** Default Duration */
+            default_duration?: string | null;
+            /** Default Instructions */
+            default_instructions?: string | null;
+            /** Use Count */
+            use_count: number;
+            status: components["schemas"]["ActiveInactiveStatus"];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /**
+         * MedicationTemplateUpdate
+         * @description Edición parcial de una plantilla (PATCH).
+         *
+         *     ``doctor_id`` es inmutable tras la creación: el dueño de la plantilla no se
+         *     reasigna desde aquí. ``use_count`` y los campos gobernados por el servidor no
+         *     se declaran: enviarlos da 422 (extra forbid).
+         */
+        MedicationTemplateUpdate: {
+            /** Medicamento */
+            medication_name?: string | null;
+            /** Presentación */
+            presentation?: string | null;
+            /** Dosis sugerida */
+            default_dose?: string | null;
+            /** Frecuencia sugerida */
+            default_frequency?: string | null;
+            /** Duración sugerida */
+            default_duration?: string | null;
+            /** Indicaciones sugeridas */
+            default_instructions?: string | null;
+            /** Estado */
+            status?: components["schemas"]["ActiveInactiveStatus"] | null;
+        };
         /** MessageResponse */
         MessageResponse: {
             /** Message */
@@ -2415,6 +2592,12 @@ export interface components {
         OffsetPage_MedicalHistoryVersionListItem_: {
             /** Items */
             items: components["schemas"]["MedicalHistoryVersionListItem"][];
+            pagination: components["schemas"]["OffsetPagination"];
+        };
+        /** OffsetPage[MedicationTemplateListItem] */
+        OffsetPage_MedicationTemplateListItem_: {
+            /** Items */
+            items: components["schemas"]["MedicationTemplateListItem"][];
             pagination: components["schemas"]["OffsetPagination"];
         };
         /** OffsetPage[PatientClinicalItemListItem] */
@@ -5706,6 +5889,185 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MedicalHistoryVersionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_medication_templates_api_v1_medication_templates_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+                /** @description Campos de orden separados por coma. Use '-' para orden descendente. */
+                sort?: string;
+                doctor_id?: string | null;
+                status?: components["schemas"]["ActiveInactiveStatus"] | null;
+                medication_name?: string | null;
+                id_in?: string[] | null;
+                q?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OffsetPage_MedicationTemplateListItem_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_medication_template_api_v1_medication_templates_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MedicationTemplateCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MedicationTemplateRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_medication_template_api_v1_medication_templates__template_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                template_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MedicationTemplateRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_medication_template_api_v1_medication_templates__template_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                template_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MedicationTemplateRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_medication_template_api_v1_medication_templates__template_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                template_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MedicationTemplateUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MedicationTemplateRead"];
                 };
             };
             /** @description Validation Error */

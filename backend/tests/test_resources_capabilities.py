@@ -348,7 +348,7 @@ class PermissionsCatalogTest(unittest.TestCase):
         with _As("permissions:read"):
             groups = client.get("/api/v1/permissions").json()
         names = [group["name"] for group in groups]
-        self.assertEqual(names, ["users", "roles", "doctors", "patients", "patient_clinical_items", "medical_history_versions", "consultations", "consultation_diagnoses", "vital_signs", "prescriptions", "appointments", "clinical_documents", "permissions"])
+        self.assertEqual(names, ["users", "roles", "doctors", "medication_templates", "patients", "patient_clinical_items", "medical_history_versions", "consultations", "consultation_diagnoses", "vital_signs", "prescriptions", "appointments", "clinical_documents", "permissions"])
         for group in groups:
             self.assertTrue(group["label"])
             for permission in group["permissions"]:
@@ -746,6 +746,101 @@ class PrescriptionsAndAppointmentsCapabilityTest(unittest.TestCase):
         # contenido binario ni el hash almacenado.)
         for needle in ("file_content", "hashed_password"):
             self.assertNotIn(needle, blob)
+
+
+class MedicationTemplatesCapabilityTest(unittest.TestCase):
+    _GOVERNED = (
+        "id",
+        "use_count",
+        "created_at",
+        "created_by",
+        "updated_at",
+        "updated_by",
+        "deleted_at",
+        "deleted_by",
+    )
+
+    def _cap(self, *permissions: str) -> dict:
+        with _As(*permissions):
+            return client.get("/api/v1/resources/medication_templates").json()
+
+    def test_visible_only_with_read(self) -> None:
+        with _As("users:read"):
+            names = [r["name"] for r in client.get("/api/v1/resources").json()]
+        self.assertNotIn("medication_templates", names)
+        with _As("medication_templates:read"):
+            names = [r["name"] for r in client.get("/api/v1/resources").json()]
+        self.assertIn("medication_templates", names)
+
+    def test_resource_contract_is_renderable(self) -> None:
+        cap = self._cap(
+            "medication_templates:read",
+            "medication_templates:create",
+            "medication_templates:update",
+            "medication_templates:delete",
+        )
+        self.assertEqual(cap["name"], "medication_templates")
+        self.assertEqual(cap["label"], "Plantillas de medicamentos")
+        self.assertEqual(cap["view"], "table")
+        self.assertEqual(cap["api_path"], "/api/v1/medication-templates")
+        self.assertEqual(
+            cap["detail"]["url_template"], "/api/v1/medication-templates/{id}"
+        )
+
+        list_fields = {f["name"] for f in cap["list"]["fields"]}
+        for expected in ("doctor_id", "medication_name", "use_count", "status"):
+            self.assertIn(expected, list_fields)
+
+        # El filtro de status publica opciones en español con operador eq.
+        status_filter = next(f for f in cap["list"]["filters"] if f["field"] == "status")
+        self.assertEqual(status_filter["widget"], "select")
+        self.assertEqual(status_filter["operator"], "eq")
+        self.assertEqual(
+            {o["value"] for o in status_filter["options"]}, {"active", "inactive"}
+        )
+
+        self.assertEqual(cap["forms"]["create"]["method"], "POST")
+        self.assertEqual(
+            cap["forms"]["create"]["url_template"], "/api/v1/medication-templates"
+        )
+        self.assertEqual(cap["forms"]["update"]["method"], "PATCH")
+        self.assertEqual([a["name"] for a in cap["actions"]], ["delete"])
+        delete = cap["actions"][0]
+        self.assertEqual(delete["method"], "DELETE")
+        self.assertTrue(delete["confirmation"]["destructive"])
+
+    def test_form_select_publishes_status_options(self) -> None:
+        cap = self._cap("medication_templates:read", "medication_templates:create")
+        status_field = next(
+            f for f in cap["forms"]["create"]["fields"] if f["name"] == "status"
+        )
+        self.assertEqual(status_field["widget"], "select")
+        self.assertEqual(
+            {o["value"]: o["label"] for o in status_field["options"]},
+            {"active": "Activa", "inactive": "Inactiva"},
+        )
+
+    def test_forms_gated_by_permission(self) -> None:
+        cap = self._cap("medication_templates:read")
+        self.assertNotIn("forms", cap)
+        self.assertEqual(cap["actions"], [])
+
+    def test_forms_hide_server_governed_fields(self) -> None:
+        cap = self._cap(
+            "medication_templates:read",
+            "medication_templates:create",
+            "medication_templates:update",
+        )
+        fields: set[str] = set()
+        for form in ("create", "update"):
+            fields |= {f["name"] for f in cap["forms"][form]["fields"]}
+        for governed in self._GOVERNED:
+            self.assertNotIn(governed, fields)
+        # doctor_id se declara sólo en el alta (inmutable): presente en create, no en update.
+        create_fields = {f["name"] for f in cap["forms"]["create"]["fields"]}
+        update_fields = {f["name"] for f in cap["forms"]["update"]["fields"]}
+        self.assertIn("doctor_id", create_fields)
+        self.assertNotIn("doctor_id", update_fields)
 
 
 if __name__ == "__main__":

@@ -175,7 +175,7 @@ class BootstrapRoutesTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertEqual(body["limits"], {"max_additional_roles": 10})
-        self.assertEqual([group["name"] for group in body["permission_groups"]], ["users", "roles", "doctors", "patients", "patient_clinical_items", "medical_history_versions", "consultations", "consultation_diagnoses", "vital_signs", "prescriptions", "appointments", "clinical_documents", "permissions"])
+        self.assertEqual([group["name"] for group in body["permission_groups"]], ["users", "roles", "doctors", "medication_templates", "patients", "patient_clinical_items", "medical_history_versions", "consultations", "consultation_diagnoses", "vital_signs", "prescriptions", "appointments", "clinical_documents", "permissions"])
         self.assertIn("users:read", {item["access"] for group in body["permission_groups"] for item in group["permissions"]})
 
         with Session(self.engine) as session:
