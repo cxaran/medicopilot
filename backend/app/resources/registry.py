@@ -876,6 +876,9 @@ RESOURCE_REGISTRY: tuple[ResourceDefinition, ...] = (
                 scope=ActionScope.ITEM,
                 danger=False,
                 permission=MedicalHistoryVersionPermissions.FINALIZE,
+                # POST sin parámetros: cuerpo vacío explícito ({}) para que el cliente
+                # capability-driven envíe un JSON válido y el endpoint no responda 422.
+                fixed_body={},
                 visible_when=ActionCondition(
                     all=[
                         ActionConditionPredicate(
@@ -941,6 +944,9 @@ RESOURCE_REGISTRY: tuple[ResourceDefinition, ...] = (
                 scope=ActionScope.ITEM,
                 danger=False,
                 permission=ConsultationPermissions.FINALIZE,
+                # POST sin parámetros: cuerpo vacío explícito ({}) para que el cliente
+                # capability-driven envíe un JSON válido y el endpoint no responda 422.
+                fixed_body={},
                 visible_when=ActionCondition(
                     all=[
                         ActionConditionPredicate(
@@ -1068,6 +1074,9 @@ RESOURCE_REGISTRY: tuple[ResourceDefinition, ...] = (
                 scope=ActionScope.ITEM,
                 danger=False,
                 permission=PrescriptionPermissions.APPROVE,
+                # POST sin parámetros: cuerpo vacío explícito ({}) para que el cliente
+                # capability-driven envíe un JSON válido y el endpoint no responda 422.
+                fixed_body={},
                 visible_when=ActionCondition(
                     all=[
                         ActionConditionPredicate(
@@ -1195,6 +1204,9 @@ RESOURCE_REGISTRY: tuple[ResourceDefinition, ...] = (
                 scope=ActionScope.ITEM,
                 danger=False,
                 permission=AppointmentPermissions.UPDATE,
+                # POST sin parámetros: cuerpo vacío explícito ({}) para que el cliente
+                # capability-driven envíe un JSON válido y el endpoint no responda 422.
+                fixed_body={},
                 visible_when=ActionCondition(
                     all=[
                         ActionConditionPredicate(
@@ -1245,6 +1257,9 @@ RESOURCE_REGISTRY: tuple[ResourceDefinition, ...] = (
                 scope=ActionScope.ITEM,
                 danger=True,
                 permission=AppointmentPermissions.UPDATE,
+                # POST sin parámetros: cuerpo vacío explícito ({}) para que el cliente
+                # capability-driven envíe un JSON válido y el endpoint no responda 422.
+                fixed_body={},
                 visible_when=ActionCondition(
                     all=[
                         ActionConditionPredicate(

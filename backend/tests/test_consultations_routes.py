@@ -396,6 +396,17 @@ class ConsultationRoutesTest(unittest.TestCase):
         self.assertEqual(body["finalized_by_doctor_id"], body["attending_doctor_id"])
         self.assertIsNotNone(body["finalized_at"])
 
+    def test_finalize_accepts_empty_body(self) -> None:
+        # finalize es POST sin parámetros: un cuerpo vacío {} debe ser válido (nunca 422).
+        doctor_id = self._seed_doctor(status=RecordStatus.ACTIVE, user_id=self.actor_id)
+        consultation = self._create(attending_doctor_id=str(doctor_id)).json()
+        response = self.client.post(
+            f"{_BASE}/{consultation['id']}/finalize", json={}
+        )
+        self.assertNotEqual(response.status_code, 422, response.text)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["status"], "finalized")
+
     def test_finalized_is_immutable(self) -> None:
         doctor_id = self._seed_doctor(status=RecordStatus.ACTIVE, user_id=self.actor_id)
         consultation = self._create(attending_doctor_id=str(doctor_id)).json()

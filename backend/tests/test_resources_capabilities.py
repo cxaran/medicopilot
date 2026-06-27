@@ -568,8 +568,22 @@ class MedicalHistoryAndConsultationsCapabilityTest(unittest.TestCase):
             finalize["visible_when"]["all"][0],
             {"field": "status", "operator": "eq", "value": "draft"},
         )
-        # finalize no lleva cuerpo (vacío por diseño): ni request ni input_schema.
-        self.assertNotIn("request", finalize)
+        # finalize es POST sin parámetros: publica request.fixed_body == {} (cuerpo
+        # vacío explícito para que el cliente envíe JSON válido) y nunca input_schema.
+        self.assertEqual(finalize["request"]["fixed_body"], {})
+        self.assertNotIn("input_schema", finalize)
+
+    def test_medical_history_finalize_publishes_empty_body(self) -> None:
+        with _As("medical_history_versions:read", "medical_history_versions:finalize"):
+            cap = client.get("/api/v1/resources/medical_history_versions").json()
+        actions = {a["name"]: a for a in cap["actions"]}
+        finalize = actions["finalize"]
+        self.assertEqual(finalize["method"], "POST")
+        self.assertEqual(
+            finalize["url_template"], "/api/v1/medical-history-versions/{id}/finalize"
+        )
+        # POST sin parámetros: cuerpo vacío explícito ({}), nunca input_schema.
+        self.assertEqual(finalize["request"]["fixed_body"], {})
         self.assertNotIn("input_schema", finalize)
 
     def test_delete_only_with_delete_permission(self) -> None:
@@ -667,7 +681,9 @@ class PrescriptionsAndAppointmentsCapabilityTest(unittest.TestCase):
         self.assertEqual(approve["url_template"], "/api/v1/prescriptions/{id}/approve")
         self.assertEqual(approve["visible_when"]["all"][0]["value"], "draft")
         self.assertTrue(approve["confirmation"])
-        self.assertNotIn("input_schema", approve)  # cuerpo vacío
+        # POST sin parámetros: cuerpo vacío explícito ({}), nunca input_schema.
+        self.assertEqual(approve["request"]["fixed_body"], {})
+        self.assertNotIn("input_schema", approve)
 
         cap = self._cap("prescriptions", "prescriptions:read", "prescriptions:void")
         void = next(a for a in cap["actions"] if a["name"] == "void")
@@ -688,7 +704,11 @@ class PrescriptionsAndAppointmentsCapabilityTest(unittest.TestCase):
             actions["confirm"]["url_template"], "/api/v1/appointments/{id}/confirm"
         )
         self.assertEqual(actions["confirm"]["visible_when"]["all"][0]["value"], "pending")
+        # confirm/no_show son POST sin parámetros: cuerpo vacío explícito ({}).
+        self.assertEqual(actions["confirm"]["request"]["fixed_body"], {})
         self.assertNotIn("input_schema", actions["confirm"])
+        self.assertEqual(actions["no_show"]["request"]["fixed_body"], {})
+        self.assertNotIn("input_schema", actions["no_show"])
         self.assertEqual(
             actions["cancel"]["visible_when"]["all"][0]["operator"], "in"
         )

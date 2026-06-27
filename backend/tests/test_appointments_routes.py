@@ -463,6 +463,21 @@ class AppointmentRoutesTest(_AppointmentTestMixin, unittest.TestCase):
         # ya confirmada -> 409
         self.assertEqual(self._confirm(appointment_id).status_code, 409)
 
+    def test_confirm_and_no_show_accept_empty_body(self) -> None:
+        # Las acciones POST sin parámetros aceptan un cuerpo vacío {} (el cliente
+        # capability-driven envía request.fixed_body={}): nunca 422 por falta de body.
+        pending = self._create_id()
+        confirmed = self.client.post(f"{_BASE}/{pending}/confirm", json={})
+        self.assertNotEqual(confirmed.status_code, 422, confirmed.text)
+        self.assertEqual(confirmed.status_code, 200, confirmed.text)
+        self.assertEqual(confirmed.json()["status"], "confirmed")
+
+        other = self._create_id(scheduled_at=self._at(13))
+        no_show = self.client.post(f"{_BASE}/{other}/no-show", json={})
+        self.assertNotEqual(no_show.status_code, 422, no_show.text)
+        self.assertEqual(no_show.status_code, 200, no_show.text)
+        self.assertEqual(no_show.json()["status"], "no_show")
+
     def test_cancel_pending_or_confirmed(self) -> None:
         a = self._create_id()
         self.assertEqual(self._cancel(a).status_code, 200)

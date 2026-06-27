@@ -480,6 +480,15 @@ class PrescriptionRoutesTest(_PrescriptionTestMixin, unittest.TestCase):
         self.assertEqual(set(body["doctor_snapshot"].keys()), _SNAPSHOT_FIELDS)
         self.assertEqual(body["doctor_snapshot"]["professional_name"], "Dra. House")
 
+    def test_approve_accepts_empty_body(self) -> None:
+        # approve es POST sin parámetros: un cuerpo vacío {} debe ser válido (nunca 422).
+        prescription_id = self._create_id()
+        self.assertEqual(self._add_item(prescription_id).status_code, 201)
+        response = self.client.post(f"{_BASE}/{prescription_id}/approve", json={})
+        self.assertNotEqual(response.status_code, 422, response.text)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["status"], "approved")
+
     def test_approve_twice_409(self) -> None:
         prescription_id = self._approved_prescription()
         self.assertEqual(self._approve(prescription_id).status_code, 409)

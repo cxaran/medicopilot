@@ -345,6 +345,15 @@ class MedicalHistoryVersionRoutesTest(unittest.TestCase):
         )
         self.assertEqual(self._finalize(version["id"]).status_code, 409)
 
+    def test_finalize_accepts_empty_body(self) -> None:
+        # finalize es POST sin parámetros: un cuerpo vacío {} debe ser válido (nunca 422).
+        version = self._create().json()
+        self._seed_doctor(status=RecordStatus.ACTIVE)
+        response = self.client.post(f"{_BASE}/{version['id']}/finalize", json={})
+        self.assertNotEqual(response.status_code, 422, response.text)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["status"], "current")
+
     def test_create_after_current_copies_and_overrides(self) -> None:
         v1 = self._create(
             family_history="FH1", pathological_history="PH1"
