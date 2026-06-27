@@ -455,6 +455,29 @@ class AppointmentRoutesTest(_AppointmentTestMixin, unittest.TestCase):
             409,
         )
 
+    def test_patch_reassign_to_missing_or_deleted_doctor_404(self) -> None:
+        # Integridad referencial en update: reasignar la cita a un médico inexistente
+        # o con baja lógica se rechaza con 404 (el create ya cubre missing/deleted; la
+        # reasignación vía PATCH sólo cubría el caso inactivo→409). El médico no cambia.
+        appointment_id = self._create_id()
+
+        missing = self.client.patch(
+            f"{_BASE}/{appointment_id}", json={"doctor_id": str(uuid.uuid4())}
+        )
+        self.assertEqual(missing.status_code, 404, missing.text)
+
+        deleted_doctor = self._seed_doctor(self._seed_user(), deleted=True)
+        deleted = self.client.patch(
+            f"{_BASE}/{appointment_id}", json={"doctor_id": str(deleted_doctor)}
+        )
+        self.assertEqual(deleted.status_code, 404, deleted.text)
+
+        # El médico de la cita no se reasignó.
+        self.assertEqual(
+            self.client.get(f"{_BASE}/{appointment_id}").json()["doctor_id"],
+            str(self.doctor_id),
+        )
+
     # --- transiciones ---
 
     def test_confirm_only_from_pending(self) -> None:
