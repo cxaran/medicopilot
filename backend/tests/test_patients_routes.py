@@ -193,6 +193,36 @@ class PatientRoutesTest(unittest.TestCase):
         # Segundo delete -> 404 (ya no visible).
         self.assertEqual(self.client.delete(f"/api/v1/patients/{patient['id']}").status_code, 404)
 
+    def test_soft_deleted_patient_not_actionable_or_filtered(self) -> None:
+        # Complementa test_soft_delete_hides_from_list_and_get: un paciente eliminado
+        # tampoco aparece filtrando por estado, ni admite update ni la acción archive.
+        patient = self._create().json()
+        self.assertEqual(
+            self.client.delete(f"/api/v1/patients/{patient['id']}").status_code, 200
+        )
+
+        # No aparece ni filtrando por su estado previo (active): la baja lógica
+        # excluye el expediente del scope de lista incluso con filtros.
+        by_status = self.client.get("/api/v1/patients", params={"status": "active"}).json()
+        self.assertEqual(by_status["pagination"]["total"], 0)
+        self.assertNotIn(patient["id"], [item["id"] for item in by_status["items"]])
+
+        # update sobre el borrado -> 404 (no se puede editar un expediente eliminado).
+        self.assertEqual(
+            self.client.patch(
+                f"/api/v1/patients/{patient['id']}", json={"phone": "8112345678"}
+            ).status_code,
+            404,
+        )
+        # La acción archive del registry es un PATCH {status: "archived"}; sobre el
+        # borrado -> 404 (no resucita ni muta un expediente eliminado).
+        self.assertEqual(
+            self.client.patch(
+                f"/api/v1/patients/{patient['id']}", json={"status": "archived"}
+            ).status_code,
+            404,
+        )
+
     def test_archived_patient_is_still_readable(self) -> None:
         patient = self._create().json()
         self.client.patch(
