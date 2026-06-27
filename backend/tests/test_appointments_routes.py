@@ -741,5 +741,66 @@ class ConsultationAppointmentIntegrationTest(_AppointmentTestMixin, unittest.Tes
                 session.commit()
 
 
+@unittest.skipUnless(
+    _is_test_url(_TEST_PG_URL),
+    "TEST_POSTGRES_URL no definida o no apunta a una base *_test.",
+)
+class AppointmentForbiddenTransitionsTest(_AppointmentTestMixin, unittest.TestCase):
+    """Transiciones PROHIBIDAS desde estados terminales aún no cubiertas y guard de
+    permiso de las acciones de transición.
+
+    Máquina: pending → confirmed → attended/cancelled/no_show/rescheduled. Los
+    estados ``no_show`` y ``rescheduled`` son terminales. ``AppointmentRoutesTest`` ya
+    cubre el rechazo de transiciones desde ``cancelled`` y desde ``attended``
+    (frozen), y el patch desde todos los terminales; aquí se completan ``no_show`` y
+    ``rescheduled`` como ORIGEN de cada transición, y el guard de permiso de
+    cancel/no_show/reschedule. Cada test re-LEE el recurso para verificar que el
+    estado no mutó.
+
+    Nota de dominio: ``no_show`` se permite desde ``pending`` o ``confirmed`` (el
+    backend es la autoridad; el ``visible_when`` de UI sólo lo muestra en
+    ``confirmed``), por lo que NO se prueba no_show-desde-pending como prohibido.
+    """
+
+    def _status(self, appointment_id: str) -> str:
+        response = self.client.get(f"{_BASE}/{appointment_id}")
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()["status"]
+
+    def test_no_show_terminal_rejects_transitions_state_unchanged(self) -> None:
+        appointment_id = self._no_show_appt()  # estado terminal no_show
+        self.assertEqual(self._confirm(appointment_id).status_code, 409)
+        self.assertEqual(self._cancel(appointment_id).status_code, 409)
+        self.assertEqual(
+            self._reschedule(appointment_id, scheduled_at=self._at(19)).status_code, 409
+        )
+        self.assertEqual(self.client.delete(f"{_BASE}/{appointment_id}").status_code, 409)
+        self.assertEqual(self._status(appointment_id), "no_show")
+
+    def test_rescheduled_terminal_rejects_transitions_state_unchanged(self) -> None:
+        original = self._rescheduled_original()  # estado terminal rescheduled
+        self.assertEqual(self._confirm(original).status_code, 409)
+        self.assertEqual(self._cancel(original).status_code, 409)
+        self.assertEqual(self._no_show(original).status_code, 409)
+        self.assertEqual(
+            self._reschedule(original, scheduled_at=self._at(19)).status_code, 409
+        )
+        self.assertEqual(self.client.delete(f"{_BASE}/{original}").status_code, 409)
+        self.assertEqual(self._status(original), "rescheduled")
+
+    def test_cancel_no_show_reschedule_require_update_permission(self) -> None:
+        # cancel/no_show/reschedule usan AppointmentPermissions.UPDATE; sin ese
+        # permiso deben dar 403 (el RBAC existente sólo cubría confirm).
+        appointment_id = self._create_id()
+        self._as("appointments:read")  # sin update
+        self.assertEqual(self._cancel(appointment_id).status_code, 403)
+        self.assertEqual(self._no_show(appointment_id).status_code, 403)
+        self.assertEqual(
+            self._reschedule(appointment_id, scheduled_at=self._at(13)).status_code, 403
+        )
+        self._as(*ALL_PERMS)
+        self.assertEqual(self._status(appointment_id), "pending")
+
+
 if __name__ == "__main__":
     unittest.main()
