@@ -83,16 +83,29 @@ class PatientRoutesTest(unittest.TestCase):
         # Usuario actor real: las FK de auditoría (created_by/updated_by) se enforced
         # en PostgreSQL, por lo que el id del usuario autenticado debe existir.
         cls.actor_id = uuid.uuid4()
+        # Segundo actor real: permite verificar que la auditoría rastrea al usuario
+        # que actúa (created_by vs updated_by/deleted_by) y no una constante.
+        cls.actor_b_id = uuid.uuid4()
         with Session(cls.engine) as session:
-            session.add(
-                User(
-                    id=cls.actor_id,
-                    name="Admin",
-                    last_name="Tester",
-                    email=f"actor-{cls.actor_id}@example.com",
-                    hashed_password="x",
-                    is_active=True,
-                )
+            session.add_all(
+                [
+                    User(
+                        id=cls.actor_id,
+                        name="Admin",
+                        last_name="Tester",
+                        email=f"actor-{cls.actor_id}@example.com",
+                        hashed_password="x",
+                        is_active=True,
+                    ),
+                    User(
+                        id=cls.actor_b_id,
+                        name="Segundo",
+                        last_name="Médico",
+                        email=f"actor-{cls.actor_b_id}@example.com",
+                        hashed_password="x",
+                        is_active=True,
+                    ),
+                ]
             )
             session.commit()
 
@@ -124,6 +137,24 @@ class PatientRoutesTest(unittest.TestCase):
             email="admin@example.com",
             permissions=set(permissions),
         )
+
+    def _as_user(self, user_id: uuid.UUID, *permissions: str) -> None:
+        """Actúa como un usuario concreto (para verificar el rastro de auditoría)."""
+        app.dependency_overrides[get_current_user] = lambda: SessionUser(
+            id=user_id,
+            name="Actor",
+            last_name="Tester",
+            email=f"{user_id}@example.com",
+            permissions=set(permissions),
+        )
+
+    def _patient_row(self, patient_id: str) -> Patient:
+        """Lee la fila real desde la base: el read schema no expone las columnas de
+        auditoría de autor (created_by/updated_by/deleted_by), así que se verifican aquí."""
+        with Session(self.engine) as session:
+            row = session.get(Patient, uuid.UUID(patient_id))
+            assert row is not None
+            return row
 
     def _payload(self, **overrides: object) -> dict[str, object]:
         payload: dict[str, object] = {
@@ -179,6 +210,40 @@ class PatientRoutesTest(unittest.TestCase):
         body = response.json()
         self.assertEqual(body["phone"], "8112345678")
         self.assertEqual(body["status"], "inactive")
+
+    # --- rastro de auditoría (created_by / updated_by / deleted_by) ---
+
+    def test_audit_trail_tracks_real_actor_across_lifecycle(self) -> None:
+        # Crea como usuario A: created_by y updated_by deben ser A; sin borrado.
+        self._as_user(self.actor_id, *ALL_PATIENT_PERMS)
+        patient_id = self._create().json()["id"]
+        created = self._patient_row(patient_id)
+        self.assertEqual(created.created_by, self.actor_id)
+        self.assertEqual(created.updated_by, self.actor_id)
+        self.assertIsNone(created.deleted_at)
+        self.assertIsNone(created.deleted_by)
+
+        # Actualiza como usuario B: updated_by pasa a B (actor real), created_by intacto.
+        self._as_user(self.actor_b_id, *ALL_PATIENT_PERMS)
+        patched = self.client.patch(
+            f"/api/v1/patients/{patient_id}", json={"phone": "8112345678"}
+        )
+        self.assertEqual(patched.status_code, 200, patched.text)
+        after_update = self._patient_row(patient_id)
+        self.assertEqual(after_update.updated_by, self.actor_b_id)
+        self.assertEqual(after_update.created_by, self.actor_id)
+        self.assertIsNone(after_update.deleted_at)
+
+        # Borra (lógico) como usuario B: deleted_by == B y deleted_at != null; el autor
+        # original (created_by) nunca se sobreescribe.
+        deleted = self.client.delete(f"/api/v1/patients/{patient_id}")
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        after_delete = self._patient_row(patient_id)
+        self.assertIsNotNone(after_delete.deleted_at)
+        self.assertEqual(after_delete.deleted_by, self.actor_b_id)
+        self.assertEqual(after_delete.created_by, self.actor_id)
+        # soft_delete también registra al actor en updated_by.
+        self.assertEqual(after_delete.updated_by, self.actor_b_id)
 
     # --- borrado lógico ---
 
