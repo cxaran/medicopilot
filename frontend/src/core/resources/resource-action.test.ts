@@ -238,6 +238,17 @@ test("actionBody con input_schema sin payload devuelve cuerpo vacío", () => {
   assert.deepEqual(actionBody(rescheduleAction()), {});
 });
 
+test("actionBody con fixed_body vacío devuelve {} (no undefined)", () => {
+  // Una acción con request.fixed_body = {} debe enviar un cuerpo vacío {}, nunca
+  // undefined: el endpoint espera JSON (POST/PATCH) sin campos de usuario.
+  const action = statefulAction({
+    request: { content_type: "application/json", fixed_body: {} },
+  });
+  const body = actionBody(action);
+  assert.deepEqual(body, {});
+  assert.notEqual(body, undefined);
+});
+
 test("actionBody rechaza un contrato con request e input_schema simultáneos", () => {
   const corrupt = rescheduleAction({
     request: { content_type: "application/json", fixed_body: { a: 1 } },
@@ -323,6 +334,47 @@ test("evaluateActionCondition conservador: operador desconocido => true", () => 
     all: [{ field: "status", operator: "matches", value: "x" }],
   } as unknown as NonNullable<Operator>;
   assert.equal(evaluateActionCondition(corrupt, { status: "approved" }), true);
+});
+
+test("evaluateActionCondition: eq con escalar numérico cubre y no cubre", () => {
+  // El evaluador soporta cualquier escalar (no sólo string): número con === estricto.
+  assert.equal(evaluateActionCondition(cond(pred("count", "eq", 3)), { count: 3 }), true);
+  assert.equal(evaluateActionCondition(cond(pred("count", "eq", 3)), { count: 4 }), false);
+});
+
+test("evaluateActionCondition conservador: neq con value no escalar => true", () => {
+  // neq sólo compara contra escalares; un value con forma inesperada no bloquea.
+  const malformed = {
+    all: [{ field: "status", operator: "neq", value: ["draft"] }],
+  } as unknown as NonNullable<Operator>;
+  assert.equal(evaluateActionCondition(malformed, { status: "approved" }), true);
+});
+
+test("evaluateActionCondition conservador: not_in con value no array => true", () => {
+  assert.equal(
+    evaluateActionCondition(cond(pred("status", "not_in", "draft")), { status: "approved" }),
+    true,
+  );
+});
+
+test("evaluateActionCondition conservador: predicado null en all => true", () => {
+  const malformed = { all: [null] } as unknown as NonNullable<Operator>;
+  assert.equal(evaluateActionCondition(malformed, { status: "approved" }), true);
+});
+
+test("evaluateActionCondition conservador: field no string => true", () => {
+  const malformed = {
+    all: [{ field: 123, operator: "eq", value: "x" }],
+  } as unknown as NonNullable<Operator>;
+  assert.equal(evaluateActionCondition(malformed, { status: "approved" }), true);
+});
+
+test("evaluateActionCondition: is_null/not_null con campo presente y valor undefined", () => {
+  // Campo presente (hasOwnProperty true) pero con valor undefined: distinto del campo
+  // ausente. is_null lo trata como nulo; not_null como no satisfecho.
+  const item = { voided_at: undefined };
+  assert.equal(evaluateActionCondition(cond(pred("voided_at", "is_null")), item), true);
+  assert.equal(evaluateActionCondition(cond(pred("voided_at", "not_null")), item), false);
 });
 
 test("isActionVisible: sin visible_when siempre visible; con condición filtra", () => {
