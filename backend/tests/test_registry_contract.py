@@ -30,11 +30,21 @@ escritura expuestos al cliente (``create_schema``, ``update_schema`` y el
 ``input_schema`` de cada acción): ningún campo aceptado en esos cuerpos debe ser
 un campo gobernado por el servidor (identificador, folio, auditoría, soft-delete,
 snapshots, marcas de aprobación/anulación, etc.). Ver ``FieldGovernanceTest``.
+
+Y (MP-CTRL-0010) se verifica la VALIDEZ DE LAS CONDICIONES de estado de las
+acciones (``visible_when``/``enabled_when``, el DSL serializable añadido en
+MP-CTRL-0005): cada predicado usa un operador soportado y referencia un campo que
+el cliente realmente recibe por fila (el ``list_schema`` que serializa el row que
+consume el evaluador client-side); si el campo no existiera, el evaluador no
+podría evaluar la condición y el gating de UI se rompería en silencio. Ver
+``ActionConditionValidityTest``.
 """
 
+import enum
 import os
+import typing
 import unittest
-from typing import NamedTuple
+from typing import NamedTuple, Optional
 
 
 DEV_ENV = {
@@ -67,7 +77,12 @@ os.environ.update(DEV_ENV)
 from pydantic import BaseModel  # noqa: E402
 
 from backend.app.resources.registry import RESOURCE_REGISTRY  # noqa: E402
-from backend.app.schemas.capabilities import HttpMethod  # noqa: E402
+from backend.app.schemas.capabilities import (  # noqa: E402
+    ActionCondition,
+    ActionConditionOperator,
+    ActionConditionPredicate,
+    HttpMethod,
+)
 
 
 # Métodos que envían cuerpo y, por tanto, deben declararlo explícitamente.
@@ -334,6 +349,196 @@ class FieldGovernanceTest(unittest.TestCase):
                     f"Excepción innecesaria: '{field_name}' no dispara la heurística "
                     "server-governed; no debería estar en el allowlist.",
                 )
+
+
+# ---------------------------------------------------------------------------
+# Validez de condiciones de estado de acciones (MP-CTRL-0010)
+# ---------------------------------------------------------------------------
+#
+# ``visible_when``/``enabled_when`` (DSL serializable añadido en MP-CTRL-0005) son
+# instancias ``ActionCondition`` ya validadas por Pydantic al construirse en el
+# registry: el operador es un enum (no puede ser un string arbitrario) y la forma
+# (value presente/ausente según el operador, ``all`` no vacío) la valida
+# ``ActionConditionPredicate._validate_shape`` / ``ActionCondition._validate_non_empty``.
+# Lo que NO garantiza Pydantic es que el ``field`` referenciado EXISTA en el row que
+# el cliente recibe: el evaluador client-side (``evaluateActionCondition`` en
+# ``resource-action.ts``) evalúa cada predicado contra el item de la lista y, si el
+# campo está ausente, es conservador (devuelve ``true``); es decir, una condición
+# que apunte a un campo inexistente NO da error pero rompe el gating en silencio.
+#
+# Fuente real de los campos del row: la lista se sirve como ``OffsetPage[<ListItem>]``
+# y ese ``<ListItem>`` es exactamente ``definition.list_schema``; sus ``model_fields``
+# son los campos que el cliente recibe por fila.
+
+_SUPPORTED_OPERATORS = frozenset(ActionConditionOperator)
+_SCALAR_OPERATORS = frozenset({ActionConditionOperator.EQ, ActionConditionOperator.NEQ})
+_LIST_OPERATORS = frozenset({ActionConditionOperator.IN, ActionConditionOperator.NOT_IN})
+
+
+class ConditionRef(NamedTuple):
+    """Referencia a una condición de estado declarada por una acción."""
+
+    resource: str
+    action: str
+    kind: str  # "visible_when" | "enabled_when"
+    condition: ActionCondition
+    field_set: frozenset
+    list_schema: Optional[type[BaseModel]]
+
+
+def _resolve_enum(annotation) -> Optional[type[enum.Enum]]:
+    """Subclase ``Enum`` del anotado (desenvolviendo ``Optional``/``Union``), o None."""
+    for candidate in (annotation, *typing.get_args(annotation)):
+        if isinstance(candidate, type) and issubclass(candidate, enum.Enum):
+            return candidate
+    return None
+
+
+def _action_conditions():
+    """Genera un ``ConditionRef`` por cada ``visible_when``/``enabled_when``
+    declarado por cualquier acción del RESOURCE_REGISTRY."""
+    for definition in RESOURCE_REGISTRY:
+        for action in definition.actions:
+            for kind in ("visible_when", "enabled_when"):
+                condition = getattr(action, kind)
+                if condition is None:
+                    continue
+                list_schema = definition.list_schema
+                field_set = (
+                    frozenset(list_schema.model_fields)
+                    if list_schema is not None
+                    else frozenset()
+                )
+                yield ConditionRef(
+                    definition.name, action.name, kind, condition, field_set, list_schema
+                )
+
+
+class ActionConditionValidityTest(unittest.TestCase):
+    """Verifica que cada condición de acción sea estructuralmente válida y
+    referencie operadores y campos que el cliente realmente puede evaluar."""
+
+    def test_has_conditions(self) -> None:
+        """Sanidad: existe al menos una condición que validar."""
+        refs = list(_action_conditions())
+        self.assertGreater(
+            len(refs),
+            0,
+            "Ninguna acción declara visible_when/enabled_when; el test no validaría "
+            "nada.",
+        )
+
+    def test_resource_with_condition_has_list_schema(self) -> None:
+        """Toda acción con condición pertenece a un recurso con ``list_schema``.
+
+        Sin ``list_schema`` no hay row contra el cual el evaluador pueda resolver
+        la condición.
+        """
+        for ref in _action_conditions():
+            with self.subTest(resource=ref.resource, action=ref.action, kind=ref.kind):
+                self.assertIsNotNone(
+                    ref.list_schema,
+                    f"[condición] {ref.resource}.{ref.action} [{ref.kind}]: el recurso "
+                    "no declara list_schema; el evaluador no tiene un row sobre el cual "
+                    "evaluar la condición.",
+                )
+
+    def test_conditions_are_well_formed(self) -> None:
+        """Cada condición es un ``ActionCondition`` con ``all`` no vacío de predicados."""
+        for ref in _action_conditions():
+            with self.subTest(resource=ref.resource, action=ref.action, kind=ref.kind):
+                self.assertIsInstance(ref.condition, ActionCondition)
+                self.assertTrue(
+                    ref.condition.all_,
+                    f"[condición] {ref.resource}.{ref.action} [{ref.kind}]: 'all' no "
+                    "puede estar vacío.",
+                )
+                for predicate in ref.condition.all_:
+                    self.assertIsInstance(predicate, ActionConditionPredicate)
+                    self.assertTrue(
+                        isinstance(predicate.field, str) and predicate.field.strip(),
+                        f"[condición] {ref.resource}.{ref.action} [{ref.kind}]: un "
+                        "predicado tiene 'field' vacío.",
+                    )
+
+    def test_operators_are_supported(self) -> None:
+        """Cada predicado usa un operador del conjunto soportado por el contrato."""
+        for ref in _action_conditions():
+            for predicate in ref.condition.all_:
+                with self.subTest(
+                    resource=ref.resource,
+                    action=ref.action,
+                    kind=ref.kind,
+                    field=predicate.field,
+                ):
+                    self.assertIn(
+                        predicate.operator,
+                        _SUPPORTED_OPERATORS,
+                        f"[condición] {ref.resource}.{ref.action} [{ref.kind}]: el "
+                        f"operador {predicate.operator!r} sobre '{predicate.field}' no "
+                        "está soportado.",
+                    )
+
+    def test_fields_exist_in_client_row(self) -> None:
+        """Cada campo referenciado existe en el row que el cliente recibe."""
+        for ref in _action_conditions():
+            if ref.list_schema is None:
+                continue  # cubierto por test_resource_with_condition_has_list_schema
+            for predicate in ref.condition.all_:
+                with self.subTest(
+                    resource=ref.resource,
+                    action=ref.action,
+                    kind=ref.kind,
+                    field=predicate.field,
+                ):
+                    self.assertIn(
+                        predicate.field,
+                        ref.field_set,
+                        f"[condición] {ref.resource}.{ref.action} [{ref.kind}]: el "
+                        f"campo '{predicate.field}' no existe en el row que el cliente "
+                        f"recibe (list_schema={ref.list_schema.__name__}); el evaluador "
+                        "client-side no podría evaluarlo y el gating se rompería en "
+                        "silencio.",
+                    )
+
+    def test_condition_values_match_enum_fields(self) -> None:
+        """Coherencia de valor (robusta): cuando el campo resuelve a un ``Enum``, el
+        valor comparado debe ser un miembro válido. Se omite para campos no-enum y
+        para operadores sin valor (``is_null``/``not_null``)."""
+        for ref in _action_conditions():
+            if ref.list_schema is None:
+                continue
+            for predicate in ref.condition.all_:
+                field_info = ref.list_schema.model_fields.get(predicate.field)
+                if field_info is None:
+                    continue  # cubierto por test_fields_exist_in_client_row
+                enum_cls = _resolve_enum(field_info.annotation)
+                if enum_cls is None:
+                    continue
+                if predicate.operator in _SCALAR_OPERATORS:
+                    values = [predicate.value]
+                elif predicate.operator in _LIST_OPERATORS:
+                    values = list(predicate.value) if isinstance(predicate.value, list) else []
+                else:
+                    values = []
+                allowed = {member.value for member in enum_cls}
+                for value in values:
+                    raw = getattr(value, "value", value)
+                    with self.subTest(
+                        resource=ref.resource,
+                        action=ref.action,
+                        kind=ref.kind,
+                        field=predicate.field,
+                        value=raw,
+                    ):
+                        self.assertIn(
+                            raw,
+                            allowed,
+                            f"[condición] {ref.resource}.{ref.action} [{ref.kind}]: el "
+                            f"valor {raw!r} comparado contra '{predicate.field}' no es "
+                            f"un miembro válido de {enum_cls.__name__} "
+                            f"({sorted(allowed)}).",
+                        )
 
 
 if __name__ == "__main__":
