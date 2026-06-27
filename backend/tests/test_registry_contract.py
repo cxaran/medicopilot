@@ -45,6 +45,13 @@ el registry (``read_/create_/update_/download_permission`` del recurso, el
 verdad del backend (``security.catalog.declared_permissions``). Un permiso
 huérfano o mal escrito rompería el gating de autorización en silencio. Ver
 ``PermissionConsistencyTest``.
+
+Y (MP-CTRL-0012) se verifica la VALIDEZ DE FILTROS Y ORDEN de la capacidad de
+lista: cada campo que el ``CompiledQueryPlan`` de ``list_query`` declara filtrable
+u ordenable debe existir en el ``list_schema`` (el row que el cliente recibe), y
+cada operador/widget declarado en los blobs ``ui.filter`` de las columnas debe ser
+soportado. Un campo filtrable/ordenable inexistente rompería el filtrado/orden en
+la UI sin error claro. Ver ``ListFilterSortValidityTest``.
 """
 
 import enum
@@ -83,12 +90,15 @@ os.environ.update(DEV_ENV)
 
 from pydantic import BaseModel  # noqa: E402
 
+from backend.app.query.operators import Operator  # noqa: E402
+from backend.app.query.plans import CompiledQueryPlan  # noqa: E402
 from backend.app.resources.registry import RESOURCE_REGISTRY  # noqa: E402
 from backend.app.schemas.capabilities import (  # noqa: E402
     ActionCondition,
     ActionConditionOperator,
     ActionConditionPredicate,
     HttpMethod,
+    WidgetType,
 )
 from backend.app.security.catalog import declared_permissions  # noqa: E402
 from backend.app.security.security_control import WILDCARD_ACCESS  # noqa: E402
@@ -638,6 +648,156 @@ class PermissionConsistencyTest(unittest.TestCase):
                     "permiso huérfano o mal escrito — el gating de autorización se "
                     "rompería en silencio.",
                 )
+
+
+# ---------------------------------------------------------------------------
+# Validez de filtros y orden de la capacidad de lista (MP-CTRL-0012)
+# ---------------------------------------------------------------------------
+#
+# La capacidad técnica de lista (qué se puede filtrar/ordenar/buscar) la declara el
+# ``CompiledQueryPlan`` que expone ``ResourceQuery.plan`` (``definition.list_query``);
+# la metadata de fila la da ``definition.list_schema``. La proyección
+# (``projection._list_capability``) cruza ambas: sólo emite filtros/orden para
+# campos presentes en ``list_schema`` (``field_caps``). Por eso un campo que el plan
+# declare filtrable/ordenable pero AUSENTE del ``list_schema`` no produce error: se
+# descarta en silencio, y el cliente queda sin ese filtro/orden o con un orden por
+# defecto que apunta a una columna que no recibe. Este test ancla los campos
+# declarados por el plan al ``list_schema``.
+#
+# Operadores soportados: el enum ``Operator`` de la capa de consulta (idéntico en
+# valores a ``FilterOperator``); es la fuente que la proyección usa para parsear el
+# operador de cada ``ui.filter`` (distinta del enum de condiciones de 0010). Widgets
+# soportados: ``WidgetType``.
+#
+# Coherencia de options/enum de filtros: OMITIDA a propósito (ver notas del reporte):
+# los selects de filtro incluyen campos no-enum (p. ej. ``is_active`` booleano con
+# opciones "true"/"false"), por lo que mapear ``ui.filter.options`` al enum del campo
+# introduciría falsos positivos. Las opciones ya se validan estructuralmente en la
+# proyección (``_declared_options``).
+
+_SUPPORTED_FILTER_OPERATORS = frozenset(member.value for member in Operator)
+_SUPPORTED_WIDGETS = frozenset(member.value for member in WidgetType)
+
+
+def _ui_blob(field_info) -> dict:
+    """Replica ``projection._ui``: el dict ``ui`` de ``json_schema_extra`` o ``{}``."""
+    extra = field_info.json_schema_extra
+    if isinstance(extra, dict):
+        ui = extra.get("ui")
+        if isinstance(ui, dict):
+            return ui
+    return {}
+
+
+class ListableResource(NamedTuple):
+    """Recurso con capacidad de lista (``list_query`` y ``list_schema`` presentes)."""
+
+    name: str
+    plan: CompiledQueryPlan
+    list_schema: type[BaseModel]
+    field_set: frozenset
+
+
+def _listable_resources():
+    """Genera un ``ListableResource`` por cada recurso con capacidad de lista."""
+    for definition in RESOURCE_REGISTRY:
+        if definition.list_query is None or definition.list_schema is None:
+            continue
+        yield ListableResource(
+            definition.name,
+            definition.list_query.plan,
+            definition.list_schema,
+            frozenset(definition.list_schema.model_fields),
+        )
+
+
+def _declared_filter_fields(plan) -> set:
+    """Conjunto de campos que el plan declara filtrables (todas las variantes)."""
+    fields: set = set()
+    fields.update(plan.filter_columns)
+    fields.update(plan.range_fields)
+    fields.update(plan.in_fields)
+    fields.update(plan.null_filter_fields)
+    fields.update(descriptor.field_name for descriptor in plan.extended_filters)
+    fields.update(parameter.field_name for parameter in plan.filter_parameters)
+    return fields
+
+
+class ListFilterSortValidityTest(unittest.TestCase):
+    """Verifica que los campos filtrables/ordenables existan en list_schema y que
+    los operadores/widgets de filtro declarados sean soportados."""
+
+    def test_list_query_implies_list_schema(self) -> None:
+        """Coherencia: un recurso con ``list_query`` también declara ``list_schema``
+        (y viceversa); la proyección de lista los exige juntos."""
+        for definition in RESOURCE_REGISTRY:
+            with self.subTest(resource=definition.name):
+                self.assertEqual(
+                    definition.list_query is None,
+                    definition.list_schema is None,
+                    f"[lista] {definition.name}: list_query y list_schema deben estar "
+                    "ambos presentes o ambos ausentes "
+                    f"(list_query={definition.list_query is not None}, "
+                    f"list_schema={definition.list_schema is not None}).",
+                )
+
+    def test_has_listable_resources(self) -> None:
+        """Sanidad: hay al menos un recurso con capacidad de lista."""
+        resources = list(_listable_resources())
+        self.assertGreater(
+            len(resources),
+            0,
+            "Ningún recurso declara capacidad de lista; el test no validaría nada.",
+        )
+
+    def test_sortable_fields_exist_in_list_schema(self) -> None:
+        """Cada campo ordenable del plan existe en el list_schema."""
+        for resource in _listable_resources():
+            for column in resource.plan.public_sort_columns:
+                with self.subTest(resource=resource.name, field=column, capability="sort"):
+                    self.assertIn(
+                        column,
+                        resource.field_set,
+                        f"[orden] {resource.name}: el campo ordenable '{column}' no "
+                        f"existe en list_schema ({resource.list_schema.__name__}); el "
+                        "orden por ese campo no sería evaluable por el cliente.",
+                    )
+
+    def test_filterable_fields_exist_in_list_schema(self) -> None:
+        """Cada campo filtrable del plan existe en el list_schema."""
+        for resource in _listable_resources():
+            for field in _declared_filter_fields(resource.plan):
+                with self.subTest(resource=resource.name, field=field, capability="filter"):
+                    self.assertIn(
+                        field,
+                        resource.field_set,
+                        f"[filtro] {resource.name}: el campo filtrable '{field}' no "
+                        f"existe en list_schema ({resource.list_schema.__name__}); el "
+                        "filtro por ese campo no se proyectaría al cliente.",
+                    )
+
+    def test_ui_filter_operators_and_widgets_supported(self) -> None:
+        """Cada blob ``ui.filter`` declara un operador y un widget soportados."""
+        for resource in _listable_resources():
+            for name, field_info in resource.list_schema.model_fields.items():
+                declaration = _ui_blob(field_info).get("filter")
+                if not isinstance(declaration, dict):
+                    continue
+                operator = declaration.get("operator")
+                widget = declaration.get("widget")
+                with self.subTest(resource=resource.name, field=name, capability="filter"):
+                    self.assertIn(
+                        operator,
+                        _SUPPORTED_FILTER_OPERATORS,
+                        f"[filtro] {resource.name}.{name}: el operador de filtro "
+                        f"{operator!r} no está soportado.",
+                    )
+                    self.assertIn(
+                        widget,
+                        _SUPPORTED_WIDGETS,
+                        f"[filtro] {resource.name}.{name}: el widget de filtro "
+                        f"{widget!r} no está soportado.",
+                    )
 
 
 if __name__ == "__main__":
