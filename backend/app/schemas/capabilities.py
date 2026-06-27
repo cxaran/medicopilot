@@ -231,10 +231,36 @@ class ResourceFormFieldCapability(ApiReadSchema):
     options: Optional[list[ResourceFilterOption]] = None
 
 
+class FormTransport(str, Enum):
+    # Cuerpo JSON estándar (default, retrocompatible).
+    JSON = "json"
+    # ``multipart/form-data``: el formulario incluye un archivo. El frontend NO debe
+    # enviar JSON; los campos de metadata viajan como campos de formulario y el binario
+    # en ``file_field``.
+    MULTIPART = "multipart"
+
+
+class ResourceFileFieldCapability(ApiReadSchema):
+    """Campo de archivo de un formulario multipart (genérico, sin semántica de dominio).
+
+    El frontend usa ``accepted_mime_types`` y ``max_size_bytes`` solo como guía de UI; el
+    backend revalida tamaño y tipo en cada carga."""
+
+    name: str
+    label: str
+    accepted_mime_types: list[str]
+    max_size_bytes: int
+    required: bool
+
+
 class ResourceFormCapability(ApiReadSchema):
     method: HttpMethod
     url_template: str
     fields: list[ResourceFormFieldCapability]
+    # ``transport``/``file_field`` describen un formulario con carga de archivo. Para los
+    # formularios JSON normales ``transport`` es ``json`` y ``file_field`` se omite.
+    transport: FormTransport = FormTransport.JSON
+    file_field: Optional[ResourceFileFieldCapability] = None
 
 
 class ResourceFormsCapability(ApiReadSchema):
@@ -417,6 +443,17 @@ class ResourceDetailCapability(ApiReadSchema):
     url_template: str
 
 
+class ResourceFileDownloadCapability(ApiReadSchema):
+    """Descarga de contenido binario de un item (navegación de archivo, no mutación).
+
+    Genérico: cualquier recurso con contenido descargable la declara. Se proyecta solo
+    si el actor tiene el permiso de descarga (distinto del de lectura de metadata). El
+    backend revalida permiso y visibilidad y entrega el binario con cabeceras seguras."""
+
+    method: HttpMethod
+    url_template: str
+
+
 class ResourceCapability(ApiReadSchema):
     name: str
     label: str
@@ -424,6 +461,9 @@ class ResourceCapability(ApiReadSchema):
     view: ResourceView
     item_reference: Optional[ItemReference] = None
     detail: Optional[ResourceDetailCapability] = None
+    # Descarga de binario por item (recursos con contenido de archivo). Omitido si el
+    # recurso no declara descarga o el actor no tiene el permiso.
+    file_download: Optional[ResourceFileDownloadCapability] = None
     # El atributo se llama ``list_`` para no sombrear el builtin ``list`` dentro del
     # cuerpo de la clase; se serializa/valida como ``list`` vía alias.
     list_: Optional[ResourceListCapability] = Field(default=None, alias="list")

@@ -13,6 +13,7 @@ from typing import Optional
 
 from pydantic import BaseModel
 
+from backend.app.core.settings import settings
 from backend.app.models.appointment import Appointment
 from backend.app.models.clinical_document import ClinicalDocument
 from backend.app.models.consultation import Consultation
@@ -45,14 +46,22 @@ _CREATED_AT_OPERATORS = (
 )
 from backend.app.schemas.capabilities import (
     ActionCondition,
+    ActionConditionOperator,
+    ActionConditionPredicate,
     ActionScope,
+    FormTransport,
     HttpMethod,
     OptionsSourceType,
     RelationCardinality,
+    ResourceFileFieldCapability,
     ResourceView,
 )
 from backend.app.schemas.appointment import AppointmentListItem
-from backend.app.schemas.clinical_document import ClinicalDocumentListItem
+from backend.app.schemas.clinical_document import (
+    ClinicalDocumentCreateForm,
+    ClinicalDocumentListItem,
+    ClinicalDocumentMetadataUpdate,
+)
 from backend.app.schemas.consultation import ConsultationListItem
 from backend.app.schemas.consultation_diagnosis import (
     ConsultationDiagnosisCreate,
@@ -82,6 +91,7 @@ from backend.app.schemas.user_admin import (
     UserAdminListItem,
     UserAdminUpdate,
 )
+from backend.app.security.groups.clinical_documents import ClinicalDocumentPermissions
 from backend.app.security.groups.consultation_diagnoses import (
     ConsultationDiagnosisPermissions,
 )
@@ -446,6 +456,15 @@ class ResourceDefinition:
     update_schema: Optional[type[BaseModel]] = None
     create_permission: Optional[SecurityGroup] = None
     update_permission: Optional[SecurityGroup] = None
+    # Transporte del formulario de creación. ``MULTIPART`` declara una carga de archivo:
+    # ``create_file_field`` describe el campo de archivo (genérico). Los campos de
+    # metadata siguen proyectándose desde ``create_schema``.
+    create_transport: FormTransport = FormTransport.JSON
+    create_file_field: Optional[ResourceFileFieldCapability] = None
+    # Descarga de binario por item. Si se declara, el recurso publica ``file_download``
+    # cuando el actor tiene ``download_permission`` (distinto del de lectura).
+    download_url_template: Optional[str] = None
+    download_permission: Optional[SecurityGroup] = None
     # Lectura individual: si está declarada, el recurso publica ``item_reference`` y
     # ``detail``. El campo identificador (``item_id_field``) coincide con el token
     # ``{id}`` de las plantillas de URL (detail, update, acciones).
@@ -806,6 +825,110 @@ RESOURCE_REGISTRY: tuple[ResourceDefinition, ...] = (
                 confirmation=ConfirmationDef(
                     title="Eliminar diagnóstico",
                     message="El diagnóstico se dará de baja lógica.",
+                    confirm_label="Eliminar",
+                    destructive=True,
+                ),
+            ),
+        ),
+    ),
+    ResourceDefinition(
+        name="clinical_documents",
+        label="Documentos clínicos",
+        api_path="/api/v1/clinical-documents",
+        view=ResourceView.TABLE,
+        read_permission=ClinicalDocumentPermissions.READ,
+        list_query=CLINICAL_DOCUMENTS,
+        list_schema=ClinicalDocumentListItem,
+        # La creación es multipart: los campos de metadata vienen de ``create_schema``
+        # (contrato declarativo) y el binario de ``create_file_field``.
+        create_schema=ClinicalDocumentCreateForm,
+        create_permission=ClinicalDocumentPermissions.CREATE,
+        create_transport=FormTransport.MULTIPART,
+        create_file_field=ResourceFileFieldCapability(
+            name="file",
+            label="Archivo",
+            accepted_mime_types=sorted(settings.clinical_document_allowed_mimes),
+            max_size_bytes=settings.clinical_document_max_size_bytes,
+            required=True,
+        ),
+        update_schema=ClinicalDocumentMetadataUpdate,
+        update_permission=ClinicalDocumentPermissions.UPDATE,
+        download_url_template="/api/v1/clinical-documents/{id}/download",
+        download_permission=ClinicalDocumentPermissions.DOWNLOAD,
+        detail_url_template="/api/v1/clinical-documents/{id}",
+        actions=(
+            # Las condiciones de estado son guía de UI; el backend revalida la transición
+            # y responde 409 clinical_document_state_invalid si se fuerza la petición.
+            ActionDef(
+                name="archive",
+                label="Archivar",
+                method=HttpMethod.POST,
+                url_template="/api/v1/clinical-documents/{id}/archive",
+                scope=ActionScope.ITEM,
+                danger=False,
+                permission=ClinicalDocumentPermissions.ARCHIVE,
+                visible_when=ActionCondition(
+                    all=[
+                        ActionConditionPredicate(
+                            field="status",
+                            operator=ActionConditionOperator.EQ,
+                            value="active",
+                        )
+                    ]
+                ),
+                confirmation=ConfirmationDef(
+                    title="Archivar documento",
+                    message="El documento quedará archivado (seguirá siendo descargable).",
+                    confirm_label="Archivar",
+                    destructive=False,
+                    required=False,
+                ),
+            ),
+            ActionDef(
+                name="restore",
+                label="Restaurar",
+                method=HttpMethod.POST,
+                url_template="/api/v1/clinical-documents/{id}/restore",
+                scope=ActionScope.ITEM,
+                danger=False,
+                permission=ClinicalDocumentPermissions.RESTORE,
+                visible_when=ActionCondition(
+                    all=[
+                        ActionConditionPredicate(
+                            field="status",
+                            operator=ActionConditionOperator.EQ,
+                            value="deleted",
+                        )
+                    ]
+                ),
+                confirmation=ConfirmationDef(
+                    title="Restaurar documento",
+                    message="El documento volverá a estar activo.",
+                    confirm_label="Restaurar",
+                    destructive=False,
+                    required=False,
+                ),
+            ),
+            ActionDef(
+                name="delete",
+                label="Eliminar",
+                method=HttpMethod.DELETE,
+                url_template="/api/v1/clinical-documents/{id}",
+                scope=ActionScope.ITEM,
+                danger=True,
+                permission=ClinicalDocumentPermissions.DELETE,
+                visible_when=ActionCondition(
+                    all=[
+                        ActionConditionPredicate(
+                            field="status",
+                            operator=ActionConditionOperator.IN,
+                            value=["active", "archived"],
+                        )
+                    ]
+                ),
+                confirmation=ConfirmationDef(
+                    title="Eliminar documento",
+                    message="El documento se dará de baja lógica (no se descargará).",
                     confirm_label="Eliminar",
                     destructive=True,
                 ),

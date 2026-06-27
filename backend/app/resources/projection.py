@@ -44,6 +44,7 @@ from backend.app.schemas.capabilities import (
     ResourceDetailCapability,
     ResourceActionCapability,
     ResourceCapability,
+    ResourceFileDownloadCapability,
     ResourceFieldCapability,
     ResourceFilterCapability,
     ResourceFilterOption,
@@ -630,6 +631,8 @@ def _forms_capability(
             method=HttpMethod.POST,
             url_template=definition.api_path,
             fields=_form_fields(definition.create_schema),
+            transport=definition.create_transport,
+            file_field=definition.create_file_field,
         )
 
     if (
@@ -750,6 +753,19 @@ def _build_capability(definition: ResourceDefinition, user: SessionUser) -> Reso
             url_template=definition.detail_url_template,
         )
 
+    # ``file_download`` se publica solo si el recurso declara descarga y el actor tiene el
+    # permiso de descarga (distinto del de lectura de metadata).
+    file_download: Optional[ResourceFileDownloadCapability] = None
+    if (
+        definition.download_url_template is not None
+        and definition.download_permission is not None
+        and definition.download_permission.check(user)
+    ):
+        file_download = ResourceFileDownloadCapability(
+            method=HttpMethod.GET,
+            url_template=definition.download_url_template,
+        )
+
     return ResourceCapability(
         name=definition.name,
         label=definition.label,
@@ -757,6 +773,7 @@ def _build_capability(definition: ResourceDefinition, user: SessionUser) -> Reso
         view=definition.view,
         item_reference=item_reference,
         detail=detail,
+        file_download=file_download,
         list=list_cap,
         forms=forms_cap,
         actions=actions,

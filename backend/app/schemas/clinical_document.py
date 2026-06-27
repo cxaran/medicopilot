@@ -13,7 +13,7 @@ from typing import Any, Optional
 from pydantic import Field
 
 from backend.app.models.enums import ClinicalDocumentStatus, ClinicalDocumentType
-from backend.app.schemas.base import ApiPatchSchema, ApiReadSchema
+from backend.app.schemas.base import ApiPatchSchema, ApiReadSchema, ApiWriteSchema
 
 # Opciones de tipo y estado, reutilizadas en formulario (metadata) y filtros de lista.
 _TYPE_OPTIONS: list[dict[str, Any]] = [
@@ -124,6 +124,40 @@ class ClinicalDocumentListItem(ApiReadSchema):
     )
     uploaded_at: datetime = Field(
         title="Cargado", json_schema_extra={"ui": {"list": True}}
+    )
+
+
+class ClinicalDocumentCreateForm(ApiWriteSchema):
+    """Contrato **declarativo** del formulario de metadata de la carga (capabilities).
+
+    No se usa para parsear la petición —la carga es ``multipart/form-data`` y el router la
+    recibe con ``Form()``/``File()``—; existe para que la proyección publique los campos de
+    metadata del formulario de creación. El archivo se describe aparte (``file_field``) y la
+    metadata gobernada por servidor (hash, tamaño, MIME, estado, auditoría) no aparece aquí.
+    """
+
+    patient_id: uuid.UUID = Field(
+        title="Paciente",
+        json_schema_extra={"ui": {"form": True, "widget": "text"}},
+    )
+    consultation_id: Optional[uuid.UUID] = Field(
+        default=None,
+        title="Consulta",
+        json_schema_extra={"ui": {"form": True, "widget": "text"}},
+    )
+    document_type: ClinicalDocumentType = Field(
+        title="Tipo", json_schema_extra=_TYPE_FORM_UI
+    )
+    document_date: Optional[date] = Field(
+        default=None,
+        title="Fecha del documento",
+        json_schema_extra={"ui": {"form": True, "widget": "date"}},
+    )
+    description: Optional[str] = Field(
+        default=None,
+        max_length=2000,
+        title="Descripción",
+        json_schema_extra={"ui": {"form": True, "widget": "textarea"}},
     )
 
 
