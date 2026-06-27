@@ -62,14 +62,22 @@ from backend.app.schemas.clinical_document import (
     ClinicalDocumentListItem,
     ClinicalDocumentMetadataUpdate,
 )
-from backend.app.schemas.consultation import ConsultationListItem
+from backend.app.schemas.consultation import (
+    ConsultationCreate,
+    ConsultationListItem,
+    ConsultationUpdate,
+)
 from backend.app.schemas.consultation_diagnosis import (
     ConsultationDiagnosisCreate,
     ConsultationDiagnosisListItem,
     ConsultationDiagnosisUpdate,
 )
 from backend.app.schemas.doctor import DoctorCreate, DoctorListItem, DoctorUpdate
-from backend.app.schemas.medical_history_version import MedicalHistoryVersionListItem
+from backend.app.schemas.medical_history_version import (
+    MedicalHistoryVersionCreate,
+    MedicalHistoryVersionListItem,
+    MedicalHistoryVersionUpdate,
+)
 from backend.app.schemas.patient import PatientCreate, PatientListItem, PatientUpdate
 from backend.app.schemas.patient_clinical_item import (
     PatientClinicalItemCreate,
@@ -94,6 +102,10 @@ from backend.app.schemas.user_admin import (
 from backend.app.security.groups.clinical_documents import ClinicalDocumentPermissions
 from backend.app.security.groups.consultation_diagnoses import (
     ConsultationDiagnosisPermissions,
+)
+from backend.app.security.groups.consultations import ConsultationPermissions
+from backend.app.security.groups.medical_history_versions import (
+    MedicalHistoryVersionPermissions,
 )
 from backend.app.security.groups.doctors import DoctorPermissions
 from backend.app.security.groups.patient_clinical_items import (
@@ -763,6 +775,138 @@ RESOURCE_REGISTRY: tuple[ResourceDefinition, ...] = (
                 confirmation=ConfirmationDef(
                     title="Eliminar dato clínico",
                     message="El dato clínico se dará de baja lógica.",
+                    confirm_label="Eliminar",
+                    destructive=True,
+                ),
+            ),
+        ),
+    ),
+    ResourceDefinition(
+        name="medical_history_versions",
+        label="Historia clínica",
+        api_path="/api/v1/medical-history-versions",
+        view=ResourceView.TABLE,
+        read_permission=MedicalHistoryVersionPermissions.READ,
+        list_query=MEDICAL_HISTORY_VERSIONS,
+        list_schema=MedicalHistoryVersionListItem,
+        create_schema=MedicalHistoryVersionCreate,
+        update_schema=MedicalHistoryVersionUpdate,
+        create_permission=MedicalHistoryVersionPermissions.CREATE,
+        update_permission=MedicalHistoryVersionPermissions.UPDATE,
+        detail_url_template="/api/v1/medical-history-versions/{id}",
+        actions=(
+            # finalize sella la versión (draft -> current). Cuerpo vacío por diseño:
+            # ni fixed_body ni input_schema. Sólo visible mientras está en borrador; el
+            # backend revalida la transición.
+            ActionDef(
+                name="finalize",
+                label="Finalizar",
+                method=HttpMethod.POST,
+                url_template="/api/v1/medical-history-versions/{id}/finalize",
+                scope=ActionScope.ITEM,
+                danger=False,
+                permission=MedicalHistoryVersionPermissions.FINALIZE,
+                visible_when=ActionCondition(
+                    all=[
+                        ActionConditionPredicate(
+                            field="status",
+                            operator=ActionConditionOperator.EQ,
+                            value="draft",
+                        )
+                    ]
+                ),
+                confirmation=ConfirmationDef(
+                    title="Finalizar historia clínica",
+                    message="La versión se sellará como vigente y dejará de ser editable.",
+                    confirm_label="Finalizar",
+                    destructive=False,
+                ),
+            ),
+            ActionDef(
+                name="delete",
+                label="Eliminar",
+                method=HttpMethod.DELETE,
+                url_template="/api/v1/medical-history-versions/{id}",
+                scope=ActionScope.ITEM,
+                danger=True,
+                permission=MedicalHistoryVersionPermissions.DELETE,
+                visible_when=ActionCondition(
+                    all=[
+                        ActionConditionPredicate(
+                            field="status",
+                            operator=ActionConditionOperator.EQ,
+                            value="draft",
+                        )
+                    ]
+                ),
+                confirmation=ConfirmationDef(
+                    title="Eliminar versión de historia",
+                    message="La versión en borrador se dará de baja lógica.",
+                    confirm_label="Eliminar",
+                    destructive=True,
+                ),
+            ),
+        ),
+    ),
+    ResourceDefinition(
+        name="consultations",
+        label="Consultas médicas",
+        api_path="/api/v1/consultations",
+        view=ResourceView.TABLE,
+        read_permission=ConsultationPermissions.READ,
+        list_query=CONSULTATIONS,
+        list_schema=ConsultationListItem,
+        create_schema=ConsultationCreate,
+        update_schema=ConsultationUpdate,
+        create_permission=ConsultationPermissions.CREATE,
+        update_permission=ConsultationPermissions.UPDATE,
+        detail_url_template="/api/v1/consultations/{id}",
+        actions=(
+            # finalize sella la consulta (draft -> finalized). Cuerpo vacío por diseño.
+            ActionDef(
+                name="finalize",
+                label="Finalizar",
+                method=HttpMethod.POST,
+                url_template="/api/v1/consultations/{id}/finalize",
+                scope=ActionScope.ITEM,
+                danger=False,
+                permission=ConsultationPermissions.FINALIZE,
+                visible_when=ActionCondition(
+                    all=[
+                        ActionConditionPredicate(
+                            field="status",
+                            operator=ActionConditionOperator.EQ,
+                            value="draft",
+                        )
+                    ]
+                ),
+                confirmation=ConfirmationDef(
+                    title="Finalizar consulta",
+                    message="La consulta se sellará y sus datos clínicos quedarán bloqueados.",
+                    confirm_label="Finalizar",
+                    destructive=False,
+                ),
+            ),
+            ActionDef(
+                name="delete",
+                label="Eliminar",
+                method=HttpMethod.DELETE,
+                url_template="/api/v1/consultations/{id}",
+                scope=ActionScope.ITEM,
+                danger=True,
+                permission=ConsultationPermissions.DELETE,
+                visible_when=ActionCondition(
+                    all=[
+                        ActionConditionPredicate(
+                            field="status",
+                            operator=ActionConditionOperator.EQ,
+                            value="draft",
+                        )
+                    ]
+                ),
+                confirmation=ConfirmationDef(
+                    title="Eliminar consulta",
+                    message="La consulta en borrador se dará de baja lógica.",
                     confirm_label="Eliminar",
                     destructive=True,
                 ),

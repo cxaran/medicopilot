@@ -521,5 +521,100 @@ class ClinicalSummaryCapabilityTest(unittest.TestCase):
             self.assertNotIn(name, names)
 
 
+class MedicalHistoryAndConsultationsCapabilityTest(unittest.TestCase):
+    _GOVERNED = (
+        "status",
+        "created_by",
+        "updated_by",
+        "deleted_at",
+        "deleted_by",
+        "finalized_at",
+        "finalized_by_doctor_id",
+        "reviewed_at",
+        "reviewed_by_doctor_id",
+        "version_number",
+    )
+
+    def test_both_resources_visible_with_read(self) -> None:
+        with _As("medical_history_versions:read", "consultations:read"):
+            names = [r["name"] for r in client.get("/api/v1/resources").json()]
+        self.assertIn("medical_history_versions", names)
+        self.assertIn("consultations", names)
+
+    def test_forms_only_with_write_permissions(self) -> None:
+        with _As("consultations:read"):
+            cap = client.get("/api/v1/resources/consultations").json()
+        self.assertNotIn("forms", cap)
+        with _As("consultations:read", "consultations:create", "consultations:update"):
+            cap = client.get("/api/v1/resources/consultations").json()
+        self.assertEqual(cap["forms"]["create"]["method"], "POST")
+        self.assertEqual(cap["forms"]["create"]["url_template"], "/api/v1/consultations")
+        self.assertEqual(cap["forms"]["update"]["method"], "PATCH")
+
+    def test_finalize_only_with_finalize_permission(self) -> None:
+        with _As("consultations:read", "consultations:delete"):
+            cap = client.get("/api/v1/resources/consultations").json()
+        self.assertNotIn("finalize", [a["name"] for a in cap["actions"]])
+        with _As("consultations:read", "consultations:finalize"):
+            cap = client.get("/api/v1/resources/consultations").json()
+        actions = {a["name"]: a for a in cap["actions"]}
+        self.assertIn("finalize", actions)
+        self.assertNotIn("delete", actions)
+        finalize = actions["finalize"]
+        self.assertEqual(finalize["method"], "POST")
+        self.assertEqual(finalize["url_template"], "/api/v1/consultations/{id}/finalize")
+        self.assertTrue(finalize["confirmation"]["required"])
+        self.assertEqual(
+            finalize["visible_when"]["all"][0],
+            {"field": "status", "operator": "eq", "value": "draft"},
+        )
+        # finalize no lleva cuerpo (vacío por diseño): ni request ni input_schema.
+        self.assertNotIn("request", finalize)
+        self.assertNotIn("input_schema", finalize)
+
+    def test_delete_only_with_delete_permission(self) -> None:
+        with _As("medical_history_versions:read", "medical_history_versions:finalize"):
+            cap = client.get("/api/v1/resources/medical_history_versions").json()
+        self.assertNotIn("delete", [a["name"] for a in cap["actions"]])
+        with _As("medical_history_versions:read", "medical_history_versions:delete"):
+            cap = client.get("/api/v1/resources/medical_history_versions").json()
+        actions = {a["name"]: a for a in cap["actions"]}
+        self.assertEqual(set(actions), {"delete"})
+        delete = actions["delete"]
+        self.assertEqual(delete["method"], "DELETE")
+        self.assertEqual(
+            delete["url_template"], "/api/v1/medical-history-versions/{id}"
+        )
+        self.assertTrue(delete["confirmation"]["destructive"])
+        self.assertEqual(delete["visible_when"]["all"][0]["value"], "draft")
+
+    def test_forms_hide_server_governed_fields(self) -> None:
+        perms = [
+            f"{resource}:{op}"
+            for resource in ("medical_history_versions", "consultations")
+            for op in ("read", "create", "update")
+        ]
+        with _As(*perms):
+            for name in ("medical_history_versions", "consultations"):
+                cap = client.get(f"/api/v1/resources/{name}").json()
+                fields: set[str] = set()
+                for form in ("create", "update"):
+                    fields |= {f["name"] for f in cap["forms"][form]["fields"]}
+                for governed in self._GOVERNED:
+                    self.assertNotIn(governed, fields, f"{name}.{governed}")
+
+    def test_resource_catalog_clinical_order(self) -> None:
+        with _As(*declared_permissions()):
+            names = [r["name"] for r in client.get("/api/v1/resources").json()]
+        # Orden clínico coherente: paciente -> historia -> consulta -> datos de consulta.
+        self.assertLess(
+            names.index("patient_clinical_items"), names.index("medical_history_versions")
+        )
+        self.assertLess(
+            names.index("medical_history_versions"), names.index("consultations")
+        )
+        self.assertLess(names.index("consultations"), names.index("vital_signs"))
+
+
 if __name__ == "__main__":
     unittest.main()

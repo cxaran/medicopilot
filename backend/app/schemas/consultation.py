@@ -28,12 +28,10 @@ _STATUS_LIST_FILTER_UI: dict[str, Any] = {
         },
     }
 }
-_CONSULTED_AT_LIST_FILTER_UI: dict[str, Any] = {
-    "ui": {
-        "list": True,
-        "filter": {"operator": "range", "label": "Atención", "widget": "datetime"},
-    }
-}
+# ``consulted_at`` es columna de lista; su filtro de rango de calendario (on/before/
+# after/between) lo publica ``filterable_fields`` desde ``field_operators`` del recurso,
+# no el bloque ``ui.filter`` legacy (que sólo admite un operador único válido).
+_CONSULTED_AT_LIST_FILTER_UI: dict[str, Any] = {"ui": {"list": True}}
 
 
 def _naive_utc(value: datetime) -> datetime:
