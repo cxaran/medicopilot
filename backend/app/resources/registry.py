@@ -19,6 +19,7 @@ from backend.app.models.medical_history import MedicalHistoryVersion
 from backend.app.models.patient import Patient
 from backend.app.models.patient_clinical_item import PatientClinicalItem
 from backend.app.models.user import Role, User
+from backend.app.models.vital_sign import VitalSign
 from backend.app.query import QueryOptions, ResourceQuery
 from backend.app.query.operators import Operator
 
@@ -50,6 +51,7 @@ from backend.app.schemas.doctor import DoctorListItem
 from backend.app.schemas.medical_history_version import MedicalHistoryVersionListItem
 from backend.app.schemas.patient import PatientListItem
 from backend.app.schemas.patient_clinical_item import PatientClinicalItemListItem
+from backend.app.schemas.vital_sign import VitalSignListItem
 from backend.app.schemas.role import RoleCreate, RoleListItem, RoleRead, RoleUpdate
 from backend.app.schemas.user_admin import (
     UserAdminCreate,
@@ -198,6 +200,23 @@ CONSULTATIONS = ResourceQuery(
         in_fields=("id",),
         field_operators={"consulted_at": _CREATED_AT_OPERATORS},
         default_sort="-consulted_at",
+    ),
+)
+
+VITAL_SIGNS = ResourceQuery(
+    name="VitalSignQuery",
+    model=VitalSign,
+    schema=VitalSignListItem,
+    options=QueryOptions(
+        # ``consultation_id`` (UUID) por igualdad: las mediciones se consultan por
+        # consulta. ``measured_at`` admite rango de calendario. Sin búsqueda libre
+        # sobre observaciones ni numéricos. Los listados excluyen eliminadas
+        # (``deleted_at``) y las de consultas eliminadas vía stmt base en el router.
+        filter_fields=("consultation_id",),
+        sort_fields=("measured_at", "created_at", "updated_at"),
+        in_fields=("id",),
+        field_operators={"measured_at": _CREATED_AT_OPERATORS},
+        default_sort="-measured_at",
     ),
 )
 

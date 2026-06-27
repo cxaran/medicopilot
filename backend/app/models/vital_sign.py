@@ -104,6 +104,42 @@ class VitalSign(Base):
     deleted_by_user = relationship("User", foreign_keys=[deleted_by])
 
     __table_args__ = (
+        # Validaciones estructurales mínimas (no rangos clínicos restrictivos): los
+        # valores presentes deben ser fisiológicamente posibles, no necesariamente
+        # frecuentes. La validación de schema da el 422 amable; estos CHECK son la
+        # última garantía de integridad.
+        CheckConstraint(
+            "weight_kg IS NULL OR weight_kg > 0", name="weight_positive"
+        ),
+        CheckConstraint(
+            "height_cm IS NULL OR height_cm > 0", name="height_positive"
+        ),
+        CheckConstraint(
+            "temperature_c IS NULL OR temperature_c > 0", name="temperature_positive"
+        ),
+        CheckConstraint(
+            "heart_rate_bpm IS NULL OR heart_rate_bpm > 0", name="heart_rate_positive"
+        ),
+        CheckConstraint(
+            "respiratory_rate_rpm IS NULL OR respiratory_rate_rpm > 0",
+            name="respiratory_rate_positive",
+        ),
+        # Presión: ambas o ninguna; si ambas, sistólica >= diastólica.
+        CheckConstraint(
+            "(systolic_bp IS NULL AND diastolic_bp IS NULL)"
+            " OR (systolic_bp IS NOT NULL AND diastolic_bp IS NOT NULL"
+            " AND systolic_bp >= diastolic_bp)",
+            name="blood_pressure",
+        ),
+        CheckConstraint(
+            "oxygen_saturation IS NULL"
+            " OR (oxygen_saturation >= 0 AND oxygen_saturation <= 100)",
+            name="oxygen_saturation_range",
+        ),
+        CheckConstraint(
+            "capillary_glucose IS NULL OR capillary_glucose >= 0",
+            name="capillary_glucose_non_negative",
+        ),
         CheckConstraint(
             "pain_scale IS NULL OR (pain_scale >= 0 AND pain_scale <= 10)",
             name="pain_scale_range",
