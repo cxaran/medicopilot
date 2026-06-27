@@ -14,6 +14,7 @@ from typing import Optional
 from pydantic import BaseModel
 
 from backend.app.models.consultation import Consultation
+from backend.app.models.consultation_diagnosis import ConsultationDiagnosis
 from backend.app.models.doctor import Doctor
 from backend.app.models.medical_history import MedicalHistoryVersion
 from backend.app.models.patient import Patient
@@ -47,6 +48,7 @@ from backend.app.schemas.capabilities import (
     ResourceView,
 )
 from backend.app.schemas.consultation import ConsultationListItem
+from backend.app.schemas.consultation_diagnosis import ConsultationDiagnosisListItem
 from backend.app.schemas.doctor import DoctorListItem
 from backend.app.schemas.medical_history_version import MedicalHistoryVersionListItem
 from backend.app.schemas.patient import PatientListItem
@@ -217,6 +219,23 @@ VITAL_SIGNS = ResourceQuery(
         in_fields=("id",),
         field_operators={"measured_at": _CREATED_AT_OPERATORS},
         default_sort="-measured_at",
+    ),
+)
+
+CONSULTATION_DIAGNOSES = ResourceQuery(
+    name="ConsultationDiagnosisQuery",
+    model=ConsultationDiagnosis,
+    schema=ConsultationDiagnosisListItem,
+    options=QueryOptions(
+        # ``consultation_id`` (UUID) por igualdad y ``diagnosis_kind`` (enum) por
+        # igualdad. Búsqueda libre acotada a ``diagnosis_text`` y ``code`` (no a
+        # ``notes``). Los listados excluyen diagnósticos eliminados y los de
+        # consultas eliminadas vía stmt base en el router.
+        filter_fields=("consultation_id", "diagnosis_kind"),
+        sort_fields=("created_at", "updated_at", "diagnosis_text"),
+        search_fields=("diagnosis_text", "code"),
+        in_fields=("id",),
+        default_sort="-created_at",
     ),
 )
 

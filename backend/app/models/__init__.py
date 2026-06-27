@@ -4,6 +4,7 @@ from backend.app.models.base import Base
 from backend.app.models.clinical_document import ClinicalDocument
 from backend.app.models.consultation import Consultation
 from backend.app.models.consultation_ai_output import ConsultationAiOutput
+from backend.app.models.consultation_diagnosis import ConsultationDiagnosis
 from backend.app.models.doctor import Doctor
 from backend.app.models.enums import (
     ActiveInactiveStatus,
@@ -14,6 +15,7 @@ from backend.app.models.enums import (
     ClinicalItemStatus,
     ClinicalSeverity,
     ConsultationAiOutputType,
+    ConsultationDiagnosisKind,
     ConsultationStatus,
     MedicalHistoryVersionStatus,
     PatientClinicalItemType,
@@ -46,6 +48,8 @@ __all__ = [
     "Consultation",
     "ConsultationAiOutput",
     "ConsultationAiOutputType",
+    "ConsultationDiagnosis",
+    "ConsultationDiagnosisKind",
     "ConsultationStatus",
     "Doctor",
     "MedicalHistoryVersion",

@@ -81,6 +81,14 @@ class ConsultationStatus(str, Enum):
     FINALIZED = "finalized"
 
 
+class ConsultationDiagnosisKind(str, Enum):
+    """Tipo clínico de un diagnóstico o impresión diagnóstica de la consulta."""
+
+    PRIMARY = "primary"
+    SECONDARY = "secondary"
+    SUSPECTED = "suspected"
+
+
 class ConsultationAiOutputType(str, Enum):
     """Tipo de resultado generado por el copiloto de IA."""
 
