@@ -38,6 +38,13 @@ el cliente realmente recibe por fila (el ``list_schema`` que serializa el row qu
 consume el evaluador client-side); si el campo no existiera, el evaluador no
 podría evaluar la condición y el gating de UI se rompería en silencio. Ver
 ``ActionConditionValidityTest``.
+
+Y (MP-CTRL-0011) se verifica la CONSISTENCIA DE PERMISOS: cada permiso citado por
+el registry (``read_/create_/update_/download_permission`` del recurso, el
+``permission`` de cada acción y de cada relación) debe existir en la fuente de
+verdad del backend (``security.catalog.declared_permissions``). Un permiso
+huérfano o mal escrito rompería el gating de autorización en silencio. Ver
+``PermissionConsistencyTest``.
 """
 
 import enum
@@ -83,6 +90,9 @@ from backend.app.schemas.capabilities import (  # noqa: E402
     ActionConditionPredicate,
     HttpMethod,
 )
+from backend.app.security.catalog import declared_permissions  # noqa: E402
+from backend.app.security.security_control import WILDCARD_ACCESS  # noqa: E402
+from backend.app.security.security_group import SecurityGroup  # noqa: E402
 
 
 # Métodos que envían cuerpo y, por tanto, deben declararlo explícitamente.
@@ -539,6 +549,95 @@ class ActionConditionValidityTest(unittest.TestCase):
                             f"un miembro válido de {enum_cls.__name__} "
                             f"({sorted(allowed)}).",
                         )
+
+
+# ---------------------------------------------------------------------------
+# Consistencia de permisos citados por el registry (MP-CTRL-0011)
+# ---------------------------------------------------------------------------
+#
+# Fuente de verdad: ``security.catalog.declared_permissions()`` devuelve el set de
+# TODOS los strings de permiso declarados en código (la unión de los miembros de
+# cada SecurityGroup en ``SECURITY_GROUPS``); es la misma fuente que los routers
+# usan para validar permisos en runtime.
+#
+# El registry referencia permisos como miembros de un ``SecurityGroup`` (un Enum
+# cuyo miembro expone ``.permission`` -> str). Por tanto un typo no compila (sería
+# un AttributeError al importar), pero un permiso HUÉRFANO sí es posible: un
+# SecurityGroup cuyo grupo no esté listado en ``SECURITY_GROUPS`` produciría un
+# ``.permission`` ausente del catálogo, rompiendo el gating de autorización en
+# silencio. Este test ancla cada permiso citado al catálogo.
+#
+# Comodín/jerarquía: el modelo admite el comodín ``"*"`` (WILDCARD_ACCESS), pero su
+# semántica es del lado del USUARIO (un actor con ``"*"`` pasa cualquier check vía
+# CurrentUser.access_control); no es un permiso declarado en el catálogo. La
+# jerarquía se resuelve también en tiempo de check (usuario), no en la citación.
+# Para la EXISTENCIA del permiso citado basta el membership exacto contra el
+# catálogo; se acepta además ``"*"`` como patrón válido por si alguna vez se citara.
+
+
+def _cited_permissions():
+    """Genera ``(resource_name, location, permission)`` por cada permiso citado en
+    el RESOURCE_REGISTRY: las operaciones del recurso (read/create/update/download),
+    el ``permission`` de cada acción y el de cada relación."""
+    for definition in RESOURCE_REGISTRY:
+        for attr in (
+            "read_permission",
+            "create_permission",
+            "update_permission",
+            "download_permission",
+        ):
+            permission = getattr(definition, attr)
+            if permission is not None:
+                yield definition.name, attr, permission
+        for action in definition.actions:
+            yield definition.name, f"acción '{action.name}'", action.permission
+        for relation in definition.relations:
+            yield definition.name, f"relación '{relation.name}'", relation.permission
+
+
+def _permission_string(permission) -> str:
+    """Resuelve el string de permiso de una citación (miembro SecurityGroup o str)."""
+    if isinstance(permission, SecurityGroup):
+        return permission.permission
+    return permission
+
+
+class PermissionConsistencyTest(unittest.TestCase):
+    """Verifica que todo permiso citado por el registry exista en el catálogo."""
+
+    def test_has_cited_permissions(self) -> None:
+        """Sanidad: el registry cita al menos un permiso."""
+        cited = list(_cited_permissions())
+        self.assertGreater(
+            len(cited),
+            0,
+            "El RESOURCE_REGISTRY no cita ningún permiso; el test no validaría nada.",
+        )
+
+    def test_cited_permissions_are_security_groups(self) -> None:
+        """Cada permiso citado es un miembro de SecurityGroup (shape del contrato)."""
+        for resource_name, location, permission in _cited_permissions():
+            with self.subTest(resource=resource_name, location=location):
+                self.assertIsInstance(
+                    permission,
+                    SecurityGroup,
+                    f"[permiso] {resource_name} / {location}: el permiso {permission!r} "
+                    "no es un miembro de SecurityGroup.",
+                )
+
+    def test_cited_permissions_exist_in_catalog(self) -> None:
+        """Cada permiso citado existe en declared_permissions() (o es el comodín)."""
+        catalog = declared_permissions()
+        for resource_name, location, permission in _cited_permissions():
+            perm = _permission_string(permission)
+            with self.subTest(resource=resource_name, location=location, permission=perm):
+                self.assertTrue(
+                    perm in catalog or perm == WILDCARD_ACCESS,
+                    f"[permiso] {resource_name} / {location}: el permiso {perm!r} no "
+                    "existe en el catálogo (security.catalog.declared_permissions); "
+                    "permiso huérfano o mal escrito — el gating de autorización se "
+                    "rompería en silencio.",
+                )
 
 
 if __name__ == "__main__":
