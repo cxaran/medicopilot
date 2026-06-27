@@ -51,6 +51,27 @@ class Settings(BaseSettings):
     redis_port: int
     redis_db: int
 
+    # Política de archivos clínicos (clinical_documents). El binario se almacena en
+    # PostgreSQL (LargeBinary); el límite acota memoria y tamaño de fila. La allowlist
+    # de MIME es CSV y se evalúa contra el Content-Type declarado (no se infiere). Ver
+    # services/clinical_documents.py y docs de la vertical para los límites operativos.
+    clinical_document_max_size_bytes: int = 26_214_400  # 25 MiB
+    clinical_document_allowed_mime_types: str = (
+        "application/pdf,"
+        "image/png,image/jpeg,image/webp,image/tiff,"
+        "application/dicom,"
+        "text/plain"
+    )
+
+    @computed_field
+    @property
+    def clinical_document_allowed_mimes(self) -> frozenset[str]:
+        return frozenset(
+            mime.strip().lower()
+            for mime in self.clinical_document_allowed_mime_types.split(",")
+            if mime.strip()
+        )
+
     # Zona horaria de aplicación (IANA) para la semántica de calendario de los filtros
     # de fecha. Default determinista UTC; dev/E2E pueden fijar p. ej. America/Monterrey.
     # Nunca se depende de la TZ del host, contenedor, navegador o PostgreSQL.

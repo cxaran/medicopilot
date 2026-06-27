@@ -36,6 +36,9 @@ from backend.app.security.groups.appointments import (  # noqa: E402
 from backend.app.security.groups.consultation_diagnoses import (  # noqa: E402
     ConsultationDiagnosisPermissions,
 )
+from backend.app.security.groups.clinical_documents import (  # noqa: E402
+    ClinicalDocumentPermissions,
+)
 from backend.app.security.groups.consultations import ConsultationPermissions  # noqa: E402
 from backend.app.security.groups.doctors import DoctorPermissions  # noqa: E402
 from backend.app.security.groups.medical_history_versions import (  # noqa: E402
@@ -71,6 +74,7 @@ class SecurityCatalogTest(unittest.TestCase):
                 VitalSignPermissions,
                 PrescriptionPermissions,
                 AppointmentPermissions,
+                ClinicalDocumentPermissions,
                 PermissionPermissions,
             ],
         )
@@ -132,6 +136,13 @@ class SecurityCatalogTest(unittest.TestCase):
                 "appointments:create",
                 "appointments:update",
                 "appointments:delete",
+                "clinical_documents:read",
+                "clinical_documents:create",
+                "clinical_documents:update",
+                "clinical_documents:archive",
+                "clinical_documents:restore",
+                "clinical_documents:delete",
+                "clinical_documents:download",
                 "permissions:read",
             ],
         )
