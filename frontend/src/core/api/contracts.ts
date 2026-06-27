@@ -23,6 +23,12 @@ export type ResourceFormsCapability = components["schemas"]["ResourceFormsCapabi
 export type ResourceFormCapability = components["schemas"]["ResourceFormCapability"];
 export type ResourceFormFieldCapability =
   components["schemas"]["ResourceFormFieldCapability"];
+// Formularios con carga de archivo (multipart) y descarga de binario por item.
+export type FormTransport = components["schemas"]["FormTransport"];
+export type ResourceFileFieldCapability =
+  components["schemas"]["ResourceFileFieldCapability"];
+export type ResourceFileDownloadCapability =
+  components["schemas"]["ResourceFileDownloadCapability"];
 export type ResourceActionCapability = components["schemas"]["ResourceActionCapability"];
 export type ActionRequestSpec = components["schemas"]["ActionRequestSpec"];
 export type ActionConfirmation = components["schemas"]["ActionConfirmation"];

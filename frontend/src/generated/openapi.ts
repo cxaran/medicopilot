@@ -353,6 +353,94 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/clinical-documents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Clinical Documents */
+        get: operations["list_clinical_documents_api_v1_clinical_documents_get"];
+        put?: never;
+        /** Upload Clinical Document */
+        post: operations["upload_clinical_document_api_v1_clinical_documents_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clinical-documents/{document_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Clinical Document */
+        get: operations["get_clinical_document_api_v1_clinical_documents__document_id__get"];
+        put?: never;
+        post?: never;
+        /** Delete Clinical Document */
+        delete: operations["delete_clinical_document_api_v1_clinical_documents__document_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Clinical Document */
+        patch: operations["update_clinical_document_api_v1_clinical_documents__document_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/clinical-documents/{document_id}/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download Clinical Document */
+        get: operations["download_clinical_document_api_v1_clinical_documents__document_id__download_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clinical-documents/{document_id}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Archive Clinical Document */
+        post: operations["archive_clinical_document_api_v1_clinical_documents__document_id__archive_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clinical-documents/{document_id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Restore Clinical Document */
+        post: operations["restore_clinical_document_api_v1_clinical_documents__document_id__restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/consultation-diagnoses": {
         parameters: {
             query?: never;
@@ -1250,6 +1338,23 @@ export interface components {
             /** Password Reset Enabled */
             password_reset_enabled: boolean;
         };
+        /** Body_upload_clinical_document_api_v1_clinical_documents_post */
+        Body_upload_clinical_document_api_v1_clinical_documents_post: {
+            /**
+             * Patient Id
+             * Format: uuid
+             */
+            patient_id: string;
+            document_type: components["schemas"]["ClinicalDocumentType"];
+            /** File */
+            file: string;
+            /** Consultation Id */
+            consultation_id?: string | null;
+            /** Document Date */
+            document_date?: string | null;
+            /** Description */
+            description?: string | null;
+        };
         /** BootstrapAdditionalRole */
         BootstrapAdditionalRole: {
             /** Name */
@@ -1346,6 +1451,169 @@ export interface components {
              * @default Administración inicial de la plataforma
              */
             description: string | null;
+        };
+        /**
+         * ClinicalDocumentListItem
+         * @description Versión de listado compatible con ``ResourceQuery``: metadata segura, sin binario.
+         */
+        ClinicalDocumentListItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Paciente
+             * Format: uuid
+             */
+            patient_id: string;
+            /** Consulta */
+            consultation_id?: string | null;
+            /** Tipo */
+            document_type: components["schemas"]["ClinicalDocumentType"];
+            /** Estado */
+            status: components["schemas"]["ClinicalDocumentStatus"];
+            /** Archivo */
+            original_filename: string;
+            /** Tipo MIME */
+            mime_type: string;
+            /** Tamaño (bytes) */
+            size_bytes: number;
+            /** Fecha del documento */
+            document_date?: string | null;
+            /**
+             * Cargado
+             * Format: date-time
+             */
+            uploaded_at: string;
+        };
+        /**
+         * ClinicalDocumentMetadataUpdate
+         * @description Actualización parcial de **metadata** (PATCH). No reemplaza el archivo.
+         *
+         *     En v1 solo se editan ``document_type``, ``document_date`` y ``description``. El
+         *     binario, el nombre original, el hash, el tamaño, el MIME, el estado y la auditoría
+         *     los gobierna el servidor; enviarlos da 422 (extra forbid). Sustituir el archivo se
+         *     hace cargando un documento nuevo, no sobrescribiendo bytes.
+         */
+        ClinicalDocumentMetadataUpdate: {
+            /** Tipo */
+            document_type?: components["schemas"]["ClinicalDocumentType"] | null;
+            /** Fecha del documento */
+            document_date?: string | null;
+            /** Descripción */
+            description?: string | null;
+        };
+        /**
+         * ClinicalDocumentRead
+         * @description Representación pública completa de un documento clínico: solo metadata segura.
+         *
+         *     No incluye ``file_content`` ni ninguna forma del binario. ``sha256`` se publica como
+         *     huella de integridad; no es un control de autorización.
+         */
+        ClinicalDocumentRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Patient Id
+             * Format: uuid
+             */
+            patient_id: string;
+            /** Consultation Id */
+            consultation_id?: string | null;
+            document_type: components["schemas"]["ClinicalDocumentType"];
+            status: components["schemas"]["ClinicalDocumentStatus"];
+            /** Original Filename */
+            original_filename: string;
+            /** Mime Type */
+            mime_type: string;
+            /** Size Bytes */
+            size_bytes: number;
+            /** Sha256 */
+            sha256: string;
+            /** Document Date */
+            document_date?: string | null;
+            /** Description */
+            description?: string | null;
+            /**
+             * Uploaded At
+             * Format: date-time
+             */
+            uploaded_at: string;
+            /** Uploaded By */
+            uploaded_by?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+            /** Updated By */
+            updated_by?: string | null;
+            /** Deleted At */
+            deleted_at?: string | null;
+            /** Deleted By */
+            deleted_by?: string | null;
+        };
+        /**
+         * ClinicalDocumentStatus
+         * @description Estado operativo de un archivo clínico.
+         * @enum {string}
+         */
+        ClinicalDocumentStatus: "active" | "archived" | "deleted";
+        /**
+         * ClinicalDocumentType
+         * @description Tipo de archivo clínico asociado al expediente del paciente.
+         * @enum {string}
+         */
+        ClinicalDocumentType: "laboratory" | "study" | "image" | "pdf" | "external_prescription" | "clinical_photography" | "consent" | "reference" | "other";
+        /**
+         * ClinicalDocumentUploadResponse
+         * @description Respuesta de la carga (POST multipart). Misma metadata segura que la lectura;
+         *     nombre distinto para dejar explícito en el contrato que es el resultado de un
+         *     upload (nunca devuelve el binario).
+         */
+        ClinicalDocumentUploadResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Patient Id
+             * Format: uuid
+             */
+            patient_id: string;
+            /** Consultation Id */
+            consultation_id?: string | null;
+            document_type: components["schemas"]["ClinicalDocumentType"];
+            status: components["schemas"]["ClinicalDocumentStatus"];
+            /** Original Filename */
+            original_filename: string;
+            /** Mime Type */
+            mime_type: string;
+            /** Size Bytes */
+            size_bytes: number;
+            /** Sha256 */
+            sha256: string;
+            /** Document Date */
+            document_date?: string | null;
+            /** Description */
+            description?: string | null;
+            /**
+             * Uploaded At
+             * Format: date-time
+             */
+            uploaded_at: string;
+            /** Uploaded By */
+            uploaded_by?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+            /** Updated By */
+            updated_by?: string | null;
+            /** Deleted At */
+            deleted_at?: string | null;
+            /** Deleted By */
+            deleted_by?: string | null;
         };
         /**
          * ClinicalItemStatus
@@ -1904,6 +2172,11 @@ export interface components {
              */
             email: string;
         };
+        /**
+         * FormTransport
+         * @enum {string}
+         */
+        FormTransport: "json" | "multipart";
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -2112,6 +2385,12 @@ export interface components {
         OffsetPage_AppointmentListItem_: {
             /** Items */
             items: components["schemas"]["AppointmentListItem"][];
+            pagination: components["schemas"]["OffsetPagination"];
+        };
+        /** OffsetPage[ClinicalDocumentListItem] */
+        OffsetPage_ClinicalDocumentListItem_: {
+            /** Items */
+            items: components["schemas"]["ClinicalDocumentListItem"][];
             pagination: components["schemas"]["OffsetPagination"];
         };
         /** OffsetPage[ConsultationDiagnosisListItem] */
@@ -2901,6 +3180,7 @@ export interface components {
             view: components["schemas"]["ResourceView"];
             item_reference?: components["schemas"]["ItemReference"] | null;
             detail?: components["schemas"]["ResourceDetailCapability"] | null;
+            file_download?: components["schemas"]["ResourceFileDownloadCapability"] | null;
             list?: components["schemas"]["ResourceListCapability"] | null;
             forms?: components["schemas"]["ResourceFormsCapability"] | null;
             /**
@@ -2941,6 +3221,38 @@ export interface components {
             /** Filter Operators */
             filter_operators: components["schemas"]["FilterOperator"][];
         };
+        /**
+         * ResourceFileDownloadCapability
+         * @description Descarga de contenido binario de un item (navegación de archivo, no mutación).
+         *
+         *     Genérico: cualquier recurso con contenido descargable la declara. Se proyecta solo
+         *     si el actor tiene el permiso de descarga (distinto del de lectura de metadata). El
+         *     backend revalida permiso y visibilidad y entrega el binario con cabeceras seguras.
+         */
+        ResourceFileDownloadCapability: {
+            method: components["schemas"]["HttpMethod"];
+            /** Url Template */
+            url_template: string;
+        };
+        /**
+         * ResourceFileFieldCapability
+         * @description Campo de archivo de un formulario multipart (genérico, sin semántica de dominio).
+         *
+         *     El frontend usa ``accepted_mime_types`` y ``max_size_bytes`` solo como guía de UI; el
+         *     backend revalida tamaño y tipo en cada carga.
+         */
+        ResourceFileFieldCapability: {
+            /** Name */
+            name: string;
+            /** Label */
+            label: string;
+            /** Accepted Mime Types */
+            accepted_mime_types: string[];
+            /** Max Size Bytes */
+            max_size_bytes: number;
+            /** Required */
+            required: boolean;
+        };
         /** ResourceFilterCapability */
         ResourceFilterCapability: {
             /** Field */
@@ -2971,6 +3283,9 @@ export interface components {
             url_template: string;
             /** Fields */
             fields: components["schemas"]["ResourceFormFieldCapability"][];
+            /** @default json */
+            transport: components["schemas"]["FormTransport"];
+            file_field?: components["schemas"]["ResourceFileFieldCapability"] | null;
         };
         /** ResourceFormFieldCapability */
         ResourceFormFieldCapability: {
@@ -4304,6 +4619,290 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BootstrapInitializeRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_clinical_documents_api_v1_clinical_documents_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+                /** @description Campos de orden separados por coma. Use '-' para orden descendente. */
+                sort?: string;
+                patient_id?: string | null;
+                consultation_id?: string | null;
+                document_type?: components["schemas"]["ClinicalDocumentType"] | null;
+                status?: components["schemas"]["ClinicalDocumentStatus"] | null;
+                id_in?: string[] | null;
+                uploaded_at_on?: string | null;
+                uploaded_at_before?: string | null;
+                uploaded_at_after?: string | null;
+                uploaded_at_from?: string | null;
+                uploaded_at_to?: string | null;
+                q?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OffsetPage_ClinicalDocumentListItem_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_clinical_document_api_v1_clinical_documents_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_clinical_document_api_v1_clinical_documents_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClinicalDocumentUploadResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_clinical_document_api_v1_clinical_documents__document_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClinicalDocumentRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_clinical_document_api_v1_clinical_documents__document_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClinicalDocumentRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_clinical_document_api_v1_clinical_documents__document_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClinicalDocumentMetadataUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClinicalDocumentRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    download_clinical_document_api_v1_clinical_documents__document_id__download_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    archive_clinical_document_api_v1_clinical_documents__document_id__archive_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClinicalDocumentRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restore_clinical_document_api_v1_clinical_documents__document_id__restore_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClinicalDocumentRead"];
                 };
             };
             /** @description Validation Error */
