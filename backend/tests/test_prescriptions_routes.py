@@ -828,5 +828,67 @@ class PrescriptionItemRoutesTest(_PrescriptionTestMixin, unittest.TestCase):
                 session.commit()
 
 
+@unittest.skipUnless(
+    _is_test_url(_TEST_PG_URL),
+    "TEST_POSTGRES_URL no definida o no apunta a una base *_test.",
+)
+class PrescriptionForbiddenTransitionsTest(_PrescriptionTestMixin, unittest.TestCase):
+    """Transiciones de estado PROHIBIDAS desde el estado terminal ``voided`` y guard
+    de médico tratante aún no cubiertos por ``PrescriptionRoutesTest``.
+
+    El ciclo es draft → approved → voided; ``voided`` es terminal. Cada test parte de
+    un estado válido sembrado, ejecuta la transición prohibida, comprueba el status
+    HTTP de error que emite el backend y RE-LEE el recurso para verificar que el
+    estado no mutó.
+    """
+
+    def _voided_prescription(self) -> str:
+        """Receta llevada hasta el estado terminal ``voided``."""
+        prescription_id = self._approved_prescription()
+        self.assertEqual(self._void(prescription_id).status_code, 200)
+        return prescription_id
+
+    def _status(self, prescription_id: str) -> str:
+        response = self.client.get(f"{_BASE}/{prescription_id}")
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()["status"]
+
+    def test_approve_voided_409_state_unchanged(self) -> None:
+        # Aprobar una receta ya anulada está prohibido (no es draft): 409 y sigue voided.
+        prescription_id = self._voided_prescription()
+        response = self._approve(prescription_id)
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(self._status(prescription_id), "voided")
+
+    def test_patch_voided_409_state_unchanged(self) -> None:
+        # Editar una receta anulada está prohibido (sólo borrador): 409 y sin cambios.
+        prescription_id = self._voided_prescription()
+        response = self.client.patch(
+            f"{_BASE}/{prescription_id}", json={"observations": "cambio prohibido"}
+        )
+        self.assertEqual(response.status_code, 409, response.text)
+        body = self.client.get(f"{_BASE}/{prescription_id}").json()
+        self.assertEqual(body["status"], "voided")
+        self.assertIsNone(body["observations"])
+
+    def test_delete_voided_409_state_unchanged(self) -> None:
+        # Borrar (baja lógica) una receta anulada está prohibido (sólo borrador): 409.
+        prescription_id = self._voided_prescription()
+        response = self.client.delete(f"{_BASE}/{prescription_id}")
+        self.assertEqual(response.status_code, 409, response.text)
+        # La receta sigue disponible y anulada (no fue eliminada).
+        self.assertEqual(self._status(prescription_id), "voided")
+
+    def test_void_without_doctor_profile_403_state_unchanged(self) -> None:
+        # Anular exige perfil de médico activo tratante; un usuario sin perfil de
+        # médico recibe 403 y la receta sigue aprobada.
+        prescription_id = self._approved_prescription()
+        other_user = self._seed_user()
+        self._as_user(other_user, *ALL_PERMS)
+        self.assertEqual(self._void(prescription_id).status_code, 403)
+        self._as(*ALL_PERMS)
+        self.assertEqual(self._status(prescription_id), "approved")
+
+
 if __name__ == "__main__":
     unittest.main()
