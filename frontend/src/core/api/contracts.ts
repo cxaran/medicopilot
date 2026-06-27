@@ -27,6 +27,12 @@ export type ResourceActionCapability = components["schemas"]["ResourceActionCapa
 export type ActionRequestSpec = components["schemas"]["ActionRequestSpec"];
 export type ActionConfirmation = components["schemas"]["ActionConfirmation"];
 export type ActionSuccessBehavior = components["schemas"]["ActionSuccessBehavior"];
+// Formulario de entrada declarado de una acción (B2) y DSL serializable de condiciones
+// de estado (B3). Sólo guía de UI: el backend revalida la transición en cada ejecución.
+export type ActionInputSchema = components["schemas"]["ActionInputSchema"];
+export type ActionCondition = components["schemas"]["ActionCondition"];
+export type ActionConditionPredicate = components["schemas"]["ActionConditionPredicate"];
+export type ActionConditionOperator = components["schemas"]["ActionConditionOperator"];
 export type ItemReference = components["schemas"]["ItemReference"];
 export type ResourceDetailCapability = components["schemas"]["ResourceDetailCapability"];
 export type ResourceRelationCapability = components["schemas"]["ResourceRelationCapability"];
