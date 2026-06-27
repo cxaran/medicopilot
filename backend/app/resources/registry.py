@@ -56,7 +56,13 @@ from backend.app.schemas.capabilities import (
     ResourceFileFieldCapability,
     ResourceView,
 )
-from backend.app.schemas.appointment import AppointmentListItem
+from backend.app.schemas.appointment import (
+    AppointmentCancel,
+    AppointmentCreate,
+    AppointmentListItem,
+    AppointmentReschedule,
+    AppointmentUpdate,
+)
 from backend.app.schemas.clinical_document import (
     ClinicalDocumentCreateForm,
     ClinicalDocumentListItem,
@@ -85,8 +91,13 @@ from backend.app.schemas.patient_clinical_item import (
     PatientClinicalItemUpdate,
 )
 from backend.app.schemas.prescription import (
+    PrescriptionCreate,
+    PrescriptionItemCreate,
     PrescriptionItemListItem,
+    PrescriptionItemUpdate,
     PrescriptionListItem,
+    PrescriptionUpdate,
+    PrescriptionVoid,
 )
 from backend.app.schemas.vital_sign import (
     VitalSignCreate,
@@ -103,10 +114,12 @@ from backend.app.security.groups.clinical_documents import ClinicalDocumentPermi
 from backend.app.security.groups.consultation_diagnoses import (
     ConsultationDiagnosisPermissions,
 )
+from backend.app.security.groups.appointments import AppointmentPermissions
 from backend.app.security.groups.consultations import ConsultationPermissions
 from backend.app.security.groups.medical_history_versions import (
     MedicalHistoryVersionPermissions,
 )
+from backend.app.security.groups.prescriptions import PrescriptionPermissions
 from backend.app.security.groups.doctors import DoctorPermissions
 from backend.app.security.groups.patient_clinical_items import (
     PatientClinicalItemPermissions,
@@ -969,6 +982,273 @@ RESOURCE_REGISTRY: tuple[ResourceDefinition, ...] = (
                 confirmation=ConfirmationDef(
                     title="Eliminar diagnóstico",
                     message="El diagnóstico se dará de baja lógica.",
+                    confirm_label="Eliminar",
+                    destructive=True,
+                ),
+            ),
+        ),
+    ),
+    ResourceDefinition(
+        name="prescriptions",
+        label="Recetas médicas",
+        api_path="/api/v1/prescriptions",
+        view=ResourceView.TABLE,
+        read_permission=PrescriptionPermissions.READ,
+        list_query=PRESCRIPTIONS,
+        list_schema=PrescriptionListItem,
+        create_schema=PrescriptionCreate,
+        update_schema=PrescriptionUpdate,
+        create_permission=PrescriptionPermissions.CREATE,
+        update_permission=PrescriptionPermissions.UPDATE,
+        detail_url_template="/api/v1/prescriptions/{id}",
+        actions=(
+            # approve sella la receta (draft -> approved). Cuerpo vacío por diseño.
+            ActionDef(
+                name="approve",
+                label="Aprobar",
+                method=HttpMethod.POST,
+                url_template="/api/v1/prescriptions/{id}/approve",
+                scope=ActionScope.ITEM,
+                danger=False,
+                permission=PrescriptionPermissions.APPROVE,
+                visible_when=ActionCondition(
+                    all=[
+                        ActionConditionPredicate(
+                            field="status",
+                            operator=ActionConditionOperator.EQ,
+                            value="draft",
+                        )
+                    ]
+                ),
+                confirmation=ConfirmationDef(
+                    title="Aprobar receta",
+                    message="La receta se aprobará y dejará de ser editable.",
+                    confirm_label="Aprobar",
+                    destructive=False,
+                ),
+            ),
+            # void anula una receta aprobada; exige motivo (input_schema PrescriptionVoid).
+            ActionDef(
+                name="void",
+                label="Anular",
+                method=HttpMethod.POST,
+                url_template="/api/v1/prescriptions/{id}/void",
+                scope=ActionScope.ITEM,
+                danger=True,
+                permission=PrescriptionPermissions.VOID,
+                input_schema=PrescriptionVoid,
+                visible_when=ActionCondition(
+                    all=[
+                        ActionConditionPredicate(
+                            field="status",
+                            operator=ActionConditionOperator.EQ,
+                            value="approved",
+                        )
+                    ]
+                ),
+                confirmation=ConfirmationDef(
+                    title="Anular receta",
+                    message="La receta aprobada quedará anulada. Indica el motivo.",
+                    confirm_label="Anular",
+                    destructive=True,
+                ),
+            ),
+            ActionDef(
+                name="delete",
+                label="Eliminar",
+                method=HttpMethod.DELETE,
+                url_template="/api/v1/prescriptions/{id}",
+                scope=ActionScope.ITEM,
+                danger=True,
+                permission=PrescriptionPermissions.DELETE,
+                visible_when=ActionCondition(
+                    all=[
+                        ActionConditionPredicate(
+                            field="status",
+                            operator=ActionConditionOperator.EQ,
+                            value="draft",
+                        )
+                    ]
+                ),
+                confirmation=ConfirmationDef(
+                    title="Eliminar receta",
+                    message="La receta en borrador se dará de baja lógica.",
+                    confirm_label="Eliminar",
+                    destructive=True,
+                ),
+            ),
+        ),
+    ),
+    ResourceDefinition(
+        name="prescription_items",
+        label="Renglones de receta",
+        api_path="/api/v1/prescription-items",
+        view=ResourceView.TABLE,
+        # Los renglones reutilizan los permisos de la receta: crear/editar/eliminar un
+        # renglón requiere prescriptions:update (la receta padre, en borrador, los gobierna).
+        read_permission=PrescriptionPermissions.READ,
+        list_query=PRESCRIPTION_ITEMS,
+        list_schema=PrescriptionItemListItem,
+        create_schema=PrescriptionItemCreate,
+        update_schema=PrescriptionItemUpdate,
+        create_permission=PrescriptionPermissions.UPDATE,
+        update_permission=PrescriptionPermissions.UPDATE,
+        detail_url_template="/api/v1/prescription-items/{id}",
+        actions=(
+            # El renglón no tiene estado propio: no se declara visible_when (el backend
+            # revalida contra el estado de la receta padre).
+            ActionDef(
+                name="delete",
+                label="Eliminar",
+                method=HttpMethod.DELETE,
+                url_template="/api/v1/prescription-items/{id}",
+                scope=ActionScope.ITEM,
+                danger=True,
+                permission=PrescriptionPermissions.UPDATE,
+                confirmation=ConfirmationDef(
+                    title="Eliminar renglón",
+                    message="El medicamento se quitará de la receta (baja lógica).",
+                    confirm_label="Eliminar",
+                    destructive=True,
+                ),
+            ),
+        ),
+    ),
+    ResourceDefinition(
+        name="appointments",
+        label="Agenda y citas",
+        api_path="/api/v1/appointments",
+        view=ResourceView.TABLE,
+        read_permission=AppointmentPermissions.READ,
+        list_query=APPOINTMENTS,
+        list_schema=AppointmentListItem,
+        create_schema=AppointmentCreate,
+        update_schema=AppointmentUpdate,
+        create_permission=AppointmentPermissions.CREATE,
+        update_permission=AppointmentPermissions.UPDATE,
+        detail_url_template="/api/v1/appointments/{id}",
+        actions=(
+            # Las transiciones de cita reutilizan appointments:update (no hay permisos
+            # dedicados); el backend revalida cada transición de estado.
+            ActionDef(
+                name="confirm",
+                label="Confirmar",
+                method=HttpMethod.POST,
+                url_template="/api/v1/appointments/{id}/confirm",
+                scope=ActionScope.ITEM,
+                danger=False,
+                permission=AppointmentPermissions.UPDATE,
+                visible_when=ActionCondition(
+                    all=[
+                        ActionConditionPredicate(
+                            field="status",
+                            operator=ActionConditionOperator.EQ,
+                            value="pending",
+                        )
+                    ]
+                ),
+                confirmation=ConfirmationDef(
+                    title="Confirmar cita",
+                    message="La cita pasará a confirmada.",
+                    confirm_label="Confirmar",
+                    destructive=False,
+                    required=False,
+                ),
+            ),
+            ActionDef(
+                name="cancel",
+                label="Cancelar",
+                method=HttpMethod.POST,
+                url_template="/api/v1/appointments/{id}/cancel",
+                scope=ActionScope.ITEM,
+                danger=True,
+                permission=AppointmentPermissions.UPDATE,
+                input_schema=AppointmentCancel,
+                visible_when=ActionCondition(
+                    all=[
+                        ActionConditionPredicate(
+                            field="status",
+                            operator=ActionConditionOperator.IN,
+                            value=["pending", "confirmed"],
+                        )
+                    ]
+                ),
+                confirmation=ConfirmationDef(
+                    title="Cancelar cita",
+                    message="La cita se cancelará. Puedes indicar un motivo.",
+                    confirm_label="Cancelar cita",
+                    destructive=True,
+                ),
+            ),
+            ActionDef(
+                name="no_show",
+                label="No asistió",
+                method=HttpMethod.POST,
+                url_template="/api/v1/appointments/{id}/no-show",
+                scope=ActionScope.ITEM,
+                danger=True,
+                permission=AppointmentPermissions.UPDATE,
+                visible_when=ActionCondition(
+                    all=[
+                        ActionConditionPredicate(
+                            field="status",
+                            operator=ActionConditionOperator.EQ,
+                            value="confirmed",
+                        )
+                    ]
+                ),
+                confirmation=ConfirmationDef(
+                    title="Marcar inasistencia",
+                    message="La cita confirmada se marcará como no asistida.",
+                    confirm_label="Marcar no asistió",
+                    destructive=True,
+                ),
+            ),
+            ActionDef(
+                name="reschedule",
+                label="Reagendar",
+                method=HttpMethod.POST,
+                url_template="/api/v1/appointments/{id}/reschedule",
+                scope=ActionScope.ITEM,
+                danger=False,
+                permission=AppointmentPermissions.UPDATE,
+                input_schema=AppointmentReschedule,
+                visible_when=ActionCondition(
+                    all=[
+                        ActionConditionPredicate(
+                            field="status",
+                            operator=ActionConditionOperator.IN,
+                            value=["pending", "confirmed"],
+                        )
+                    ]
+                ),
+                confirmation=ConfirmationDef(
+                    title="Reagendar cita",
+                    message="Se creará la cita reprogramada con los datos indicados.",
+                    confirm_label="Reagendar",
+                    destructive=False,
+                ),
+            ),
+            ActionDef(
+                name="delete",
+                label="Eliminar",
+                method=HttpMethod.DELETE,
+                url_template="/api/v1/appointments/{id}",
+                scope=ActionScope.ITEM,
+                danger=True,
+                permission=AppointmentPermissions.DELETE,
+                visible_when=ActionCondition(
+                    all=[
+                        ActionConditionPredicate(
+                            field="status",
+                            operator=ActionConditionOperator.EQ,
+                            value="pending",
+                        )
+                    ]
+                ),
+                confirmation=ConfirmationDef(
+                    title="Eliminar cita",
+                    message="La cita pendiente se dará de baja lógica.",
                     confirm_label="Eliminar",
                     destructive=True,
                 ),

@@ -28,12 +28,10 @@ _STATUS_LIST_FILTER_UI: dict[str, Any] = {
         },
     }
 }
-_SCHEDULED_AT_LIST_FILTER_UI: dict[str, Any] = {
-    "ui": {
-        "list": True,
-        "filter": {"operator": "range", "label": "Programada", "widget": "datetime"},
-    }
-}
+# ``scheduled_at`` es columna de lista; su filtro de rango de calendario (on/before/
+# after/between) lo publica ``filterable_fields`` desde ``field_operators`` del recurso,
+# no el bloque ``ui.filter`` legacy (que sólo admite un operador único válido).
+_SCHEDULED_AT_LIST_FILTER_UI: dict[str, Any] = {"ui": {"list": True}}
 
 _DURATION = Field(
     ge=5,

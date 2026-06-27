@@ -616,5 +616,137 @@ class MedicalHistoryAndConsultationsCapabilityTest(unittest.TestCase):
         self.assertLess(names.index("consultations"), names.index("vital_signs"))
 
 
+class PrescriptionsAndAppointmentsCapabilityTest(unittest.TestCase):
+    _GOVERNED = (
+        "status",
+        "internal_folio",
+        "created_by",
+        "updated_by",
+        "deleted_at",
+        "deleted_by",
+        "approved_at",
+        "approved_by",
+        "voided_at",
+        "voided_by",
+        "position",
+        "rescheduled_from_id",
+        "doctor_snapshot",
+        "patient_snapshot",
+    )
+
+    def _cap(self, name: str, *permissions: str) -> dict:
+        with _As(*permissions):
+            return client.get(f"/api/v1/resources/{name}").json()
+
+    def test_resources_visible_only_with_read(self) -> None:
+        with _As("users:read"):
+            names = [r["name"] for r in client.get("/api/v1/resources").json()]
+        for name in ("prescriptions", "prescription_items", "appointments"):
+            self.assertNotIn(name, names)
+        with _As(
+            "prescriptions:read", "appointments:read"
+        ):
+            names = [r["name"] for r in client.get("/api/v1/resources").json()]
+        # prescription_items reutiliza el permiso de lectura de recetas.
+        for name in ("prescriptions", "prescription_items", "appointments"):
+            self.assertIn(name, names)
+
+    def test_forms_gated_by_write_permissions(self) -> None:
+        self.assertNotIn("forms", self._cap("prescriptions", "prescriptions:read"))
+        cap = self._cap(
+            "prescriptions", "prescriptions:read", "prescriptions:create", "prescriptions:update"
+        )
+        self.assertEqual(cap["forms"]["create"]["url_template"], "/api/v1/prescriptions")
+        self.assertEqual(cap["forms"]["update"]["method"], "PATCH")
+
+    def test_prescription_actions_gated_by_specific_permissions(self) -> None:
+        cap = self._cap("prescriptions", "prescriptions:read", "prescriptions:approve")
+        self.assertEqual([a["name"] for a in cap["actions"]], ["approve"])
+        approve = cap["actions"][0]
+        self.assertEqual(approve["method"], "POST")
+        self.assertEqual(approve["url_template"], "/api/v1/prescriptions/{id}/approve")
+        self.assertEqual(approve["visible_when"]["all"][0]["value"], "draft")
+        self.assertTrue(approve["confirmation"])
+        self.assertNotIn("input_schema", approve)  # cuerpo vacío
+
+        cap = self._cap("prescriptions", "prescriptions:read", "prescriptions:void")
+        void = next(a for a in cap["actions"] if a["name"] == "void")
+        self.assertEqual(void["url_template"], "/api/v1/prescriptions/{id}/void")
+        self.assertEqual(void["visible_when"]["all"][0]["value"], "approved")
+        self.assertEqual(
+            [f["name"] for f in void["input_schema"]["fields"]], ["void_reason"]
+        )
+
+    def test_appointment_actions_and_input_schemas(self) -> None:
+        cap = self._cap("appointments", "appointments:read", "appointments:update")
+        actions = {a["name"]: a for a in cap["actions"]}
+        # confirm/cancel/no_show/reschedule se habilitan con update (guard real).
+        self.assertEqual(
+            set(actions), {"confirm", "cancel", "no_show", "reschedule"}
+        )
+        self.assertEqual(
+            actions["confirm"]["url_template"], "/api/v1/appointments/{id}/confirm"
+        )
+        self.assertEqual(actions["confirm"]["visible_when"]["all"][0]["value"], "pending")
+        self.assertNotIn("input_schema", actions["confirm"])
+        self.assertEqual(
+            actions["cancel"]["visible_when"]["all"][0]["operator"], "in"
+        )
+        self.assertEqual(
+            [f["name"] for f in actions["cancel"]["input_schema"]["fields"]], ["reason"]
+        )
+        reschedule_fields = {
+            f["name"] for f in actions["reschedule"]["input_schema"]["fields"]
+        }
+        self.assertEqual(
+            reschedule_fields,
+            {"doctor_id", "scheduled_at", "duration_minutes", "reason", "internal_notes"},
+        )
+        self.assertEqual(
+            actions["no_show"]["url_template"], "/api/v1/appointments/{id}/no-show"
+        )
+
+    def test_appointment_delete_gated_by_delete_permission(self) -> None:
+        cap = self._cap("appointments", "appointments:read", "appointments:delete")
+        self.assertEqual([a["name"] for a in cap["actions"]], ["delete"])
+        delete = cap["actions"][0]
+        self.assertEqual(delete["method"], "DELETE")
+        self.assertEqual(delete["visible_when"]["all"][0]["value"], "pending")
+
+    def test_prescription_item_delete_has_no_state_condition(self) -> None:
+        cap = self._cap("prescription_items", "prescriptions:read", "prescriptions:update")
+        actions = {a["name"]: a for a in cap["actions"]}
+        self.assertIn("delete", actions)
+        # El renglón no tiene estado propio: no se inventa visible_when.
+        self.assertNotIn("visible_when", actions["delete"])
+        self.assertEqual(
+            actions["delete"]["url_template"], "/api/v1/prescription-items/{id}"
+        )
+
+    def test_forms_hide_server_governed_fields(self) -> None:
+        cases = {
+            "prescriptions": ("prescriptions:read", "prescriptions:create", "prescriptions:update"),
+            "prescription_items": ("prescriptions:read", "prescriptions:update"),
+            "appointments": ("appointments:read", "appointments:create", "appointments:update"),
+        }
+        for name, perms in cases.items():
+            cap = self._cap(name, *perms)
+            fields: set[str] = set()
+            for form in ("create", "update"):
+                if form in cap.get("forms", {}):
+                    fields |= {f["name"] for f in cap["forms"][form]["fields"]}
+            for governed in self._GOVERNED:
+                self.assertNotIn(governed, fields, f"{name}.{governed}")
+
+    def test_no_binary_or_secret_leaks_in_payload(self) -> None:
+        with _As(*declared_permissions()):
+            blob = json.dumps(client.get("/api/v1/resources").json())
+        # No se filtran datos binarios ni columnas secretas. (``password`` sí es un campo
+        # legítimo del formulario de alta de usuarios; lo que nunca debe aparecer es el
+        # contenido binario ni el hash almacenado.)
+        for needle in ("file_content", "hashed_password"):
+            self.assertNotIn(needle, blob)
+
+
 if __name__ == "__main__":
     unittest.main()
