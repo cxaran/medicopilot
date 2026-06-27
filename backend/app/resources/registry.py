@@ -14,6 +14,7 @@ from typing import Optional
 from pydantic import BaseModel
 
 from backend.app.models.appointment import Appointment
+from backend.app.models.clinical_document import ClinicalDocument
 from backend.app.models.consultation import Consultation
 from backend.app.models.consultation_diagnosis import ConsultationDiagnosis
 from backend.app.models.doctor import Doctor
@@ -51,6 +52,7 @@ from backend.app.schemas.capabilities import (
     ResourceView,
 )
 from backend.app.schemas.appointment import AppointmentListItem
+from backend.app.schemas.clinical_document import ClinicalDocumentListItem
 from backend.app.schemas.consultation import ConsultationListItem
 from backend.app.schemas.consultation_diagnosis import (
     ConsultationDiagnosisCreate,
@@ -316,6 +318,30 @@ APPOINTMENTS = ResourceQuery(
         in_fields=("id",),
         field_operators={"scheduled_at": _CREATED_AT_OPERATORS},
         default_sort="scheduled_at",
+    ),
+)
+
+
+CLINICAL_DOCUMENTS = ResourceQuery(
+    name="ClinicalDocumentQuery",
+    model=ClinicalDocument,
+    schema=ClinicalDocumentListItem,
+    options=QueryOptions(
+        # ``patient_id``/``consultation_id`` (UUID) por igualdad: los archivos se
+        # consultan por paciente o por consulta. ``document_type``/``status`` (enums
+        # no-nativos) por igualdad (select). ``uploaded_at``/``document_date`` admiten
+        # rango de calendario. Búsqueda libre acotada al nombre de archivo (metadata, no
+        # sensible). Los listados excluyen documentos eliminados y los de pacientes
+        # eliminados vía stmt base en el router.
+        filter_fields=("patient_id", "consultation_id", "document_type", "status"),
+        sort_fields=("uploaded_at", "document_date", "size_bytes"),
+        search_fields=("original_filename",),
+        in_fields=("id",),
+        # ``document_date`` es ``date`` (no admite los operadores de calendario, que
+        # exigen datetime); queda como campo ordenable. El rango de calendario aplica a
+        # ``uploaded_at`` (datetime).
+        field_operators={"uploaded_at": _CREATED_AT_OPERATORS},
+        default_sort="-uploaded_at",
     ),
 )
 
