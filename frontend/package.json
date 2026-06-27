@@ -20,8 +20,9 @@
     "test:api-error": "node --no-warnings --import ./scripts/test-register.mjs --test src/core/api/api-error.test.ts",
     "test:list-query": "node --no-warnings --import ./scripts/test-register.mjs --test src/core/resources/list-query.test.ts",
     "test:request": "node --no-warnings --import ./scripts/test-register.mjs --test src/core/api/request.test.ts",
+    "test:action-client": "node --no-warnings --import ./scripts/test-register.mjs --test src/core/resources/resource-action-client.test.ts",
     "test:e2e:bootstrap": "node scripts/run-e2e-bootstrap.mjs",
-    "check:canonical": "npm run check:api && npm run lint && npm run typecheck && npm run test:bootstrap && npm run test:actions && npm run test:public-auth && npm run test:filters && npm run test:forms && npm run test:api-error && npm run test:list-query && npm run test:request && npm run build",
+    "check:canonical": "npm run check:api && npm run lint && npm run typecheck && npm run test:bootstrap && npm run test:actions && npm run test:public-auth && npm run test:filters && npm run test:forms && npm run test:api-error && npm run test:list-query && npm run test:request && npm run test:action-client && npm run build",
     "generate:api": "node scripts/generate-openapi.mjs",
     "check:api": "node scripts/generate-openapi.mjs --check"
   },
