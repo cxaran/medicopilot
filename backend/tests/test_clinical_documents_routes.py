@@ -517,6 +517,43 @@ class ClinicalDocumentRoutesTest(unittest.TestCase):
             self.client.post(f"{_BASE}/{document_id}/archive").status_code, 403
         )
 
+    def test_rbac_denied_mutations_return_403_and_have_no_effect(self) -> None:
+        # Refuerza el RBAC negativo: el existente verifica el status 403 por operación
+        # pero no que la operación quede SIN efecto; ademas el guard de 'restore' no
+        # tenía cobertura negativa. Aquí un usuario autenticado solo con lectura/descarga
+        # es rechazado en cada operación protegida y el documento permanece intacto.
+        document_id = self._upload(description="Original").json()["id"]
+        before = self.client.get(f"{_BASE}/{document_id}").json()
+        self.assertEqual(before["status"], "active")
+        count_before = self._document_count()
+
+        self._as("clinical_documents:read", "clinical_documents:download")
+
+        self.assertEqual(self._upload().status_code, 403)  # create
+        self.assertEqual(
+            self.client.patch(
+                f"{_BASE}/{document_id}", json={"description": "hackeado"}
+            ).status_code,
+            403,
+        )  # update
+        self.assertEqual(
+            self.client.post(f"{_BASE}/{document_id}/archive").status_code, 403
+        )  # archive
+        self.assertEqual(
+            self.client.post(f"{_BASE}/{document_id}/restore").status_code, 403
+        )  # restore (guard antes sin test negativo)
+        self.assertEqual(
+            self.client.delete(f"{_BASE}/{document_id}").status_code, 403
+        )  # delete
+
+        # Sin efecto: no se creó nada nuevo y el documento sigue activo e intacto.
+        self.assertEqual(self._document_count(), count_before)
+        after = self.client.get(f"{_BASE}/{document_id}").json()
+        self.assertEqual(after["status"], "active")
+        self.assertEqual(after["description"], "Original")
+        self.assertIsNone(after["deleted_at"])
+        self.assertIsNone(after["deleted_by"])
+
     def test_download_requires_session(self) -> None:
         document_id = self._upload().json()["id"]
         app.dependency_overrides.pop(get_current_user, None)  # sin sesión
