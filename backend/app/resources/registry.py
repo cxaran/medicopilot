@@ -584,6 +584,9 @@ RESOURCE_REGISTRY: tuple[ResourceDefinition, ...] = (
                 scope=ActionScope.ITEM,
                 danger=True,
                 permission=UserPermissions.REVOKE_SESSIONS,
+                # POST sin parámetros: cuerpo vacío explícito ({}) para que el cliente
+                # capability-driven envíe un JSON válido y nunca reciba 422.
+                fixed_body={},
                 confirmation=ConfirmationDef(
                     title="Revocar sesiones",
                     message="Se cerrarán todas las sesiones activas del usuario.",
@@ -1363,6 +1366,9 @@ RESOURCE_REGISTRY: tuple[ResourceDefinition, ...] = (
                 scope=ActionScope.ITEM,
                 danger=False,
                 permission=ClinicalDocumentPermissions.ARCHIVE,
+                # POST sin parámetros: cuerpo vacío explícito ({}) para que el cliente
+                # capability-driven envíe un JSON válido y nunca reciba 422.
+                fixed_body={},
                 visible_when=ActionCondition(
                     all=[
                         ActionConditionPredicate(
@@ -1388,6 +1394,9 @@ RESOURCE_REGISTRY: tuple[ResourceDefinition, ...] = (
                 scope=ActionScope.ITEM,
                 danger=False,
                 permission=ClinicalDocumentPermissions.RESTORE,
+                # POST sin parámetros: cuerpo vacío explícito ({}) para que el cliente
+                # capability-driven envíe un JSON válido y nunca reciba 422.
+                fixed_body={},
                 visible_when=ActionCondition(
                     all=[
                         ActionConditionPredicate(

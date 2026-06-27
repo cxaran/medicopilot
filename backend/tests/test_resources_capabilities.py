@@ -34,9 +34,15 @@ import json  # noqa: E402
 
 from fastapi.testclient import TestClient  # noqa: E402
 from pydantic import BaseModel, Field  # noqa: E402
+from sqlalchemy import create_engine  # noqa: E402
+from sqlalchemy.pool import StaticPool  # noqa: E402
+from sqlmodel import Session  # noqa: E402
 
 from backend.app.auth.auth_dependencies import get_current_user  # noqa: E402
+from backend.app.core.database import get_db  # noqa: E402
 from backend.app.main import app  # noqa: E402
+from backend.app.models import Base  # noqa: E402
+from backend.app.models.user import User  # noqa: E402
 from backend.app.resources.projection import (  # noqa: E402
     CapabilityConfigError,
     _require_label,
@@ -280,9 +286,13 @@ class ResourceActionContractTest(unittest.TestCase):
         self.assertFalse(confirmation["required"])
         self.assertFalse(confirmation["destructive"])
 
-    def test_revoke_sessions_has_no_fixed_body(self) -> None:
+    def test_revoke_sessions_sends_empty_body(self) -> None:
+        # revoke_sessions es POST sin parámetros: publica request.fixed_body == {}
+        # (cuerpo vacío explícito) y nunca input_schema.
         actions = self._users_actions("users:read", "users:revoke_sessions")
-        self.assertNotIn("request", actions["revoke_sessions"])
+        revoke = actions["revoke_sessions"]
+        self.assertEqual(revoke["request"]["fixed_body"], {})
+        self.assertNotIn("input_schema", revoke)
 
     def test_update_actions_absent_without_update_permission(self) -> None:
         actions = self._users_actions("users:read")
@@ -861,6 +871,73 @@ class MedicationTemplatesCapabilityTest(unittest.TestCase):
         update_fields = {f["name"] for f in cap["forms"]["update"]["fields"]}
         self.assertIn("doctor_id", create_fields)
         self.assertNotIn("doctor_id", update_fields)
+
+
+class RevokeSessionsRouteTest(unittest.TestCase):
+    """La acción POST sin parámetros revoke_sessions acepta un cuerpo vacío {}."""
+
+    def setUp(self) -> None:
+        self.engine = create_engine(
+            "sqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        Base.metadata.create_all(self.engine)
+
+        def override_db():
+            with Session(self.engine) as session:
+                yield session
+
+        app.dependency_overrides[get_db] = override_db
+        app.dependency_overrides[get_current_user] = lambda: session_user(
+            "users:revoke_sessions"
+        )
+        self.client = TestClient(app)
+
+    def tearDown(self) -> None:
+        app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(get_current_user, None)
+
+    def test_revoke_accepts_empty_body(self) -> None:
+        with Session(self.engine) as session:
+            user = User(
+                name="Target",
+                last_name="User",
+                email="target@example.com",
+                is_active=True,
+                hashed_password="hash",
+                token="token-before",
+            )
+            session.add(user)
+            session.commit()
+            session.refresh(user)
+            user_id = str(user.id)
+
+        response = self.client.post(
+            f"/api/v1/users/{user_id}/revoke-sessions", json={}
+        )
+        # El cuerpo vacío {} es válido: nunca 422; la revocación responde 200.
+        self.assertNotEqual(response.status_code, 422, response.text)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["id"], user_id)
+
+
+class ClinicalDocumentsActionBodyTest(unittest.TestCase):
+    def test_archive_and_restore_send_empty_body(self) -> None:
+        # archive/restore son POST sin parámetros: publican request.fixed_body == {}
+        # (cuerpo vacío explícito) y nunca input_schema.
+        with _As(
+            "clinical_documents:read",
+            "clinical_documents:archive",
+            "clinical_documents:restore",
+        ):
+            cap = client.get("/api/v1/resources/clinical_documents").json()
+        actions = {a["name"]: a for a in cap["actions"]}
+        for name in ("archive", "restore"):
+            self.assertIn(name, actions)
+            self.assertEqual(actions[name]["method"], "POST")
+            self.assertEqual(actions[name]["request"]["fixed_body"], {})
+            self.assertNotIn("input_schema", actions[name])
 
 
 if __name__ == "__main__":
