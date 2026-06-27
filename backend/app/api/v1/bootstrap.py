@@ -174,6 +174,7 @@ def _group_name(class_name: str) -> str:
         "consultationdiagnosis": "consultation_diagnoses",
         "vitalsign": "vital_signs",
         "prescription": "prescriptions",
+        "appointment": "appointments",
         "permission": "permissions",
     }.get(singular, singular)
 
@@ -190,5 +191,6 @@ def _group_label(group_name: str) -> str:
         "consultation_diagnoses": "Diagnósticos de consulta",
         "vital_signs": "Signos vitales",
         "prescriptions": "Recetas médicas",
+        "appointments": "Agenda y citas",
         "permissions": "Permisos",
     }.get(group_name, group_name.capitalize())

@@ -24,6 +24,7 @@ _GROUP_LABELS = {
     "consultation_diagnoses": "Diagnósticos de consulta",
     "vital_signs": "Signos vitales",
     "prescriptions": "Recetas médicas",
+    "appointments": "Agenda y citas",
     "permissions": "Permisos",
 }
 
@@ -41,6 +42,7 @@ def _group_name(group: type[SecurityGroup]) -> str:
         "consultationdiagnosis": "consultation_diagnoses",
         "vitalsign": "vital_signs",
         "prescription": "prescriptions",
+        "appointment": "appointments",
         "permission": "permissions",
     }.get(singular, singular)
 

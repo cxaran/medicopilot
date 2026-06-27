@@ -2,7 +2,16 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import CheckConstraint, DateTime, Enum as SAEnum, ForeignKey, Index, Text, func
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    Enum as SAEnum,
+    ForeignKey,
+    Index,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -29,6 +38,12 @@ class Consultation(Base):
         ForeignKey("doctors.id", ondelete="RESTRICT"),
         nullable=False,
         comment="Médico tratante de la consulta.",
+    )
+    appointment_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("appointments.id", ondelete="RESTRICT"),
+        nullable=True,
+        comment="Cita de origen, si la consulta deriva de una cita agendada (se asigna sólo al crear).",
     )
     consulted_at: Mapped[datetime] = mapped_column(
         DateTime,
@@ -141,6 +156,11 @@ class Consultation(Base):
         back_populates="finalized_consultations",
         foreign_keys=[finalized_by_doctor_id],
     )
+    appointment = relationship(
+        "Appointment",
+        back_populates="consultation",
+        foreign_keys=[appointment_id],
+    )
     created_by_user = relationship("User", foreign_keys=[created_by])
     updated_by_user = relationship("User", foreign_keys=[updated_by])
     deleted_by_user = relationship("User", foreign_keys=[deleted_by])
@@ -150,6 +170,8 @@ class Consultation(Base):
     clinical_documents = relationship("ClinicalDocument", back_populates="consultation")
 
     __table_args__ = (
+        # Una cita origina cero o una consulta: la unicidad lo garantiza.
+        UniqueConstraint("appointment_id", name="uq_consultations_appointment_id"),
         # Coherencia estado/finalización: un borrador no lleva datos de cierre; una
         # consulta finalizada exige ambos y que el finalizador sea el médico tratante.
         CheckConstraint(

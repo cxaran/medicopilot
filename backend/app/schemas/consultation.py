@@ -79,6 +79,15 @@ class ConsultationCreate(ApiWriteSchema):
         title="Médico tratante",
         json_schema_extra={"ui": {"form": True, "widget": "text"}},
     )
+    appointment_id: Optional[uuid.UUID] = Field(
+        default=None,
+        title="Cita de origen",
+        description=(
+            "Cita pending/confirmed que origina la consulta; se vincula sólo al crear"
+            " y la marca como atendida. El paciente y el médico deben coincidir."
+        ),
+        json_schema_extra={"ui": {"form": True, "widget": "text"}},
+    )
     consulted_at: Optional[datetime] = Field(
         default=None,
         title="Fecha de atención",
@@ -263,6 +272,7 @@ class ConsultationRead(ApiReadSchema):
     id: uuid.UUID
     patient_id: uuid.UUID
     attending_doctor_id: uuid.UUID
+    appointment_id: Optional[uuid.UUID] = None
     consulted_at: datetime
     reason_for_visit: str
     current_illness: Optional[str] = None

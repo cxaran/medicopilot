@@ -19,7 +19,6 @@ from sqlmodel import Session, select
 from backend.app.api.resource_actions import (
     api_error,
     commit_or_conflict,
-    create_entity,
     get_or_404,
     paginate_resource,
     patch_entity,
@@ -29,9 +28,11 @@ from backend.app.api.resource_actions import (
 )
 from backend.app.auth.auth_dependencies import CurrentUser
 from backend.app.core.database import SessionDep
+from backend.app.models.appointment import Appointment
 from backend.app.models.consultation import Consultation
 from backend.app.models.doctor import Doctor
 from backend.app.models.enums import (
+    AppointmentStatus,
     ConsultationStatus,
     PatientStatus,
     PrescriptionStatus,
@@ -87,6 +88,39 @@ def _ensure_active_patient(session: Session, patient_id: UUID) -> Patient:
     return patient
 
 
+def _lock_attendable_appointment(
+    session: Session, appointment_id: UUID, patient_id: UUID, doctor_id: UUID
+) -> Appointment:
+    """Cita que puede originar la consulta: bloqueada, vigente, coincidente y sin atender.
+
+    Bloquea la fila con FOR UPDATE para serializar la atención frente a una
+    cancelación o reprogramación concurrente. Debe estar ``pending`` o ``confirmed``
+    (no eliminada) y coincidir con el paciente y el médico tratante de la consulta.
+    La unicidad de ``consultations.appointment_id`` respalda contra una segunda
+    consulta para la misma cita."""
+    appointment = session.exec(
+        select(Appointment).where(Appointment.id == appointment_id).with_for_update()
+    ).first()
+    if appointment is None or appointment.deleted_at is not None:
+        api_error(status.HTTP_404_NOT_FOUND, "resource_not_found", "Cita no encontrada")
+    if appointment.status not in (
+        AppointmentStatus.PENDING,
+        AppointmentStatus.CONFIRMED,
+    ):
+        api_error(
+            status.HTTP_409_CONFLICT,
+            "resource_state_conflict",
+            "La cita no está disponible para originar una consulta",
+        )
+    if appointment.patient_id != patient_id or appointment.doctor_id != doctor_id:
+        api_error(
+            status.HTTP_409_CONFLICT,
+            "appointment_mismatch",
+            "La cita no corresponde al paciente y médico de la consulta",
+        )
+    return appointment
+
+
 def _ensure_active_doctor(session: Session, doctor_id: UUID) -> Doctor:
     """El médico tratante debe existir, no estar eliminado y estar activo."""
     doctor = get_or_404(session, Doctor, doctor_id, _DOCTOR_NOT_FOUND)
@@ -131,18 +165,34 @@ def create_consultation(
 ) -> ConsultationRead:
     _ensure_active_patient(session, payload.patient_id)
     _ensure_active_doctor(session, payload.attending_doctor_id)
-    consultation = create_entity(
-        session,
-        Consultation,
-        payload,
-        values={
+
+    # Vínculo opcional con una cita: si llega appointment_id, se valida y se marca la
+    # cita como atendida en la misma transacción que crea la consulta.
+    appointment: Appointment | None = None
+    if payload.appointment_id is not None:
+        appointment = _lock_attendable_appointment(
+            session,
+            payload.appointment_id,
+            payload.patient_id,
+            payload.attending_doctor_id,
+        )
+
+    data = payload.model_dump()
+    data.update(
+        {
             "status": ConsultationStatus.DRAFT,
             "consulted_at": payload.consulted_at or utc_now(),
             "created_by": current_user.id,
             "updated_by": current_user.id,
-        },
-        conflict_message=_CONFLICT,
+        }
     )
+    consultation = Consultation(**data)
+    session.add(consultation)
+    if appointment is not None:
+        appointment.status = AppointmentStatus.ATTENDED
+        touch_entity(appointment, current_user.id)
+    commit_or_conflict(session, _CONFLICT)
+    session.refresh(consultation)
     return serialize(ConsultationRead, consultation)
 
 

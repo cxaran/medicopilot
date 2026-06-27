@@ -13,6 +13,7 @@ from typing import Optional
 
 from pydantic import BaseModel
 
+from backend.app.models.appointment import Appointment
 from backend.app.models.consultation import Consultation
 from backend.app.models.consultation_diagnosis import ConsultationDiagnosis
 from backend.app.models.doctor import Doctor
@@ -48,6 +49,7 @@ from backend.app.schemas.capabilities import (
     RelationCardinality,
     ResourceView,
 )
+from backend.app.schemas.appointment import AppointmentListItem
 from backend.app.schemas.consultation import ConsultationListItem
 from backend.app.schemas.consultation_diagnosis import ConsultationDiagnosisListItem
 from backend.app.schemas.doctor import DoctorListItem
@@ -274,6 +276,24 @@ PRESCRIPTION_ITEMS = ResourceQuery(
         search_fields=("medication_name",),
         in_fields=("id",),
         default_sort="position",
+    ),
+)
+
+APPOINTMENTS = ResourceQuery(
+    name="AppointmentQuery",
+    model=Appointment,
+    schema=AppointmentListItem,
+    options=QueryOptions(
+        # ``patient_id``/``doctor_id`` (UUID) por igualdad y ``status`` (enum) por
+        # igualdad (select). ``scheduled_at`` admite rango de calendario (on/before/
+        # after/between). Búsqueda libre acotada a ``reason`` (no a ``internal_notes``).
+        # Los listados excluyen citas eliminadas vía stmt base en el router.
+        filter_fields=("patient_id", "doctor_id", "status"),
+        sort_fields=("scheduled_at", "created_at", "updated_at", "duration_minutes"),
+        search_fields=("reason",),
+        in_fields=("id",),
+        field_operators={"scheduled_at": _CREATED_AT_OPERATORS},
+        default_sort="scheduled_at",
     ),
 )
 
