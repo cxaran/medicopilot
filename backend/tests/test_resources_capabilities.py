@@ -453,5 +453,52 @@ class PatientsCapabilityTest(unittest.TestCase):
         self.assertEqual(archive["request"]["fixed_body"], {"status": "archived"})
 
 
+class ClinicalSummaryCapabilityTest(unittest.TestCase):
+    def test_patient_clinical_items_contract(self) -> None:
+        with _As(
+            "patient_clinical_items:read",
+            "patient_clinical_items:create",
+            "patient_clinical_items:update",
+            "patient_clinical_items:delete",
+        ):
+            cap = client.get("/api/v1/resources/patient_clinical_items").json()
+        self.assertEqual(cap["name"], "patient_clinical_items")
+        self.assertEqual(cap["api_path"], "/api/v1/patient-clinical-items")
+        filter_fields = {f["field"] for f in cap["list"]["filters"]}
+        self.assertEqual(filter_fields, {"item_type", "severity", "status"})
+        # Un solo recurso reutilizable; las opciones de tipo vienen del contrato.
+        type_filter = next(f for f in cap["list"]["filters"] if f["field"] == "item_type")
+        self.assertIn("allergy", {o["value"] for o in type_filter["options"]})
+        self.assertEqual({a["name"] for a in cap["actions"]}, {"delete"})
+
+    def test_vital_signs_contract_excludes_bmi_from_forms_and_columns(self) -> None:
+        with _As("vital_signs:read", "vital_signs:create", "vital_signs:update"):
+            cap = client.get("/api/v1/resources/vital_signs").json()
+        self.assertEqual(cap["name"], "vital_signs")
+        list_fields = {f["name"] for f in cap["list"]["fields"]}
+        self.assertNotIn("bmi", list_fields)
+        create_fields = {f["name"] for f in cap["forms"]["create"]["fields"]}
+        self.assertNotIn("bmi", create_fields)
+        self.assertIn("consultation_id", create_fields)
+
+    def test_consultation_diagnoses_contract(self) -> None:
+        with _As("consultation_diagnoses:read"):
+            cap = client.get("/api/v1/resources/consultation_diagnoses").json()
+        self.assertEqual(cap["name"], "consultation_diagnoses")
+        kind_filter = next(
+            f for f in cap["list"]["filters"] if f["field"] == "diagnosis_kind"
+        )
+        self.assertEqual(kind_filter["widget"], "select")
+        # Sin permisos de escritura: ni forms ni acciones.
+        self.assertNotIn("forms", cap)
+        self.assertEqual(cap["actions"], [])
+
+    def test_clinical_resources_hidden_without_read_permission(self) -> None:
+        with _As("users:read"):
+            names = [r["name"] for r in client.get("/api/v1/resources").json()]
+        for name in ("patient_clinical_items", "vital_signs", "consultation_diagnoses"):
+            self.assertNotIn(name, names)
+
+
 if __name__ == "__main__":
     unittest.main()

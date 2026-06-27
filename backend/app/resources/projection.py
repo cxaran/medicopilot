@@ -123,7 +123,7 @@ def _value_type(annotation: Any) -> FieldValueType:
         return FieldValueType.BOOLEAN
     if inner is int:
         return FieldValueType.INTEGER
-    if inner is Decimal:
+    if inner is Decimal or inner is float:
         return FieldValueType.DECIMAL
     if inner is datetime:
         return FieldValueType.DATETIME

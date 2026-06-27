@@ -51,24 +51,43 @@ from backend.app.schemas.capabilities import (
 )
 from backend.app.schemas.appointment import AppointmentListItem
 from backend.app.schemas.consultation import ConsultationListItem
-from backend.app.schemas.consultation_diagnosis import ConsultationDiagnosisListItem
+from backend.app.schemas.consultation_diagnosis import (
+    ConsultationDiagnosisCreate,
+    ConsultationDiagnosisListItem,
+    ConsultationDiagnosisUpdate,
+)
 from backend.app.schemas.doctor import DoctorCreate, DoctorListItem, DoctorUpdate
 from backend.app.schemas.medical_history_version import MedicalHistoryVersionListItem
 from backend.app.schemas.patient import PatientCreate, PatientListItem, PatientUpdate
-from backend.app.schemas.patient_clinical_item import PatientClinicalItemListItem
+from backend.app.schemas.patient_clinical_item import (
+    PatientClinicalItemCreate,
+    PatientClinicalItemListItem,
+    PatientClinicalItemUpdate,
+)
 from backend.app.schemas.prescription import (
     PrescriptionItemListItem,
     PrescriptionListItem,
 )
-from backend.app.schemas.vital_sign import VitalSignListItem
+from backend.app.schemas.vital_sign import (
+    VitalSignCreate,
+    VitalSignListItem,
+    VitalSignUpdate,
+)
 from backend.app.schemas.role import RoleCreate, RoleListItem, RoleRead, RoleUpdate
 from backend.app.schemas.user_admin import (
     UserAdminCreate,
     UserAdminListItem,
     UserAdminUpdate,
 )
+from backend.app.security.groups.consultation_diagnoses import (
+    ConsultationDiagnosisPermissions,
+)
 from backend.app.security.groups.doctors import DoctorPermissions
+from backend.app.security.groups.patient_clinical_items import (
+    PatientClinicalItemPermissions,
+)
 from backend.app.security.groups.patients import PatientPermissions
+from backend.app.security.groups.vital_signs import VitalSignPermissions
 from backend.app.security.groups.permissions import PermissionPermissions
 from backend.app.security.groups.roles import RolePermissions
 from backend.app.security.groups.users import UserPermissions
@@ -642,6 +661,99 @@ RESOURCE_REGISTRY: tuple[ResourceDefinition, ...] = (
                 confirmation=ConfirmationDef(
                     title="Eliminar paciente",
                     message="El expediente se dará de baja lógica.",
+                    confirm_label="Eliminar",
+                    destructive=True,
+                ),
+            ),
+        ),
+    ),
+    ResourceDefinition(
+        name="patient_clinical_items",
+        label="Datos clínicos del paciente",
+        api_path="/api/v1/patient-clinical-items",
+        view=ResourceView.TABLE,
+        read_permission=PatientClinicalItemPermissions.READ,
+        list_query=PATIENT_CLINICAL_ITEMS,
+        list_schema=PatientClinicalItemListItem,
+        create_schema=PatientClinicalItemCreate,
+        update_schema=PatientClinicalItemUpdate,
+        create_permission=PatientClinicalItemPermissions.CREATE,
+        update_permission=PatientClinicalItemPermissions.UPDATE,
+        detail_url_template="/api/v1/patient-clinical-items/{id}",
+        actions=(
+            ActionDef(
+                name="delete",
+                label="Eliminar",
+                method=HttpMethod.DELETE,
+                url_template="/api/v1/patient-clinical-items/{id}",
+                scope=ActionScope.ITEM,
+                danger=True,
+                permission=PatientClinicalItemPermissions.DELETE,
+                confirmation=ConfirmationDef(
+                    title="Eliminar dato clínico",
+                    message="El dato clínico se dará de baja lógica.",
+                    confirm_label="Eliminar",
+                    destructive=True,
+                ),
+            ),
+        ),
+    ),
+    ResourceDefinition(
+        name="vital_signs",
+        label="Signos vitales",
+        api_path="/api/v1/vital-signs",
+        view=ResourceView.TABLE,
+        read_permission=VitalSignPermissions.READ,
+        list_query=VITAL_SIGNS,
+        list_schema=VitalSignListItem,
+        create_schema=VitalSignCreate,
+        update_schema=VitalSignUpdate,
+        create_permission=VitalSignPermissions.CREATE,
+        update_permission=VitalSignPermissions.UPDATE,
+        detail_url_template="/api/v1/vital-signs/{id}",
+        actions=(
+            ActionDef(
+                name="delete",
+                label="Eliminar",
+                method=HttpMethod.DELETE,
+                url_template="/api/v1/vital-signs/{id}",
+                scope=ActionScope.ITEM,
+                danger=True,
+                permission=VitalSignPermissions.DELETE,
+                confirmation=ConfirmationDef(
+                    title="Eliminar signos vitales",
+                    message="La medición se dará de baja lógica.",
+                    confirm_label="Eliminar",
+                    destructive=True,
+                ),
+            ),
+        ),
+    ),
+    ResourceDefinition(
+        name="consultation_diagnoses",
+        label="Diagnósticos de consulta",
+        api_path="/api/v1/consultation-diagnoses",
+        view=ResourceView.TABLE,
+        read_permission=ConsultationDiagnosisPermissions.READ,
+        list_query=CONSULTATION_DIAGNOSES,
+        list_schema=ConsultationDiagnosisListItem,
+        create_schema=ConsultationDiagnosisCreate,
+        update_schema=ConsultationDiagnosisUpdate,
+        create_permission=ConsultationDiagnosisPermissions.CREATE,
+        update_permission=ConsultationDiagnosisPermissions.UPDATE,
+        detail_url_template="/api/v1/consultation-diagnoses/{id}",
+        actions=(
+            ActionDef(
+                name="delete",
+                label="Eliminar",
+                method=HttpMethod.DELETE,
+                url_template="/api/v1/consultation-diagnoses/{id}",
+                scope=ActionScope.ITEM,
+                danger=True,
+                permission=ConsultationDiagnosisPermissions.DELETE,
+                confirmation=ConfirmationDef(
+                    title="Eliminar diagnóstico",
+                    message="El diagnóstico se dará de baja lógica.",
                     confirm_label="Eliminar",
                     destructive=True,
                 ),

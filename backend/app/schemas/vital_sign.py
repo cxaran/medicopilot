@@ -7,14 +7,10 @@ from pydantic import Field, computed_field, field_validator, model_validator
 from backend.app.schemas.base import ApiPatchSchema, ApiReadSchema, ApiWriteSchema
 from backend.app.utils.utc_now import utc_now
 
-# Filtro de rango de calendario para ``measured_at`` (compatible con la proyección
-# futura del frontend).
-_MEASURED_AT_LIST_FILTER_UI: dict[str, Any] = {
-    "ui": {
-        "list": True,
-        "filter": {"operator": "range", "label": "Medición", "widget": "datetime"},
-    }
-}
+# ``measured_at`` es columna de lista; su filtro de rango de calendario (on/before/
+# after/between) lo publica ``filterable_fields`` desde ``field_operators`` del recurso,
+# no el bloque ``ui.filter`` legacy (que sólo admite un operador único).
+_MEASURED_AT_LIST_FILTER_UI: dict[str, Any] = {"ui": {"list": True}}
 
 
 def _naive_utc(value: datetime) -> datetime:

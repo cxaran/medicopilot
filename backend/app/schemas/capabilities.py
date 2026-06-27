@@ -42,10 +42,12 @@ class WidgetType(str, Enum):
     TEXTAREA = "textarea"
     MULTISELECT = "multiselect"
     SELECT = "select"
+    NUMBER = "number"
     # Controles de fecha de calendario (filtros de fecha de C1). El frontend envía un
     # literal ``YYYY-MM-DD`` (nunca ``new Date()``/``toISOString()``).
     DATE = "date"
     DATERANGE = "daterange"
+    DATETIME = "datetime"
 
 
 class FilterOperator(str, Enum):
