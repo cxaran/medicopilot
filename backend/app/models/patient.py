@@ -2,7 +2,20 @@ import uuid
 from datetime import date, datetime
 from typing import Optional
 
-from sqlalchemy import Date, DateTime, Enum as SAEnum, ForeignKey, Index, String, Text, UniqueConstraint, func
+from sqlalchemy import (
+    BigInteger,
+    Date,
+    DateTime,
+    Enum as SAEnum,
+    ForeignKey,
+    Identity,
+    Index,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+    text,
+)
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -18,19 +31,17 @@ class Patient(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
-    record_number: Mapped[str] = mapped_column(
-        String(80),
+    record_number: Mapped[int] = mapped_column(
+        BigInteger,
+        Identity(),
         nullable=False,
-        comment="Número interno único de expediente.",
+        comment=(
+            "Número interno de expediente generado por la base de datos (identity). "
+            "Inmutable; el prefijo visual (p. ej. EXP-000123) es de presentación."
+        ),
     )
-    first_name: Mapped[str] = mapped_column(
-        String(120), nullable=False, comment="Nombre o nombres del paciente."
-    )
-    paternal_last_name: Mapped[str] = mapped_column(
-        String(120), nullable=False, comment="Apellido paterno del paciente."
-    )
-    maternal_last_name: Mapped[Optional[str]] = mapped_column(
-        String(120), nullable=True, comment="Apellido materno del paciente, si aplica."
+    full_name: Mapped[str] = mapped_column(
+        String(255), nullable=False, comment="Nombre completo del paciente."
     )
     birth_date: Mapped[date] = mapped_column(
         Date,
@@ -59,7 +70,9 @@ class Patient(Base):
         Text, nullable=True, comment="Dirección del paciente."
     )
     curp: Mapped[Optional[str]] = mapped_column(
-        String(18), nullable=True, comment="CURP opcional del paciente."
+        String(18),
+        nullable=True,
+        comment="CURP normalizada (mayúsculas, sin espacios). Única entre expedientes no eliminados.",
     )
     occupation: Mapped[Optional[str]] = mapped_column(
         String(160), nullable=True, comment="Ocupación opcional del paciente."
@@ -87,19 +100,13 @@ class Patient(Base):
         ),
         nullable=False,
         default=PatientStatus.ACTIVE,
-        comment="Estado administrativo del expediente del paciente.",
-    )
-    registered_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        server_default=func.now(),
-        nullable=False,
-        comment="Fecha de alta administrativa del paciente.",
+        comment="Estado administrativo del expediente: active, inactive o archived.",
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         server_default=func.now(),
         nullable=False,
-        comment="Fecha y hora de creación del registro.",
+        comment="Fecha y hora de creación del registro. Representa el alta del paciente.",
     )
     created_by: Mapped[Optional[uuid.UUID]] = mapped_column(
         PG_UUID(as_uuid=True),
@@ -144,12 +151,15 @@ class Patient(Base):
 
     __table_args__ = (
         UniqueConstraint("record_number", name="uq_patients_record_number"),
+        # Unicidad parcial de CURP: solo entre expedientes vigentes (no eliminados),
+        # de modo que una baja lógica no impide reutilizar la CURP.
         Index(
-            "ix_patients_name",
-            "paternal_last_name",
-            "maternal_last_name",
-            "first_name",
+            "uq_patients_curp_active",
+            "curp",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL"),
         ),
+        Index("ix_patients_full_name", "full_name"),
         Index("ix_patients_status", "status"),
-        Index("ix_patients_registered_at", "registered_at"),
+        Index("ix_patients_created_at", "created_at"),
     )
