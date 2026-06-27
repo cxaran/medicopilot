@@ -52,12 +52,20 @@ u ordenable debe existir en el ``list_schema`` (el row que el cliente recibe), y
 cada operador/widget declarado en los blobs ``ui.filter`` de las columnas debe ser
 soportado. Un campo filtrable/ordenable inexistente rompería el filtrado/orden en
 la UI sin error claro. Ver ``ListFilterSortValidityTest``.
+
+Y (MP-CTRL-0013) se verifica la UNICIDAD / NO-COLISIONES estructural: los
+identificadores (``name``) y las rutas base (``api_path``) de los recursos son
+únicos en todo el registry; dentro de cada recurso los identificadores de acción
+son únicos; y ninguna acción colisiona en su *dispatch* (mismo método + mismo
+``url_template`` + mismo cuerpo). Identificadores o rutas duplicados harían el
+enrutado/registro ambiguo. Ver ``RegistryUniquenessTest``.
 """
 
 import enum
 import os
 import typing
 import unittest
+from collections import Counter, defaultdict
 from typing import NamedTuple, Optional
 
 
@@ -798,6 +806,98 @@ class ListFilterSortValidityTest(unittest.TestCase):
                         f"[filtro] {resource.name}.{name}: el widget de filtro "
                         f"{widget!r} no está soportado.",
                     )
+
+
+# ---------------------------------------------------------------------------
+# Unicidad / no-colisiones estructural del registry (MP-CTRL-0013)
+# ---------------------------------------------------------------------------
+#
+# Identidad y ruta (leídas del código): ResourceDefinition.name (identificador) y
+# .api_path (ruta base); ActionDef.name (identificador de acción), .method
+# (HttpMethod) y .url_template (ruta de la acción).
+#
+# Definición de COLISIÓN de acción (matiz importante, para no marcar falsos
+# positivos): dos acciones de un mismo recurso colisionan sólo si su *dispatch* es
+# indistinguible, es decir, comparten método + url_template + cuerpo. El cuerpo se
+# resuelve igual que en el contrato: ``fixed_body`` (con su contenido), o el
+# ``input_schema``, o ninguno. Por eso ``activate``/``deactivate`` de users/roles
+# —que comparten ``PATCH /.../{id}`` pero difieren en ``fixed_body``
+# ({is_active: true} vs {is_active: false}) y pegan al mismo endpoint de update
+# genérico— NO se consideran colisión: son afordancias distintas disambiguadas por
+# el cuerpo. Sí sería colisión que dos acciones fueran idénticas en método, ruta y
+# cuerpo (dispatch ambiguo).
+
+
+def _action_body_key(action) -> tuple:
+    """Clave hashable del cuerpo de una acción (fixed_body / input_schema / ninguno)."""
+    if action.fixed_body is not None:
+        return ("fixed_body", tuple(sorted(action.fixed_body.items())))
+    if action.input_schema is not None:
+        return ("input_schema", action.input_schema.__name__)
+    return ("none",)
+
+
+def _action_dispatch_key(action) -> tuple:
+    """Identidad de *dispatch* de una acción: método + ruta + cuerpo."""
+    return (action.method.value, action.url_template, _action_body_key(action))
+
+
+class RegistryUniquenessTest(unittest.TestCase):
+    """Verifica que no haya identificadores ni rutas duplicados en el registry."""
+
+    def test_resource_names_unique(self) -> None:
+        """Los identificadores (name) de recurso son únicos en todo el registry."""
+        counts = Counter(definition.name for definition in RESOURCE_REGISTRY)
+        duplicates = sorted(name for name, count in counts.items() if count > 1)
+        self.assertEqual(
+            duplicates,
+            [],
+            f"[unicidad] identificadores de recurso duplicados: {duplicates}.",
+        )
+
+    def test_resource_api_paths_unique(self) -> None:
+        """Las rutas base (api_path) de recurso son únicas en todo el registry."""
+        by_path: dict[str, list[str]] = defaultdict(list)
+        for definition in RESOURCE_REGISTRY:
+            by_path[definition.api_path].append(definition.name)
+        collisions = {path: names for path, names in by_path.items() if len(names) > 1}
+        self.assertEqual(
+            collisions,
+            {},
+            f"[unicidad] api_path compartido entre recursos: {collisions}.",
+        )
+
+    def test_action_names_unique_within_resource(self) -> None:
+        """Dentro de cada recurso, los identificadores de acción son únicos."""
+        for definition in RESOURCE_REGISTRY:
+            counts = Counter(action.name for action in definition.actions)
+            duplicates = sorted(name for name, count in counts.items() if count > 1)
+            with self.subTest(resource=definition.name):
+                self.assertEqual(
+                    duplicates,
+                    [],
+                    f"[unicidad] {definition.name}: identificadores de acción "
+                    f"duplicados: {duplicates}.",
+                )
+
+    def test_action_dispatch_unique_within_resource(self) -> None:
+        """Dentro de cada recurso, ninguna acción colisiona en su dispatch
+        (mismo método + url_template + cuerpo)."""
+        for definition in RESOURCE_REGISTRY:
+            by_dispatch: dict[tuple, list[str]] = defaultdict(list)
+            for action in definition.actions:
+                by_dispatch[_action_dispatch_key(action)].append(action.name)
+            collisions = {
+                key: names for key, names in by_dispatch.items() if len(names) > 1
+            }
+            with self.subTest(resource=definition.name):
+                self.assertEqual(
+                    collisions,
+                    {},
+                    f"[unicidad] {definition.name}: acciones con dispatch idéntico "
+                    f"(método+url_template+cuerpo) — colisión de enrutado: "
+                    f"{collisions}.",
+                )
 
 
 if __name__ == "__main__":
