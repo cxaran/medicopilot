@@ -23,6 +23,7 @@ BACKEND_CANONICAL_TEST_MODULES = (
     "backend.tests.test_auth_policy",
     "backend.tests.test_doctors_routes",
     "backend.tests.test_patients_routes",
+    "backend.tests.test_patient_clinical_items_routes",
     "backend.tests.test_resources_capabilities",
     "backend.tests.test_capability_filters",
     "backend.tests.test_capability_config_errors",

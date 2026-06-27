@@ -59,7 +59,7 @@ class PatientClinicalItem(Base):
             values_callable=enum_values,
         ),
         nullable=True,
-        comment="Severidad leve, moderada, grave o crítica, si aplica.",
+        comment="Severidad baja, moderada, alta o crítica, si aplica.",
     )
     status: Mapped[ClinicalItemStatus] = mapped_column(
         SAEnum(
@@ -74,10 +74,10 @@ class PatientClinicalItem(Base):
         default=ClinicalItemStatus.ACTIVE,
         comment="Estado del dato clínico importante.",
     )
-    started_at: Mapped[Optional[date]] = mapped_column(
+    started_on: Mapped[Optional[date]] = mapped_column(
         Date, nullable=True, comment="Inicio conocido del dato clínico, si aplica."
     )
-    ended_at: Mapped[Optional[date]] = mapped_column(
+    ended_on: Mapped[Optional[date]] = mapped_column(
         Date, nullable=True, comment="Fin o resolución del dato clínico, si aplica."
     )
     created_at: Mapped[datetime] = mapped_column(

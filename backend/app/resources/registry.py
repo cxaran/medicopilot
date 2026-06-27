@@ -15,6 +15,7 @@ from pydantic import BaseModel
 
 from backend.app.models.doctor import Doctor
 from backend.app.models.patient import Patient
+from backend.app.models.patient_clinical_item import PatientClinicalItem
 from backend.app.models.user import Role, User
 from backend.app.query import QueryOptions, ResourceQuery
 from backend.app.query.operators import Operator
@@ -44,6 +45,7 @@ from backend.app.schemas.capabilities import (
 )
 from backend.app.schemas.doctor import DoctorListItem
 from backend.app.schemas.patient import PatientListItem
+from backend.app.schemas.patient_clinical_item import PatientClinicalItemListItem
 from backend.app.schemas.role import RoleCreate, RoleListItem, RoleRead, RoleUpdate
 from backend.app.schemas.user_admin import (
     UserAdminCreate,
@@ -140,6 +142,22 @@ PATIENTS = ResourceQuery(
             "full_name": _TEXT_FILTER_OPERATORS,
             "created_at": _CREATED_AT_OPERATORS,
         },
+        default_sort="-created_at",
+    ),
+)
+
+PATIENT_CLINICAL_ITEMS = ResourceQuery(
+    name="PatientClinicalItemQuery",
+    model=PatientClinicalItem,
+    schema=PatientClinicalItemListItem,
+    options=QueryOptions(
+        # ``patient_id`` (UUID) por igualdad: el resumen se consulta por paciente.
+        # ``item_type``/``status``/``severity`` (enums no-nativos) por igualdad (select).
+        # Los listados excluyen eliminados (``deleted_at``) vía stmt base en el router.
+        filter_fields=("patient_id", "item_type", "status", "severity"),
+        sort_fields=("created_at", "updated_at", "title", "started_on"),
+        search_fields=("title", "details"),
+        in_fields=("id",),
         default_sort="-created_at",
     ),
 )

@@ -40,9 +40,9 @@ class PatientClinicalItemType(str, Enum):
 class ClinicalSeverity(str, Enum):
     """Severidad clínica reusable cuando aplica a un dato del paciente."""
 
-    MILD = "mild"
+    LOW = "low"
     MODERATE = "moderate"
-    SEVERE = "severe"
+    HIGH = "high"
     CRITICAL = "critical"
 
 

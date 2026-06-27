@@ -31,6 +31,9 @@ os.environ.update(DEV_ENV)
 
 from backend.app.security.catalog import SECURITY_GROUPS  # noqa: E402
 from backend.app.security.groups.doctors import DoctorPermissions  # noqa: E402
+from backend.app.security.groups.patient_clinical_items import (  # noqa: E402
+    PatientClinicalItemPermissions,
+)
 from backend.app.security.groups.patients import PatientPermissions  # noqa: E402
 from backend.app.security.groups.permissions import PermissionPermissions  # noqa: E402
 from backend.app.security.groups.roles import RolePermissions  # noqa: E402
@@ -47,6 +50,7 @@ class SecurityCatalogTest(unittest.TestCase):
                 RolePermissions,
                 DoctorPermissions,
                 PatientPermissions,
+                PatientClinicalItemPermissions,
                 PermissionPermissions,
             ],
         )
@@ -76,6 +80,10 @@ class SecurityCatalogTest(unittest.TestCase):
                 "patients:create",
                 "patients:update",
                 "patients:delete",
+                "patient_clinical_items:read",
+                "patient_clinical_items:create",
+                "patient_clinical_items:update",
+                "patient_clinical_items:delete",
                 "permissions:read",
             ],
         )
