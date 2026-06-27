@@ -83,7 +83,7 @@ def validate_upload_content(
         )
     if size > max_size_bytes:
         api_error(
-            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            status.HTTP_413_CONTENT_TOO_LARGE,
             "file_too_large",
             "El archivo excede el tamaño máximo permitido.",
         )
