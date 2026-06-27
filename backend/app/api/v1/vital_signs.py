@@ -48,12 +48,21 @@ _CONFLICT = "No se pudo guardar el signo vital"
 _SEALED = "La consulta está finalizada: los signos vitales quedaron sellados"
 
 
+def _lock_consultation(session: Session, consultation_id: UUID) -> Consultation | None:
+    """Carga la consulta tomando su fila con FOR UPDATE.
+
+    Serializa toda mutación de signos vitales con la finalización de la consulta
+    (que bloquea la misma fila): evita la carrera entre registrar un signo y
+    finalizar la consulta. Las lecturas no la usan."""
+    return session.exec(
+        select(Consultation).where(Consultation.id == consultation_id).with_for_update()
+    ).first()
+
+
 def _get_writable_consultation(session: Session, consultation_id: UUID) -> Consultation:
-    """Consulta destino de una creación: debe existir, no estar eliminada ni finalizada."""
-    consultation = get_or_404(
-        session, Consultation, consultation_id, _CONSULTATION_NOT_FOUND
-    )
-    if consultation.deleted_at is not None:
+    """Consulta destino de una creación: bloqueada, existente, no eliminada ni finalizada."""
+    consultation = _lock_consultation(session, consultation_id)
+    if consultation is None or consultation.deleted_at is not None:
         api_error(
             status.HTTP_404_NOT_FOUND, "resource_not_found", _CONSULTATION_NOT_FOUND
         )
@@ -63,16 +72,22 @@ def _get_writable_consultation(session: Session, consultation_id: UUID) -> Consu
 
 
 def _load_active_vital_sign(
-    session: Session, vital_sign_id: UUID
+    session: Session, vital_sign_id: UUID, *, lock_parent: bool = False
 ) -> tuple[VitalSign, Consultation]:
-    """Carga una medición disponible: ni ella ni su consulta padre eliminadas (-> 404)."""
+    """Carga una medición disponible: ni ella ni su consulta padre eliminadas (-> 404).
+
+    ``lock_parent`` toma la fila de la consulta con FOR UPDATE: las mutaciones lo
+    activan para verificar el estado ``draft`` bajo bloqueo; las lecturas no."""
     vital_sign = get_or_404(session, VitalSign, vital_sign_id, _NOT_FOUND)
     if vital_sign.deleted_at is not None:
         api_error(status.HTTP_404_NOT_FOUND, "resource_not_found", _NOT_FOUND)
-    consultation = get_or_404(
-        session, Consultation, vital_sign.consultation_id, _NOT_FOUND
-    )
-    if consultation.deleted_at is not None:
+    if lock_parent:
+        consultation = _lock_consultation(session, vital_sign.consultation_id)
+    else:
+        consultation = get_or_404(
+            session, Consultation, vital_sign.consultation_id, _NOT_FOUND
+        )
+    if consultation is None or consultation.deleted_at is not None:
         # La consulta padre eliminada hace que sus signos no estén disponibles.
         api_error(status.HTTP_404_NOT_FOUND, "resource_not_found", _NOT_FOUND)
     return vital_sign, consultation
@@ -139,7 +154,9 @@ def update_vital_sign(
     current_user: CurrentUser,
     _: VitalSignPermissions.UPDATE.requiere,
 ) -> VitalSignRead:
-    vital_sign, consultation = _load_active_vital_sign(session, vital_sign_id)
+    vital_sign, consultation = _load_active_vital_sign(
+        session, vital_sign_id, lock_parent=True
+    )
     _require_editable_parent(consultation)
     vital_sign = patch_entity(
         session,
@@ -158,7 +175,9 @@ def delete_vital_sign(
     current_user: CurrentUser,
     _: VitalSignPermissions.DELETE.requiere,
 ) -> VitalSignRead:
-    vital_sign, consultation = _load_active_vital_sign(session, vital_sign_id)
+    vital_sign, consultation = _load_active_vital_sign(
+        session, vital_sign_id, lock_parent=True
+    )
     _require_editable_parent(consultation)
     vital_sign = soft_delete_entity(
         session,
