@@ -59,12 +59,21 @@ identificadores (``name``) y las rutas base (``api_path``) de los recursos son
 son únicos; y ninguna acción colisiona en su *dispatch* (mismo método + mismo
 ``url_template`` + mismo cuerpo). Identificadores o rutas duplicados harían el
 enrutado/registro ambiguo. Ver ``RegistryUniquenessTest``.
+
+Y (MP-CTRL-0014) se verifica la SINCRONÍA REGISTRY↔ROUTER: cada operación
+publicada por el registry (list/read/create/update, descarga, cada acción y cada
+relación) mapea a una ruta realmente registrada en la app FastAPI con el método
+correcto, comparando ``(method, path)`` normalizados. Una operación publicada sin
+endpoint (o con método equivocado) fallaría con 404/405 en runtime sin que ningún
+otro test lo atrape. Ver ``RegistryRouterSyncTest``.
 """
 
 import enum
 import os
+import re
 import typing
 import unittest
+import uuid
 from collections import Counter, defaultdict
 from typing import NamedTuple, Optional
 
@@ -98,8 +107,10 @@ os.environ.update(DEV_ENV)
 
 from pydantic import BaseModel  # noqa: E402
 
+from backend.app.main import app  # noqa: E402
 from backend.app.query.operators import Operator  # noqa: E402
 from backend.app.query.plans import CompiledQueryPlan  # noqa: E402
+from backend.app.resources.projection import build_visible_capabilities  # noqa: E402
 from backend.app.resources.registry import RESOURCE_REGISTRY  # noqa: E402
 from backend.app.schemas.capabilities import (  # noqa: E402
     ActionCondition,
@@ -108,6 +119,7 @@ from backend.app.schemas.capabilities import (  # noqa: E402
     HttpMethod,
     WidgetType,
 )
+from backend.app.schemas.user import SessionUser  # noqa: E402
 from backend.app.security.catalog import declared_permissions  # noqa: E402
 from backend.app.security.security_control import WILDCARD_ACCESS  # noqa: E402
 from backend.app.security.security_group import SecurityGroup  # noqa: E402
@@ -897,6 +909,138 @@ class RegistryUniquenessTest(unittest.TestCase):
                     f"[unicidad] {definition.name}: acciones con dispatch idéntico "
                     f"(método+url_template+cuerpo) — colisión de enrutado: "
                     f"{collisions}.",
+                )
+
+
+# ---------------------------------------------------------------------------
+# Sincronía registry <-> router FastAPI (MP-CTRL-0014)
+# ---------------------------------------------------------------------------
+#
+# Superficie HTTP registrada: se toma de ``app.openapi()["paths"]`` (fuente
+# canónica con prefijos ya resueltos, p. ej. ``/api/v1/...``). Nota: FastAPI moderno
+# no aplana las rutas incluidas en ``app.routes`` (usa un router perezoso), por lo
+# que el spec OpenAPI es la forma fiable de enumerar la superficie real.
+#
+# Superficie publicada por el registry: se PROYECTAN las capabilities reales con un
+# usuario que posee TODOS los permisos declarados (``SessionUser.access_control`` es
+# membership exacto, sin comodín), de modo que cada operación gateada por permiso
+# (create/update, acciones, descarga, relaciones) se proyecta. De cada capability se
+# extraen sus pares ``(method, url_template)``: list (GET api_path), detail, descarga,
+# create/update (forms), cada acción y, por cada relación, su URL de selección (GET),
+# su mutación (mutation_method) y su URL de opciones (GET).
+#
+# Normalización (ambos lados): los parámetros de path ``{x}`` se colapsan a ``{}`` —
+# así ``{id}`` del registry casa con ``{user_id}``/``{consultation_id}`` del router—
+# y se quita la barra final. Se compara ``(METHOD_mayúsculas, path_normalizado)``.
+
+_HTTP_METHODS = frozenset(
+    {"get", "put", "post", "delete", "patch", "options", "head", "trace"}
+)
+
+
+def _normalize_path(path: str) -> str:
+    """Colapsa los parámetros ``{...}`` a ``{}`` y quita la barra final."""
+    collapsed = re.sub(r"{[^}]+}", "{}", path)
+    return collapsed.rstrip("/") or "/"
+
+
+def _registered_routes() -> frozenset:
+    """Conjunto de ``(METHOD, path_normalizado)`` registrados en la app FastAPI."""
+    paths = app.openapi()["paths"]
+    return frozenset(
+        (method.upper(), _normalize_path(path))
+        for path, operations in paths.items()
+        for method in operations
+        if method.lower() in _HTTP_METHODS
+    )
+
+
+def _published_operations():
+    """Genera ``(resource, operation, method, url_template)`` por cada operación que
+    el registry publica, proyectando las capabilities con todos los permisos."""
+    superuser = SessionUser(
+        id=uuid.uuid4(),
+        name="contract",
+        last_name="test",
+        email="contract@example.com",
+        permissions=set(declared_permissions()),
+    )
+    for capability in build_visible_capabilities(superuser):
+        name = capability.name
+        if capability.list_ is not None:
+            yield name, "list", "GET", capability.api_path
+        if capability.detail is not None:
+            yield name, "detail", capability.detail.method.value, capability.detail.url_template
+        if capability.file_download is not None:
+            yield (
+                name,
+                "file_download",
+                capability.file_download.method.value,
+                capability.file_download.url_template,
+            )
+        if capability.forms is not None:
+            if capability.forms.create is not None:
+                yield (
+                    name,
+                    "forms.create",
+                    capability.forms.create.method.value,
+                    capability.forms.create.url_template,
+                )
+            if capability.forms.update is not None:
+                yield (
+                    name,
+                    "forms.update",
+                    capability.forms.update.method.value,
+                    capability.forms.update.url_template,
+                )
+        for action in capability.actions:
+            yield name, f"acción '{action.name}'", action.method.value, action.url_template
+        for relation in capability.relations:
+            yield (
+                name,
+                f"relación '{relation.name}' (selección)",
+                "GET",
+                relation.selection_url,
+            )
+            yield (
+                name,
+                f"relación '{relation.name}' (mutación)",
+                relation.mutation_method.value,
+                relation.mutation_url,
+            )
+            yield (
+                name,
+                f"relación '{relation.name}' (opciones)",
+                "GET",
+                relation.options.url,
+            )
+
+
+class RegistryRouterSyncTest(unittest.TestCase):
+    """Verifica que cada operación publicada por el registry tenga un endpoint real."""
+
+    def test_has_published_operations(self) -> None:
+        """Sanidad: el registry publica al menos una operación HTTP."""
+        operations = list(_published_operations())
+        self.assertGreater(
+            len(operations),
+            0,
+            "El registry no publica ninguna operación; el test no validaría nada.",
+        )
+
+    def test_every_published_operation_has_route(self) -> None:
+        """Cada operación publicada mapea a una ruta FastAPI con el método correcto."""
+        routes = _registered_routes()
+        for resource, operation, method, url_template in _published_operations():
+            normalized = _normalize_path(url_template)
+            with self.subTest(resource=resource, operation=operation):
+                self.assertIn(
+                    (method, normalized),
+                    routes,
+                    f"[sync] {resource} / {operation}: la operación publica "
+                    f"({method} {url_template}) pero no existe una ruta registrada "
+                    f"({method} {normalized}) en la app FastAPI; fallaría con 404/405 "
+                    "en runtime.",
                 )
 
 
