@@ -8,17 +8,46 @@ import { ApiRequestError } from "@/core/api/api-error";
 import type { ResourceActionCapability } from "@/core/api/contracts";
 import {
   actionErrorMessage,
-  actionRequiresConfirmation,
+  actionInputFields,
+  buildActionPayload,
+  shouldOpenDialog,
 } from "@/core/resources/resource-action";
 import { executeAction } from "@/core/resources/resource-action-client";
 
 const GENERIC_ERROR = "No se pudo completar la acción. Inténtalo nuevamente.";
 
+type FieldErrors = Record<string, string[]>;
+
+/**
+ * Separa el ErrorResponse 422 en errores por campo (sólo los declarados en el
+ * formulario de la acción) y un error general seguro para el resto.
+ */
+function parseFieldErrors(
+  error: ApiRequestError,
+  allowed: Set<string>,
+): { general: string | null; fields: FieldErrors } {
+  if (error.status === 422 && error.body.errors) {
+    const fields: FieldErrors = {};
+    const general: string[] = [];
+    for (const item of error.body.errors) {
+      if (item.field && allowed.has(item.field)) {
+        fields[item.field] = [...(fields[item.field] ?? []), item.message];
+      } else {
+        general.push(item.message);
+      }
+    }
+    return { general: general.length > 0 ? general.join(" ") : null, fields };
+  }
+  return { general: actionErrorMessage(error.status, error.body.code), fields: {} };
+}
+
 /**
  * Controles de acción de una fila, guiados por capability. No hay botones ni reglas
  * hardcodeadas: cada acción viene del contrato. Las acciones con confirmación
- * requerida abren el diálogo accesible y no ejecutan request antes de confirmar.
- * El backend sigue siendo la autoridad (supervivencia, invalidación, permisos).
+ * requerida o con ``input_schema`` abren el diálogo accesible y no ejecutan request
+ * antes de confirmar. Las acciones con ``input_schema`` capturan datos en un
+ * formulario y envían sólo los campos declarados (allowlist). El backend sigue siendo
+ * la autoridad (supervivencia, invalidación, permisos, estado).
  */
 export function ResourceRowActions({
   placeholder,
@@ -33,16 +62,18 @@ export function ResourceRowActions({
   const [activeAction, setActiveAction] = useState<ResourceActionCapability | null>(null);
   const [pending, setPending] = useState(false);
   const [dialogError, setDialogError] = useState<string | null>(null);
+  const [dialogFieldErrors, setDialogFieldErrors] = useState<FieldErrors>({});
   const [inlineError, setInlineError] = useState<string | null>(null);
 
   async function perform(
     action: ResourceActionCapability,
+    payload: Record<string, unknown> | undefined,
     onError: (message: string) => void,
     onDone: () => void,
   ) {
     setPending(true);
     try {
-      await executeAction(action, placeholder, id);
+      await executeAction(action, placeholder, id, payload);
       setPending(false);
       onDone();
       router.refresh();
@@ -58,6 +89,14 @@ export function ResourceRowActions({
           router.refresh();
           return;
         }
+        // Errores por campo sólo cuando la acción captura datos (input_schema).
+        if (error.status === 422 && actionInputFields(action).length > 0) {
+          const allowed = new Set(actionInputFields(action).map((f) => f.name));
+          const parsed = parseFieldErrors(error, allowed);
+          setDialogFieldErrors(parsed.fields);
+          setDialogError(parsed.general);
+          return;
+        }
         onError(actionErrorMessage(error.status, error.body.code));
         return;
       }
@@ -70,19 +109,27 @@ export function ResourceRowActions({
       return;
     }
     setInlineError(null);
-    if (actionRequiresConfirmation(action)) {
+    if (shouldOpenDialog(action)) {
       setDialogError(null);
+      setDialogFieldErrors({});
       setActiveAction(action);
       return;
     }
-    void perform(action, setInlineError, () => undefined);
+    void perform(action, undefined, setInlineError, () => undefined);
   }
 
-  function onConfirm() {
+  function onConfirm(formData?: FormData) {
     if (!activeAction || pending) {
       return;
     }
-    void perform(activeAction, setDialogError, () => setActiveAction(null));
+    const payload =
+      actionInputFields(activeAction).length > 0 && formData
+        ? buildActionPayload(activeAction, formData)
+        : undefined;
+    void perform(activeAction, payload, setDialogError, () => {
+      setActiveAction(null);
+      setDialogFieldErrors({});
+    });
   }
 
   function onCancel() {
@@ -91,6 +138,7 @@ export function ResourceRowActions({
     }
     setActiveAction(null);
     setDialogError(null);
+    setDialogFieldErrors({});
   }
 
   return (
@@ -117,6 +165,8 @@ export function ResourceRowActions({
       {activeAction && activeAction.confirmation ? (
         <ResourceActionConfirmDialog
           confirmation={activeAction.confirmation}
+          fields={actionInputFields(activeAction)}
+          fieldErrors={dialogFieldErrors}
           pending={pending}
           error={dialogError}
           onConfirm={onConfirm}

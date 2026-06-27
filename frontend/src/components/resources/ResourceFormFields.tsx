@@ -5,6 +5,10 @@ type FieldErrors = Record<string, string[]>;
 function fieldInputType(widget: ResourceFormFieldCapability["widget"]): string {
   if (widget === "email") return "email";
   if (widget === "password") return "password";
+  if (widget === "number") return "number";
+  if (widget === "datetime") return "datetime-local";
+  if (widget === "date") return "date";
+  if (widget === "time") return "time";
   return "text";
 }
 
