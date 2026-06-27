@@ -10,6 +10,7 @@ import {
   actionErrorMessage,
   actionInputFields,
   buildActionPayload,
+  isActionEnabled,
   shouldOpenDialog,
 } from "@/core/resources/resource-action";
 import { executeAction } from "@/core/resources/resource-action-client";
@@ -49,14 +50,18 @@ function parseFieldErrors(
  * formulario y envían sólo los campos declarados (allowlist). El backend sigue siendo
  * la autoridad (supervivencia, invalidación, permisos, estado).
  */
+const DISABLED_HINT = "No aplica al estado actual";
+
 export function ResourceRowActions({
   placeholder,
   id,
   actions,
+  item,
 }: Readonly<{
   placeholder: string;
   id: string;
   actions: ResourceActionCapability[];
+  item: Record<string, unknown>;
 }>) {
   const router = useRouter();
   const [activeAction, setActiveAction] = useState<ResourceActionCapability | null>(null);
@@ -144,18 +149,29 @@ export function ResourceRowActions({
   return (
     <>
       <div className="flex flex-wrap items-center gap-3">
-        {actions.map((action) => (
-          <button
-            key={action.name}
-            type="button"
-            onClick={() => onActionClick(action)}
-            className={`text-sm font-medium underline-offset-2 hover:underline ${
-              action.danger ? "text-red-700 hover:text-red-800" : "text-slate-700 hover:text-slate-900"
-            }`}
-          >
-            {action.label}
-          </button>
-        ))}
+        {actions.map((action) => {
+          // enabled_when es guía de UI: si no se cumple, el botón se ve deshabilitado
+          // (aria-disabled + tooltip) y el click se ignora. El backend revalida igual.
+          const enabled = isActionEnabled(action, item);
+          return (
+            <button
+              key={action.name}
+              type="button"
+              aria-disabled={enabled ? undefined : true}
+              title={enabled ? undefined : DISABLED_HINT}
+              onClick={() => {
+                if (enabled) {
+                  onActionClick(action);
+                }
+              }}
+              className={`text-sm font-medium underline-offset-2 hover:underline ${
+                action.danger ? "text-red-700 hover:text-red-800" : "text-slate-700 hover:text-slate-900"
+              } ${enabled ? "" : "cursor-not-allowed opacity-50 hover:no-underline"}`}
+            >
+              {action.label}
+            </button>
+          );
+        })}
       </div>
       {inlineError ? (
         <p role="alert" className="mt-1 text-sm text-red-700">

@@ -15,9 +15,45 @@ import {
   actionInputFields,
   actionRequiresConfirmation,
   buildActionPayload,
+  evaluateActionCondition,
+  isActionEnabled,
+  isActionVisible,
   resolveActionUrl,
   shouldOpenDialog,
+  visibleActionsForRow,
 } from "./resource-action.ts";
+
+type Operator = ResourceActionCapability["visible_when"];
+
+function pred(
+  field: string,
+  operator: NonNullable<Operator>["all"][number]["operator"],
+  value?: unknown,
+): NonNullable<Operator>["all"][number] {
+  return { field, operator, value };
+}
+
+function cond(
+  ...predicates: NonNullable<Operator>["all"]
+): NonNullable<Operator> {
+  return { all: predicates };
+}
+
+// Acción mínima con visible_when/enabled_when para los tests del evaluador.
+function statefulAction(
+  overrides: Partial<ResourceActionCapability> = {},
+): ResourceActionCapability {
+  return {
+    name: "approve",
+    label: "Aprobar",
+    method: "POST" as const,
+    url_template: "/api/v1/prescriptions/{id}/approve",
+    scope: "item" as const,
+    danger: false,
+    success_behavior: "refresh" as const,
+    ...overrides,
+  };
+}
 
 function field(
   name: string,
@@ -207,4 +243,116 @@ test("actionBody rechaza un contrato con request e input_schema simultáneos", (
     request: { content_type: "application/json", fixed_body: { a: 1 } },
   });
   assert.throws(() => actionBody(corrupt), ActionContractError);
+});
+
+// --- Evaluador del DSL de estado (visible_when / enabled_when) ---
+
+test("evaluateActionCondition: null/undefined => true (siempre aplica)", () => {
+  assert.equal(evaluateActionCondition(null, { status: "approved" }), true);
+  assert.equal(evaluateActionCondition(undefined, { status: "approved" }), true);
+});
+
+test("evaluateActionCondition: eq cubre y no cubre", () => {
+  assert.equal(evaluateActionCondition(cond(pred("status", "eq", "draft")), { status: "draft" }), true);
+  assert.equal(evaluateActionCondition(cond(pred("status", "eq", "draft")), { status: "approved" }), false);
+});
+
+test("evaluateActionCondition: neq", () => {
+  assert.equal(evaluateActionCondition(cond(pred("status", "neq", "draft")), { status: "approved" }), true);
+  assert.equal(evaluateActionCondition(cond(pred("status", "neq", "draft")), { status: "draft" }), false);
+});
+
+test("evaluateActionCondition: in cubre y no cubre", () => {
+  const c = cond(pred("status", "in", ["pending", "confirmed"]));
+  assert.equal(evaluateActionCondition(c, { status: "pending" }), true);
+  assert.equal(evaluateActionCondition(c, { status: "attended" }), false);
+});
+
+test("evaluateActionCondition: not_in", () => {
+  const c = cond(pred("status", "not_in", ["cancelled", "attended"]));
+  assert.equal(evaluateActionCondition(c, { status: "pending" }), true);
+  assert.equal(evaluateActionCondition(c, { status: "cancelled" }), false);
+});
+
+test("evaluateActionCondition: is_null cubre y no cubre", () => {
+  const c = cond(pred("voided_at", "is_null"));
+  assert.equal(evaluateActionCondition(c, { voided_at: null }), true);
+  assert.equal(evaluateActionCondition(c, { voided_at: "2026-01-01T00:00:00" }), false);
+});
+
+test("evaluateActionCondition: not_null cubre y no cubre", () => {
+  const c = cond(pred("approved_at", "not_null"));
+  assert.equal(evaluateActionCondition(c, { approved_at: "2026-01-01T00:00:00" }), true);
+  assert.equal(evaluateActionCondition(c, { approved_at: null }), false);
+});
+
+test("evaluateActionCondition: all es conjunción (todos cumplidos / uno no)", () => {
+  const c = cond(pred("status", "eq", "approved"), pred("voided_at", "is_null"));
+  assert.equal(evaluateActionCondition(c, { status: "approved", voided_at: null }), true);
+  assert.equal(evaluateActionCondition(c, { status: "approved", voided_at: "x" }), false);
+  assert.equal(evaluateActionCondition(c, { status: "draft", voided_at: null }), false);
+});
+
+test("evaluateActionCondition conservador: campo ausente en row => true (muestra)", () => {
+  assert.equal(evaluateActionCondition(cond(pred("status", "eq", "draft")), {}), true);
+  // not_null con campo ausente también muestra (no se puede evaluar con certeza).
+  assert.equal(evaluateActionCondition(cond(pred("status", "not_null")), {}), true);
+});
+
+test("evaluateActionCondition conservador: value null donde no corresponde (eq) => true", () => {
+  assert.equal(
+    evaluateActionCondition(cond(pred("status", "eq", null)), { status: "draft" }),
+    true,
+  );
+});
+
+test("evaluateActionCondition conservador: tipo inesperado (in sin lista) => true", () => {
+  assert.equal(
+    evaluateActionCondition(cond(pred("status", "in", "draft")), { status: "approved" }),
+    true,
+  );
+});
+
+test("evaluateActionCondition conservador: all malformado (no array) => true", () => {
+  const malformed = { all: "nope" } as unknown as NonNullable<Operator>;
+  assert.equal(evaluateActionCondition(malformed, { status: "approved" }), true);
+});
+
+test("evaluateActionCondition conservador: operador desconocido => true", () => {
+  const corrupt = {
+    all: [{ field: "status", operator: "matches", value: "x" }],
+  } as unknown as NonNullable<Operator>;
+  assert.equal(evaluateActionCondition(corrupt, { status: "approved" }), true);
+});
+
+test("isActionVisible: sin visible_when siempre visible; con condición filtra", () => {
+  assert.equal(isActionVisible(statefulAction(), { status: "approved" }), true);
+  const gated = statefulAction({ visible_when: cond(pred("status", "eq", "draft")) });
+  assert.equal(isActionVisible(gated, { status: "draft" }), true);
+  assert.equal(isActionVisible(gated, { status: "approved" }), false);
+});
+
+test("isActionEnabled: enabled_when controla habilitación, conservador si falta", () => {
+  assert.equal(isActionEnabled(statefulAction(), { status: "x" }), true);
+  const gated = statefulAction({ enabled_when: cond(pred("status", "eq", "draft")) });
+  assert.equal(isActionEnabled(gated, { status: "draft" }), true);
+  assert.equal(isActionEnabled(gated, { status: "approved" }), false);
+});
+
+test("visibleActionsForRow filtra acciones por visible_when contra el row", () => {
+  const approve = statefulAction({
+    name: "approve",
+    visible_when: cond(pred("status", "eq", "draft")),
+  });
+  const voidAction = statefulAction({
+    name: "void",
+    visible_when: cond(pred("status", "eq", "approved")),
+  });
+  const remove = statefulAction({ name: "delete" }); // sin condición: siempre visible
+
+  const draftRow = visibleActionsForRow([approve, voidAction, remove], { status: "draft" });
+  assert.deepEqual(draftRow.map((a) => a.name), ["approve", "delete"]);
+
+  const approvedRow = visibleActionsForRow([approve, voidAction, remove], { status: "approved" });
+  assert.deepEqual(approvedRow.map((a) => a.name), ["void", "delete"]);
 });

@@ -1,4 +1,5 @@
 import type {
+  ActionCondition,
   ResourceActionCapability,
   ResourceFormFieldCapability,
 } from "@/core/api/contracts";
@@ -109,6 +110,99 @@ export function actionRequiresConfirmation(action: ResourceActionCapability): bo
  */
 export function shouldOpenDialog(action: ResourceActionCapability): boolean {
   return actionRequiresConfirmation(action) || actionHasInputSchema(action);
+}
+
+// --- Evaluación client-side del DSL de estado (visible_when / enabled_when) ---
+//
+// Es sólo guía de UI: oculta/deshabilita acciones que no aplican al estado del row.
+// El backend sigue siendo la autoridad y revalida cada transición. La evaluación es
+// conservadora: ante cualquier cosa que no se pueda evaluar con certeza, NO se oculta
+// ni se deshabilita la acción (para no bloquear al usuario por un contrato/row raro).
+
+function isScalar(value: unknown): value is string | number | boolean {
+  const t = typeof value;
+  return t === "string" || t === "number" || t === "boolean";
+}
+
+/**
+ * Evalúa un predicado atómico contra el row. Conservador: predicado malformado,
+ * campo ausente o ``value`` con forma inesperada para el operador -> ``true`` (no
+ * bloquea).
+ */
+function evaluatePredicate(
+  predicate: ActionCondition["all"][number],
+  item: Record<string, unknown>,
+): boolean {
+  if (!predicate || typeof predicate.field !== "string") {
+    return true;
+  }
+  // Campo ausente en el row: no se puede evaluar con certeza -> mostrar.
+  if (!Object.prototype.hasOwnProperty.call(item, predicate.field)) {
+    return true;
+  }
+  const actual = item[predicate.field];
+  const value = predicate.value;
+  switch (predicate.operator) {
+    case "eq":
+      return isScalar(value) ? actual === value : true;
+    case "neq":
+      return isScalar(value) ? actual !== value : true;
+    case "in":
+      return Array.isArray(value) ? value.includes(actual) : true;
+    case "not_in":
+      return Array.isArray(value) ? !value.includes(actual) : true;
+    case "is_null":
+      return actual === null || actual === undefined;
+    case "not_null":
+      return actual !== null && actual !== undefined;
+    default:
+      // Operador no soportado (contrato corrupto) -> conservador.
+      return true;
+  }
+}
+
+/**
+ * Evalúa client-side una condición de estado (``visible_when``/``enabled_when``)
+ * contra el row serializado del item.
+ *
+ * - ``null``/``undefined`` -> ``true`` (sin condición declarada, siempre aplica).
+ * - ``all`` es una conjunción: todos los predicados deben cumplirse.
+ * - Conservador: si la condición o algún predicado no se pueden evaluar (contrato
+ *   malformado, campo ausente, ``value`` con forma inesperada) devuelve ``true`` y la
+ *   acción se muestra. El backend revalida el estado y es la autoridad final.
+ */
+export function evaluateActionCondition(
+  condition: ActionCondition | null | undefined,
+  item: Record<string, unknown>,
+): boolean {
+  if (!condition || !Array.isArray(condition.all)) {
+    return true;
+  }
+  return condition.all.every((predicate) => evaluatePredicate(predicate, item));
+}
+
+/** ¿La acción es visible para el row? (``visible_when`` evaluado, conservador). */
+export function isActionVisible(
+  action: ResourceActionCapability,
+  item: Record<string, unknown>,
+): boolean {
+  return evaluateActionCondition(action.visible_when, item);
+}
+
+/** ¿La acción está habilitada para el row? (``enabled_when`` evaluado, conservador). */
+export function isActionEnabled(
+  action: ResourceActionCapability,
+  item: Record<string, unknown>,
+): boolean {
+  return evaluateActionCondition(action.enabled_when, item);
+}
+
+/** Acciones que deben proyectarse en un row: filtra por ``visible_when``. */
+export function visibleActionsForRow(
+  actions: readonly ResourceActionCapability[],
+  item: Record<string, unknown>,
+): ResourceActionCapability[] {
+  return actions.filter((action) => isActionVisible(action, item));
 }
 
 /** Mensaje de error seguro (de negocio), nunca detalle técnico. */

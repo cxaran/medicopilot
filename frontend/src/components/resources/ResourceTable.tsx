@@ -8,6 +8,7 @@ import type {
 } from "@/core/api/contracts";
 import type { ResourceListPage } from "@/core/resources/list-types";
 import type { ResourceListQuery } from "@/core/resources/list-query";
+import { visibleActionsForRow } from "@/core/resources/resource-action";
 
 import { ResourceRowActions } from "./ResourceRowActions";
 import { formatCell } from "./format-cell";
@@ -132,6 +133,10 @@ export function ResourceTable({
             ) : (
               items.map((row, rowIndex) => {
                 const id = rowId(row, idField);
+                // visible_when se evalúa client-side por fila: las acciones cuya
+                // condición de estado no se cumple no se proyectan (guía de UI; el
+                // backend revalida). enabled_when lo resuelve ResourceRowActions.
+                const rowActions = visibleActionsForRow(actions, row);
                 return (
                   <tr key={rowIndex} className="hover:bg-slate-50">
                     {columns.map((column) => (
@@ -161,11 +166,12 @@ export function ResourceTable({
                                 </Link>
                               ))
                             : null}
-                          {id && actions.length > 0 ? (
+                          {id && rowActions.length > 0 ? (
                             <ResourceRowActions
                               placeholder={actionPlaceholder}
                               id={id}
-                              actions={actions}
+                              actions={rowActions}
+                              item={row}
                             />
                           ) : null}
                         </div>
