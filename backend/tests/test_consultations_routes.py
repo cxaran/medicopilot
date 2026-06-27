@@ -427,6 +427,46 @@ class ConsultationRoutesTest(unittest.TestCase):
         self.assertEqual(got.status_code, 200)
         self.assertEqual(got.json()["status"], "finalized")
 
+    def test_finalized_content_unchanged_after_rejected_mutations(self) -> None:
+        # Inmutabilidad post-finalize verificada por CONTENIDO: las mutaciones
+        # rechazadas (patch/delete/finalize de nuevo) no deben alterar ni el estado ni
+        # los campos. ``test_finalized_is_immutable`` ya cubre los 409; aquí se añade la
+        # verificación de que el contenido no mutó (re-GET).
+        doctor_id = self._seed_doctor(status=RecordStatus.ACTIVE, user_id=self.actor_id)
+        consultation = self._create(
+            attending_doctor_id=str(doctor_id), treatment="Reposo original"
+        ).json()
+        self.assertEqual(self._finalize(consultation["id"]).status_code, 200)
+
+        self.assertEqual(
+            self.client.patch(
+                f"{_BASE}/{consultation['id']}", json={"treatment": "Cambio prohibido"}
+            ).status_code,
+            409,
+        )
+        self.assertEqual(self.client.delete(f"{_BASE}/{consultation['id']}").status_code, 409)
+        self.assertEqual(self._finalize(consultation["id"]).status_code, 409)
+
+        body = self.client.get(f"{_BASE}/{consultation['id']}").json()
+        self.assertEqual(body["status"], "finalized")
+        self.assertEqual(body["treatment"], "Reposo original")
+
+    def test_finalize_rejected_when_patient_deleted_409(self) -> None:
+        # Guard de finalize no cubierto: si el paciente fue eliminado, finalizar da 409
+        # y la consulta sigue en borrador (el guard de paciente precede al de médico).
+        doctor_id = self._seed_doctor(status=RecordStatus.ACTIVE, user_id=self.actor_id)
+        consultation = self._create(attending_doctor_id=str(doctor_id)).json()
+        with Session(self.engine) as session:
+            patient = session.get(Patient, self.patient_id)
+            patient.deleted_at = utc_now()
+            patient.deleted_by = self.actor_id
+            session.add(patient)
+            session.commit()
+        response = self._finalize(consultation["id"])
+        self.assertEqual(response.status_code, 409, response.text)
+        body = self.client.get(f"{_BASE}/{consultation['id']}").json()
+        self.assertEqual(body["status"], "draft")
+
     # --- borrado lógico ---
 
     def test_soft_delete_draft(self) -> None:

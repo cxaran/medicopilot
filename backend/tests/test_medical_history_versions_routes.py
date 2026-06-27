@@ -326,6 +326,22 @@ class MedicalHistoryVersionRoutesTest(unittest.TestCase):
         response = self._finalize(version["id"])
         self.assertEqual(response.status_code, 403, response.text)
 
+    def test_finalize_rejected_when_patient_deleted_409(self) -> None:
+        # Guard de finalize no cubierto: si el paciente fue eliminado, finalizar da 409
+        # (el guard de paciente precede al de médico) y la versión sigue en borrador.
+        version = self._create().json()
+        self._seed_doctor(status=RecordStatus.ACTIVE)
+        with Session(self.engine) as session:
+            patient = session.get(Patient, self.patient_id)
+            patient.deleted_at = utc_now()
+            patient.deleted_by = self.actor_id
+            session.add(patient)
+            session.commit()
+        response = self._finalize(version["id"])
+        self.assertEqual(response.status_code, 409, response.text)
+        body = self.client.get(f"{_BASE}/{version['id']}").json()
+        self.assertEqual(body["status"], "draft")
+
     # --- finalización: flujo feliz ---
 
     def test_finalize_by_active_doctor_promotes_to_current(self) -> None:
