@@ -4,10 +4,12 @@ from typing import Any, Optional
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     CheckConstraint,
     DateTime,
     Enum as SAEnum,
     ForeignKey,
+    Identity,
     Index,
     Integer,
     String,
@@ -36,13 +38,17 @@ class Prescription(Base):
         nullable=False,
         comment="Consulta origen de la receta.",
     )
-    internal_folio: Mapped[str] = mapped_column(
-        String(80), nullable=False, comment="Folio interno único de la receta."
+    internal_folio: Mapped[int] = mapped_column(
+        BigInteger,
+        Identity(),
+        nullable=False,
+        comment="Folio interno consecutivo, generado por la base de datos.",
     )
     related_diagnosis_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         PG_UUID(as_uuid=True),
+        ForeignKey("consultation_diagnoses.id", ondelete="RESTRICT"),
         nullable=True,
-        comment="Diagnóstico relacionado, opcional. Se vinculará cuando exista el modelo de diagnósticos.",
+        comment="Diagnóstico relacionado, opcional; debe pertenecer a la misma consulta.",
     )
     observations: Mapped[Optional[str]] = mapped_column(
         Text, nullable=True, comment="Observaciones generales de la receta."
@@ -64,9 +70,6 @@ class Prescription(Base):
         JSONB().with_variant(JSON(), "sqlite"),
         nullable=True,
         comment="Captura de los datos profesionales del médico al momento de aprobación.",
-    )
-    issued_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime, nullable=True, comment="Fecha de emisión de la receta."
     )
     approved_by_doctor_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         PG_UUID(as_uuid=True),
@@ -143,9 +146,33 @@ class Prescription(Base):
 
     __table_args__ = (
         UniqueConstraint("internal_folio", name="uq_prescriptions_internal_folio"),
+        # Coherencia de estado: borrador sin datos de emisión/anulación; aprobada con
+        # datos de aprobación y snapshot; anulada además con datos de anulación.
+        CheckConstraint(
+            "(status = 'draft'"
+            " AND approved_by_doctor_id IS NULL AND approved_at IS NULL"
+            " AND doctor_snapshot IS NULL"
+            " AND voided_by_doctor_id IS NULL AND voided_at IS NULL"
+            " AND void_reason IS NULL)"
+            " OR (status = 'approved'"
+            " AND approved_by_doctor_id IS NOT NULL AND approved_at IS NOT NULL"
+            " AND doctor_snapshot IS NOT NULL"
+            " AND voided_by_doctor_id IS NULL AND voided_at IS NULL"
+            " AND void_reason IS NULL)"
+            " OR (status = 'voided'"
+            " AND approved_by_doctor_id IS NOT NULL AND approved_at IS NOT NULL"
+            " AND doctor_snapshot IS NOT NULL"
+            " AND voided_by_doctor_id IS NOT NULL AND voided_at IS NOT NULL"
+            " AND void_reason IS NOT NULL)",
+            name="prescription_status_state",
+        ),
+        # La baja lógica sólo aplica a borradores.
+        CheckConstraint(
+            "deleted_at IS NULL OR status = 'draft'",
+            name="prescription_deleted_only_draft",
+        ),
         Index("ix_prescriptions_consultation", "consultation_id"),
         Index("ix_prescriptions_status", "status"),
-        Index("ix_prescriptions_issued_at", "issued_at"),
         Index("ix_prescriptions_approved_by", "approved_by_doctor_id"),
         Index("ix_prescriptions_voided_by", "voided_by_doctor_id"),
         Index("ix_prescriptions_related_diagnosis", "related_diagnosis_id"),
@@ -165,12 +192,6 @@ class PrescriptionItem(Base):
         ForeignKey("prescriptions.id", ondelete="RESTRICT"),
         nullable=False,
         comment="Receta relacionada con este medicamento.",
-    )
-    medication_template_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        PG_UUID(as_uuid=True),
-        ForeignKey("medication_templates.id", ondelete="RESTRICT"),
-        nullable=True,
-        comment="Plantilla de medicamento usada, opcional. La receta copia los textos y no depende de la plantilla después de emitirse.",
     )
     position: Mapped[int] = mapped_column(
         Integer,
@@ -234,9 +255,6 @@ class PrescriptionItem(Base):
     )
 
     prescription = relationship("Prescription", back_populates="items")
-    medication_template = relationship(
-        "MedicationTemplate", back_populates="prescription_items"
-    )
     created_by_user = relationship("User", foreign_keys=[created_by])
     updated_by_user = relationship("User", foreign_keys=[updated_by])
     deleted_by_user = relationship("User", foreign_keys=[deleted_by])
@@ -249,5 +267,4 @@ class PrescriptionItem(Base):
             name="uq_prescription_items_prescription_position",
         ),
         Index("ix_prescription_items_prescription", "prescription_id"),
-        Index("ix_prescription_items_medication_template", "medication_template_id"),
     )

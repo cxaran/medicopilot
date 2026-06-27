@@ -19,6 +19,7 @@ from backend.app.models.doctor import Doctor
 from backend.app.models.medical_history import MedicalHistoryVersion
 from backend.app.models.patient import Patient
 from backend.app.models.patient_clinical_item import PatientClinicalItem
+from backend.app.models.prescription import Prescription, PrescriptionItem
 from backend.app.models.user import Role, User
 from backend.app.models.vital_sign import VitalSign
 from backend.app.query import QueryOptions, ResourceQuery
@@ -53,6 +54,10 @@ from backend.app.schemas.doctor import DoctorListItem
 from backend.app.schemas.medical_history_version import MedicalHistoryVersionListItem
 from backend.app.schemas.patient import PatientListItem
 from backend.app.schemas.patient_clinical_item import PatientClinicalItemListItem
+from backend.app.schemas.prescription import (
+    PrescriptionItemListItem,
+    PrescriptionListItem,
+)
 from backend.app.schemas.vital_sign import VitalSignListItem
 from backend.app.schemas.role import RoleCreate, RoleListItem, RoleRead, RoleUpdate
 from backend.app.schemas.user_admin import (
@@ -236,6 +241,39 @@ CONSULTATION_DIAGNOSES = ResourceQuery(
         search_fields=("diagnosis_text", "code"),
         in_fields=("id",),
         default_sort="-created_at",
+    ),
+)
+
+PRESCRIPTIONS = ResourceQuery(
+    name="PrescriptionQuery",
+    model=Prescription,
+    schema=PrescriptionListItem,
+    options=QueryOptions(
+        # ``consultation_id``/``related_diagnosis_id`` (UUID) por igualdad: las recetas
+        # se consultan por consulta. ``status`` (enum no-nativo) y ``internal_folio``
+        # (entero) como filtros exactos. Sin búsqueda libre. Los listados excluyen
+        # recetas eliminadas y las de consultas eliminadas vía stmt base en el router.
+        filter_fields=("consultation_id", "related_diagnosis_id", "status", "internal_folio"),
+        sort_fields=("internal_folio", "created_at", "updated_at", "approved_at", "voided_at"),
+        in_fields=("id",),
+        default_sort="-created_at",
+    ),
+)
+
+PRESCRIPTION_ITEMS = ResourceQuery(
+    name="PrescriptionItemQuery",
+    model=PrescriptionItem,
+    schema=PrescriptionItemListItem,
+    options=QueryOptions(
+        # ``prescription_id`` (UUID) por igualdad: los medicamentos se consultan por
+        # receta. Búsqueda libre acotada a ``medication_name``. ``position`` ordena el
+        # listado por defecto. Los listados excluyen renglones eliminados y los de
+        # recetas eliminadas vía stmt base en el router.
+        filter_fields=("prescription_id",),
+        sort_fields=("position", "created_at", "updated_at", "medication_name"),
+        search_fields=("medication_name",),
+        in_fields=("id",),
+        default_sort="position",
     ),
 )
 

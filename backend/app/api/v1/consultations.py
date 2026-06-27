@@ -31,8 +31,14 @@ from backend.app.auth.auth_dependencies import CurrentUser
 from backend.app.core.database import SessionDep
 from backend.app.models.consultation import Consultation
 from backend.app.models.doctor import Doctor
-from backend.app.models.enums import ConsultationStatus, PatientStatus, RecordStatus
+from backend.app.models.enums import (
+    ConsultationStatus,
+    PatientStatus,
+    PrescriptionStatus,
+    RecordStatus,
+)
 from backend.app.models.patient import Patient
+from backend.app.models.prescription import Prescription
 from backend.app.resources.registry import CONSULTATIONS
 from backend.app.schemas.consultation import (
     ConsultationCreate,
@@ -203,6 +209,22 @@ def finalize_consultation(
             status.HTTP_409_CONFLICT,
             "resource_state_conflict",
             "No se puede finalizar: el paciente fue eliminado",
+        )
+
+    # Una receta en borrador queda clínicamente sin resolver: debe aprobarse o
+    # eliminarse antes de sellar la consulta. Las aprobadas o anuladas no bloquean.
+    draft_prescription = session.exec(
+        select(Prescription).where(
+            Prescription.consultation_id == consultation.id,
+            Prescription.status == PrescriptionStatus.DRAFT,
+            Prescription.deleted_at.is_(None),
+        )
+    ).first()
+    if draft_prescription is not None:
+        api_error(
+            status.HTTP_409_CONFLICT,
+            "resource_state_conflict",
+            "No se puede finalizar: hay recetas en borrador. Apruébalas o elimínalas",
         )
 
     # El médico se deriva del usuario autenticado: no se acepta doctor_id. Además del

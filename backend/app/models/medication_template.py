@@ -96,9 +96,6 @@ class MedicationTemplate(Base):
     )
 
     doctor = relationship("Doctor", back_populates="medication_templates")
-    prescription_items = relationship(
-        "PrescriptionItem", back_populates="medication_template"
-    )
     created_by_user = relationship("User", foreign_keys=[created_by])
     updated_by_user = relationship("User", foreign_keys=[updated_by])
     deleted_by_user = relationship("User", foreign_keys=[deleted_by])
