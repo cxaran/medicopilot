@@ -17,8 +17,9 @@
     "test:public-auth": "node --no-warnings --test src/core/auth/public-auth.test.ts",
     "test:filters": "node --no-warnings --test src/core/resources/filterable.test.ts",
     "test:forms": "node --no-warnings --test src/core/resources/resource-form.test.ts",
+    "test:api-error": "node --no-warnings --test src/core/api/api-error.test.ts",
     "test:e2e:bootstrap": "node scripts/run-e2e-bootstrap.mjs",
-    "check:canonical": "npm run check:api && npm run lint && npm run typecheck && npm run test:bootstrap && npm run test:actions && npm run test:public-auth && npm run test:filters && npm run test:forms && npm run build",
+    "check:canonical": "npm run check:api && npm run lint && npm run typecheck && npm run test:bootstrap && npm run test:actions && npm run test:public-auth && npm run test:filters && npm run test:forms && npm run test:api-error && npm run build",
     "generate:api": "node scripts/generate-openapi.mjs",
     "check:api": "node scripts/generate-openapi.mjs --check"
   },
