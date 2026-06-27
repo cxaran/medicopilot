@@ -337,6 +337,46 @@ class VitalSignRoutesTest(unittest.TestCase):
         future = (utc_now() + timedelta(days=1)).isoformat()
         self.assertEqual(self._create(measured_at=future).status_code, 422)
 
+    def test_update_rejects_invalid_payload_without_mutation(self) -> None:
+        # La validación de PATCH (VitalSignUpdate) impone los mismos constraints que
+        # create, pero no estaba ejercitada. Cada PATCH inválido debe dar 422 y NO
+        # mutar el registro (re-GET). El par de presión: enviar uno solo en el mismo
+        # PATCH es inválido a nivel de schema (deben registrarse juntos).
+        vital = self._create(
+            weight_kg=70.0, pain_scale=3, oxygen_saturation=98.0
+        ).json()
+        invalid_patches = [
+            {"weight_kg": 0},
+            {"height_cm": -5},
+            {"temperature_c": 0},
+            {"heart_rate_bpm": 0},
+            {"respiratory_rate_rpm": -2},
+            {"oxygen_saturation": 101},
+            {"oxygen_saturation": -1},
+            {"capillary_glucose": -1},
+            {"pain_scale": 11},
+            {"pain_scale": -1},
+            {"systolic_bp": 120},  # par incompleto
+            {"diastolic_bp": 80},  # par incompleto
+            {"systolic_bp": 80, "diastolic_bp": 120},  # sistólica < diastólica
+            {"measured_at": (utc_now() + timedelta(days=1)).isoformat()},  # futura
+        ]
+        for body in invalid_patches:
+            with self.subTest(body=body):
+                self.assertEqual(
+                    self.client.patch(f"{_BASE}/{vital['id']}", json=body).status_code,
+                    422,
+                    body,
+                )
+        # El registro conserva exactamente los valores iniciales: ningún PATCH inválido
+        # mutó nada.
+        reread = self.client.get(f"{_BASE}/{vital['id']}").json()
+        self.assertEqual(reread["weight_kg"], 70.0)
+        self.assertEqual(reread["pain_scale"], 3)
+        self.assertEqual(reread["oxygen_saturation"], 98.0)
+        self.assertIsNone(reread["systolic_bp"])
+        self.assertIsNone(reread["diastolic_bp"])
+
     def test_reject_audit_and_delete_fields_as_input(self) -> None:
         self.assertEqual(self._create(created_by=str(uuid.uuid4())).status_code, 422)
         self.assertEqual(self._create(deleted_at="2024-01-01T00:00:00").status_code, 422)
