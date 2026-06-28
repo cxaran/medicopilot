@@ -68,15 +68,14 @@ export function createContainer(settings = loadSettings()): GatewayContainer {
   const modelCatalog = new InMemoryModelCatalog(catalogModels);
 
   // B4: si hay config del backend interno, se usa el control-plane real que arrienda
-  // credenciales contra FastAPI; si no, el fake (dev/tests). El catálogo permite
-  // resolver el profileId al proveedor/modelo reales para el arriendo.
+  // credenciales contra FastAPI; si no, el fake (dev/tests). authorizeTurn parsea el
+  // profileId (providerId/modelId); el modelo real lo resuelve el discovery.
   const controlPlane: ControlPlanePort =
     settings.backendInternalUrl && settings.backendInternalSecret
       ? new HttpControlPlaneClient({
           backendInternalUrl: settings.backendInternalUrl,
           backendInternalSecret: settings.backendInternalSecret,
-          browserSessions,
-          modelCatalog
+          browserSessions
         })
       : new FakeControlPlaneClient();
 

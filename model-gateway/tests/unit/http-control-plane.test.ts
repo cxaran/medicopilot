@@ -1,14 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { HttpControlPlaneClient } from "../../src/infrastructure/control-plane/http-control-plane.client.js";
 import { InMemoryBrowserSessionStore } from "../../src/application/browser-sessions/session-store.js";
-import { InMemoryModelCatalog } from "../../src/infrastructure/catalog/in-memory-model-catalog.js";
-import { createFakeModel } from "../../src/domain/model.js";
 import { GatewayError } from "../../src/kernel/errors.js";
 import type { TurnAuthorization } from "../../src/ports/control-plane.port.js";
 
 const BACKEND_URL = "http://backend:8000";
 const INTERNAL_SECRET = "internal-shared-secret";
-// El profileId es el model.id (providerId/providerModelId). Se resuelve contra el catálogo.
+// El profileId es el model.id (providerId/providerModelId). authorizeTurn lo PARSEA (no usa
+// catálogo): así soporta modelos descubiertos del proveedor, no solo los curados.
 const OPENCODE_PROFILE = "opencode_zen/gpt-4o-mini";
 
 interface Captured {
@@ -26,25 +25,10 @@ function build(responder: (captured: Captured) => Response) {
     return responder(captured);
   }) as unknown as typeof fetch;
 
-  // Catálogo de prueba: un modelo opencode cuyo id == profileId seleccionado.
-  const modelCatalog = new InMemoryModelCatalog([
-    createFakeModel({
-      id: "opencode_zen/gpt-4o-mini",
-      label: "Opencode gpt-4o-mini",
-      route: {
-        providerId: "opencode_zen",
-        providerModelId: "gpt-4o-mini",
-        protocol: "opencode_zen",
-        endpointBaseUrl: "https://opencode.ai/zen/v1"
-      }
-    })
-  ]);
-
   const client = new HttpControlPlaneClient({
     backendInternalUrl: BACKEND_URL,
     backendInternalSecret: INTERNAL_SECRET,
     browserSessions,
-    modelCatalog,
     fetchImpl
   });
 
@@ -63,7 +47,7 @@ describe("HttpControlPlaneClient", () => {
     expect(authorization.sessionId).toBe(sessionId);
   });
 
-  it("authorizeTurn resuelve provider/model reales desde el catálogo (no fijo 'fake')", async () => {
+  it("authorizeTurn parsea provider/model reales del profileId (no fijo 'fake')", async () => {
     const { client, sessionId } = build(() => new Response("{}", { status: 200 }));
     const authorization = await authorize(client, sessionId);
     expect(authorization.providerId).toBe("opencode_zen");
@@ -71,10 +55,20 @@ describe("HttpControlPlaneClient", () => {
     expect(authorization.profileId).toBe(OPENCODE_PROFILE);
   });
 
-  it("authorizeTurn falla si el profileId no está en el catálogo", async () => {
+  it("authorizeTurn parsea un modelo DESCUBIERTO aunque no esté en el catálogo curado", async () => {
+    const { client, sessionId } = build(() => new Response("{}", { status: 200 }));
+    const authorization = await client.authorizeTurn({
+      browserSessionId: sessionId,
+      profileId: "opencode_zen/deepseek-v4-flash-free"
+    });
+    expect(authorization.providerId).toBe("opencode_zen");
+    expect(authorization.modelId).toBe("deepseek-v4-flash-free");
+  });
+
+  it("authorizeTurn rechaza un profileId mal formado (sin 'providerId/modelId')", async () => {
     const { client, sessionId } = build(() => new Response("{}", { status: 200 }));
     await expect(
-      client.authorizeTurn({ browserSessionId: sessionId, profileId: "desconocido/x" })
+      client.authorizeTurn({ browserSessionId: sessionId, profileId: "sinbarra" })
     ).rejects.toBeInstanceOf(GatewayError);
   });
 

@@ -1,16 +1,12 @@
 import { GatewayError } from "../../kernel/errors.js";
 import type { InMemoryBrowserSessionStore } from "../../application/browser-sessions/session-store.js";
 import type { ControlPlanePort, TurnAuthorization } from "../../ports/control-plane.port.js";
-import type { ModelCatalogPort } from "../../ports/model-catalog.port.js";
 import type { ProviderCredentialLease } from "../../ports/provider-adapter.port.js";
 
 export interface HttpControlPlaneOptions {
   backendInternalUrl: string;
   backendInternalSecret: string;
   browserSessions: InMemoryBrowserSessionStore;
-  // Catálogo de modelos: resuelve el profileId (== model.id "providerId/providerModelId")
-  // al proveedor/modelo REALES, para arrendar la credencial del proveedor correcto.
-  modelCatalog: ModelCatalogPort;
   fetchImpl?: typeof fetch;
 }
 
@@ -30,9 +26,11 @@ interface CredentialLeaseResponse {
  * de estado, jamás el cuerpo ni el secreto interno.
  *
  * El profileId que envía el navegador es el ``model.id`` (``providerId/providerModelId``)
- * del modelo seleccionado; aquí se resuelve contra el catálogo para arrendar la
- * credencial del PROVEEDOR correcto (p.ej. opencode_zen) y enrutar al modelo real, en
- * vez de un proveedor fijo. La identidad del usuario sale de la sesión del navegador.
+ * del modelo seleccionado; aquí se PARSEA para arrendar la credencial del PROVEEDOR
+ * correcto (p.ej. opencode_zen) y enrutar al modelo real. NO se valida contra el catálogo
+ * curado: el modelo puede ser uno DESCUBIERTO del proveedor (no curado); su existencia y
+ * capacidades las resuelve después el discovery (StartTurn). La identidad del usuario sale
+ * de la sesión del navegador.
  */
 export class HttpControlPlaneClient implements ControlPlanePort {
   private readonly fetchImpl: typeof fetch;
@@ -50,25 +48,26 @@ export class HttpControlPlaneClient implements ControlPlanePort {
       throw new GatewayError("SESSION_NOT_FOUND", "Browser session not found");
     }
 
-    // Resuelve el modelo seleccionado (profileId === model.id) para arrendar la credencial
-    // del proveedor correcto. Sin esto se pediría siempre el proveedor fake y FastAPI
-    // rechazaría el arriendo (provider inválido).
-    const models = await this.options.modelCatalog.list();
-    const model = models.find((candidate) => candidate.id === input.profileId);
-    if (!model) {
-      throw new GatewayError("MODEL_NOT_FOUND", "Requested model profile was not found", {
+    // El profileId es "providerId/providerModelId". Se parsea por el PRIMER "/": así se
+    // soporta cualquier modelo del proveedor (incluidos los DESCUBIERTOS, no curados) sin
+    // depender del catálogo. El discovery resuelve luego el modelo real y sus capacidades.
+    const separator = input.profileId.indexOf("/");
+    if (separator <= 0 || separator >= input.profileId.length - 1) {
+      throw new GatewayError("INVALID_PROFILE_ID", "Model profile id must be 'providerId/modelId'", {
         profileId: input.profileId
       });
     }
+    const providerId = input.profileId.slice(0, separator);
+    const modelId = input.profileId.slice(separator + 1);
 
     return {
       userId: session.userId,
       sessionId: input.browserSessionId,
       tenantId: null,
       profileId: input.profileId,
-      providerId: model.route.providerId,
+      providerId,
       credentialId: session.userId,
-      modelId: model.route.providerModelId,
+      modelId,
       allowedCapabilities: {
         tools: true,
         structuredOutput: true,
