@@ -44,7 +44,7 @@ function form(
 
 // --- assertSupportedCreateForm ---
 
-test("assertSupportedCreateForm acepta POST con widgets soportados (incluye password, select y date)", () => {
+test("assertSupportedCreateForm acepta POST con widgets soportados (password, select, date, datetime, number, time)", () => {
   const f = form("POST", [
     field("name", "text"),
     field("email", "email"),
@@ -53,6 +53,9 @@ test("assertSupportedCreateForm acepta POST con widgets soportados (incluye pass
     field("active", "switch"),
     field("sex", "select"),
     field("birth_date", "date"),
+    field("scheduled_at", "datetime"),
+    field("duration_minutes", "number"),
+    field("at", "time"),
   ]);
   assert.doesNotThrow(() => assertSupportedCreateForm(f));
 });
@@ -65,9 +68,9 @@ test("assertSupportedCreateForm rechaza método distinto de POST", () => {
 });
 
 test("assertSupportedCreateForm rechaza widget no soportado", () => {
-  // datetime es un WidgetType válido pero no está permitido en formularios de creación.
+  // multiselect es un WidgetType válido pero aún no está permitido en formularios (F5+).
   assert.throws(
-    () => assertSupportedCreateForm(form("POST", [field("when", "datetime")])),
+    () => assertSupportedCreateForm(form("POST", [field("tags", "multiselect")])),
     FormContractError,
   );
 });
@@ -98,7 +101,7 @@ test("assertSupportedCreateForm rechaza nombres de campo duplicados", () => {
 
 // --- assertSupportedUpdateForm ---
 
-test("assertSupportedUpdateForm acepta PATCH y PUT con widgets soportados (incluye select y date)", () => {
+test("assertSupportedUpdateForm acepta PATCH y PUT con widgets soportados (select, date, datetime, number, time)", () => {
   const fields = [
     field("name", "text"),
     field("email", "email"),
@@ -106,6 +109,9 @@ test("assertSupportedUpdateForm acepta PATCH y PUT con widgets soportados (inclu
     field("active", "switch"),
     field("sex", "select"),
     field("birth_date", "date"),
+    field("scheduled_at", "datetime"),
+    field("duration_minutes", "number"),
+    field("at", "time"),
   ];
   assert.doesNotThrow(() => assertSupportedUpdateForm(form("PATCH", fields)));
   assert.doesNotThrow(() => assertSupportedUpdateForm(form("PUT", fields)));
@@ -144,16 +150,17 @@ test("buildUpdatePayload excluye campos no editables (editable === false)", () =
   assert.equal("record_number" in payload, false);
 });
 
-test("buildUpdatePayload mapea switch->boolean, string->string y opcional vacío->null", () => {
+test("buildUpdatePayload mapea switch->boolean, string->string y omite opcional vacío", () => {
   const fd = new FormData();
   fd.set("name", "Ana");
   fd.set("active", "on");
-  // 'phone' está declarado y es editable pero ausente del FormData (opcional, vacío).
+  // 'phone' está declarado y es editable pero ausente del FormData (opcional, vacío) -> se omite.
   const payload = buildUpdatePayload(
     [field("name", "text"), field("active", "switch"), field("phone", "text")],
     fd,
   );
-  assert.deepEqual(payload, { name: "Ana", active: true, phone: null });
+  assert.deepEqual(payload, { name: "Ana", active: true });
+  assert.equal("phone" in payload, false);
 });
 
 test("buildUpdatePayload conserva '' en un campo requerido vacío", () => {
@@ -165,18 +172,20 @@ test("buildUpdatePayload conserva '' en un campo requerido vacío", () => {
 
 // --- buildCreatePayload ---
 
-test("buildCreatePayload incluye select/date y convierte opcionales vacíos a null", () => {
+test("buildCreatePayload incluye select/date y omite opcionales vacíos", () => {
   const fd = new FormData();
   fd.set("full_name", "Ana López");
   fd.set("sex", "female");
   fd.set("birth_date", "1990-05-20");
-  // 'email' opcional y ausente -> null (evita 422 de EmailStr con cadena vacía).
+  // 'email' opcional y ausente -> se omite (evita 422 de EmailStr y respeta defaults).
+  // 'status' opcional con default no-nullable ausente -> se omite (el backend pone su default).
   const payload = buildCreatePayload(
     [
       field("full_name", "text", { required: true }),
       field("sex", "select", { required: true }),
       field("birth_date", "date", { required: true }),
       field("email", "email"),
+      field("status", "select"),
     ],
     fd,
   );
@@ -184,6 +193,38 @@ test("buildCreatePayload incluye select/date y convierte opcionales vacíos a nu
     full_name: "Ana López",
     sex: "female",
     birth_date: "1990-05-20",
-    email: null,
   });
+  assert.equal("email" in payload, false);
+  assert.equal("status" in payload, false);
+});
+
+test("buildCreatePayload coacciona number a valor numérico (entero y decimal) y datetime queda literal", () => {
+  const fd = new FormData();
+  fd.set("duration_minutes", "30");
+  fd.set("weight_kg", "70.5");
+  fd.set("scheduled_at", "2026-07-01T10:30");
+  const payload = buildCreatePayload(
+    [
+      field("duration_minutes", "number", { required: true }),
+      field("weight_kg", "number"),
+      field("scheduled_at", "datetime", { required: true }),
+    ],
+    fd,
+  );
+  assert.deepEqual(payload, {
+    duration_minutes: 30,
+    weight_kg: 70.5,
+    scheduled_at: "2026-07-01T10:30",
+  });
+  assert.equal(typeof payload.duration_minutes, "number");
+  assert.equal(typeof payload.weight_kg, "number");
+});
+
+test("buildCreatePayload: number/datetime opcionales vacíos se omiten (no NaN ni '' ni null)", () => {
+  const fd = new FormData();
+  const payload = buildCreatePayload(
+    [field("weight_kg", "number"), field("measured_at", "datetime")],
+    fd,
+  );
+  assert.deepEqual(payload, {});
 });

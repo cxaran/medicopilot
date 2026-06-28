@@ -21,9 +21,24 @@ export function ResourceFormFields({
   fieldErrors: FieldErrors;
   initialValues?: Record<string, unknown>;
 }>) {
-  function initialText(name: string): string {
-    const value = initialValues[name];
-    return value == null ? "" : String(value);
+  function initialText(field: ResourceFormFieldCapability): string {
+    const value = initialValues[field.name];
+    if (value == null) {
+      return "";
+    }
+    const text = String(value);
+    // Los inputs nativos exigen un formato exacto; recortamos el ISO del backend para que
+    // se precarguen en edición (date: YYYY-MM-DD, datetime-local: YYYY-MM-DDTHH:MM, time: HH:MM).
+    if (field.widget === "date") {
+      return text.slice(0, 10);
+    }
+    if (field.widget === "datetime") {
+      return text.slice(0, 16);
+    }
+    if (field.widget === "time") {
+      return text.slice(0, 5);
+    }
+    return text;
   }
 
   return (
@@ -104,7 +119,7 @@ export function ResourceFormFields({
                 id={field.name}
                 name={field.name}
                 required={field.required}
-                defaultValue={initialText(field.name)}
+                defaultValue={initialText(field)}
                 aria-describedby={errorId}
                 className="mt-1 min-h-28 w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-slate-500 focus:outline-none"
               />
@@ -114,7 +129,9 @@ export function ResourceFormFields({
                 name={field.name}
                 type={fieldInputType(field.widget)}
                 required={field.required}
-                defaultValue={initialText(field.name)}
+                defaultValue={initialText(field)}
+                // ``step="any"`` permite decimales (p. ej. peso/temperatura) en campos numéricos.
+                step={field.widget === "number" ? "any" : undefined}
                 aria-describedby={errorId}
                 className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-slate-500 focus:outline-none"
               />
