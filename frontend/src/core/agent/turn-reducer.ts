@@ -21,7 +21,9 @@ export interface TurnState {
   assistantText: string;
   pendingToolCalls: PendingToolCall[];
   usage: TurnUsage | null;
-  error: { code: string; message: string } | null;
+  // ``details`` conserva la metadata del error del proveedor (p. ej. ``providerStatus``)
+  // que el gateway adjunta en ``turn.failed``; la usa el mapeo a mensaje amistoso.
+  error: { code: string; message: string; details?: unknown } | null;
 }
 
 export function initialTurnState(): TurnState {
@@ -80,7 +82,7 @@ export function reduceTurnEvent(state: TurnState, event: ServerEvent): TurnState
       return {
         ...state,
         status: "failed",
-        error: { code: event.code, message: event.message },
+        error: { code: event.code, message: event.message, details: event.details },
       };
 
     default:

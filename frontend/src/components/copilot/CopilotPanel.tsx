@@ -18,6 +18,7 @@ import {
   type TurnState,
 } from "@/core/agent/turn-reducer";
 import type {
+  GatewayProtocol,
   NormalizedReasoningEffort,
   ServerEvent,
   WireContentPart,
@@ -25,6 +26,7 @@ import type {
   WireModel,
   WireProviderStatus,
 } from "@/core/agent/protocol";
+import { turnFailureMessage } from "@/core/agent/turn-error";
 import { executeTool, resolveToolCall } from "@/core/agent/tools/tool-runner";
 import {
   listTools,
@@ -217,6 +219,9 @@ export function CopilotPanel() {
   // seleccionado. Refs para usarlos en los handlers del turno (closures con deps vacías).
   const sessionUsageRef = useRef<NormalizedUsage>(emptyUsage());
   const pricingRef = useRef<ModelCostRate | null>(null);
+  // Protocolo del modelo en uso (para mapear errores específicos del proveedor a un mensaje
+  // amistoso, p. ej. el 401 de inferencia de opencode Zen). Ref por el mismo motivo que arriba.
+  const protocolRef = useRef<GatewayProtocol | null>(null);
   // Indicador de uso/costo: tokens y costo estimado de ESTE turno + acumulado de la sesión.
   // ``null`` hasta el primer turno completado. El costo es null cuando el precio es desconocido.
   const [usageStats, setUsageStats] = useState<{
@@ -280,6 +285,7 @@ export function CopilotPanel() {
       usable: usableInputTokens(model?.capabilities),
     };
     pricingRef.current = resolvePricing(model);
+    protocolRef.current = model?.protocol ?? null;
   }, [models, selectedModel]);
 
   // Carga el catálogo de recursos (permission-projected) para gatear las tools de escritura
@@ -382,7 +388,7 @@ export function CopilotPanel() {
           {
             id: nextId(),
             role: "assistant",
-            text: `No se pudo completar el turno: ${next.error?.message ?? next.error?.code ?? "error"}`,
+            text: turnFailureMessage(next.error, protocolRef.current),
             isError: true,
           },
         ]);

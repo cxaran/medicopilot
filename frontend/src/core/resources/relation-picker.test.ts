@@ -31,12 +31,34 @@ test("resolveRelationTarget: consultation_id -> consultations", () => {
   assert.deepEqual(target?.labelFields, ["reason_for_visit"]);
 });
 
-test("resolveRelationTarget: FK sin mapeo y campos no-FK devuelven null", () => {
-  // FK aún no cubierta -> cae al input de texto manual (sin regresión).
-  assert.equal(resolveRelationTarget("appointment_id"), null);
-  assert.equal(resolveRelationTarget("related_diagnosis_id"), null);
+test("resolveRelationTarget: FK clínicas ampliadas resuelven su recurso destino", () => {
+  assert.equal(resolveRelationTarget("appointment_id")?.resource, "appointments");
+  assert.deepEqual(resolveRelationTarget("appointment_id")?.labelFields, ["reason"]);
+  assert.equal(resolveRelationTarget("prescription_id")?.resource, "prescriptions");
+  assert.deepEqual(resolveRelationTarget("prescription_id")?.labelFields, ["internal_folio"]);
+  assert.equal(resolveRelationTarget("related_diagnosis_id")?.resource, "consultation_diagnoses");
+  assert.deepEqual(resolveRelationTarget("related_diagnosis_id")?.labelFields, ["diagnosis_text"]);
+  assert.equal(resolveRelationTarget("user_id")?.resource, "users");
+  assert.deepEqual(resolveRelationTarget("user_id")?.labelFields, ["full_name", "name", "email"]);
+  // El campo se conserva en el target resuelto.
+  assert.equal(resolveRelationTarget("user_id")?.field, "user_id");
+});
+
+test("resolveRelationTarget: campos de AUDITORÍA y no-FK devuelven null (texto manual)", () => {
+  // Auditoría: apuntan a usuarios pero NO son relaciones elegibles (las fija el backend).
+  assert.equal(resolveRelationTarget("created_by"), null);
+  assert.equal(resolveRelationTarget("updated_by"), null);
+  assert.equal(resolveRelationTarget("deleted_by"), null);
+  // No-FK / vacío.
   assert.equal(resolveRelationTarget("full_name"), null);
   assert.equal(resolveRelationTarget(""), null);
+});
+
+test("resolveRelationTarget: sin regresión en los mapeos previos", () => {
+  assert.equal(resolveRelationTarget("patient_id")?.resource, "patients");
+  assert.equal(resolveRelationTarget("doctor_id")?.resource, "doctors");
+  assert.equal(resolveRelationTarget("attending_doctor_id")?.resource, "doctors");
+  assert.equal(resolveRelationTarget("consultation_id")?.resource, "consultations");
 });
 
 // --- relationItemId / label / secondary ---

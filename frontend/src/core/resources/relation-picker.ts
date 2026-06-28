@@ -45,7 +45,32 @@ const RELATION_TARGETS: Readonly<Record<string, Omit<RelationTarget, "field">>> 
     labelFields: ["reason_for_visit"],
     secondaryFields: ["consulted_at"],
   },
+  // FK clínicas restantes (follow-up de la auditoría de cobertura). Cada una reutiliza el
+  // mismo relation-search-client genérico (api_path + búsqueda del recurso destino); las
+  // etiquetas caen al id si el campo elegido no viene en la fila.
+  appointment_id: {
+    resource: "appointments",
+    labelFields: ["reason"],
+    secondaryFields: ["scheduled_at", "status"],
+  },
+  prescription_id: {
+    resource: "prescriptions",
+    labelFields: ["internal_folio"],
+    secondaryFields: ["status"],
+  },
+  related_diagnosis_id: {
+    resource: "consultation_diagnoses",
+    labelFields: ["diagnosis_text"],
+    secondaryFields: ["code", "coding_system"],
+  },
+  user_id: {
+    resource: "users",
+    labelFields: ["full_name", "name", "email"],
+    secondaryFields: ["email"],
+  },
 };
+// Campos de AUDITORÍA: aunque terminen en "_by" y apunten a usuarios, NO son relaciones
+// elegibles por el usuario (los fija el backend). Se dejan SIN mapear -> input de texto.
 
 /** Recurso destino de un campo FK, o ``null`` si no hay mapeo (input manual de texto). */
 export function resolveRelationTarget(fieldName: string): RelationTarget | null {
