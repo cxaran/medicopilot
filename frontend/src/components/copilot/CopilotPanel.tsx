@@ -47,6 +47,17 @@ import {
   recallIndicatorText,
   selectRelevantMemories,
 } from "@/core/agent/memory-recall";
+import {
+  compactContext,
+  contextUsage,
+  effectiveContextWindow,
+  estimateTokens,
+  estimateToolSchemaTokens,
+  messageText,
+  usableInputTokens,
+  type ContextSegment,
+  type ContextUsage,
+} from "@/core/agent/context-window";
 import { listAgentMemories } from "@/core/agent-memories/agent-memories-client";
 import { browserApi } from "@/core/api/browser-client";
 import type { ResourceCatalog } from "@/core/api/contracts";
@@ -140,6 +151,20 @@ export function CopilotPanel() {
   // confiable; nunca como instrucciones (ver memory-recall).
   const [recalledCount, setRecalledCount] = useState<number | null>(null);
 
+  // CONTEXTO (P3): contabilidad usado/presupuesto para el indicador, y aviso de compactación.
+  // ``usage`` se actualiza con la estimación local al enviar y con el usage REPORTADO por el
+  // gateway al completar el turno. ``compaction`` describe la última compactación (si la hubo).
+  const [contextStats, setContextStats] = useState<ContextUsage | null>(null);
+  const [compaction, setCompaction] = useState<{ dropped: number; preservedIds: string[] } | null>(
+    null,
+  );
+  // Planes APROBADOS que se conservan en el contexto verbatim (preserve): así el modelo
+  // recuerda las acciones ya ejecutadas y sus identificadores aunque se compacte la charla.
+  const approvedPlansRef = useRef<ContextSegment[]>([]);
+  // Presupuesto del modelo seleccionado (ventana efectiva + input usable), para usarlo dentro
+  // de los handlers del turno (closures con deps vacías).
+  const budgetRef = useRef<{ window: number; usable: number }>({ window: 0, usable: 0 });
+
   const clientRef = useRef<AgentClient | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const turnRef = useRef<TurnState>(initialTurnState());
@@ -171,6 +196,15 @@ export function CopilotPanel() {
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
+
+  // Mantiene el presupuesto de contexto del modelo seleccionado (ventana efectiva + usable).
+  useEffect(() => {
+    const caps = models.find((model) => model.id === selectedModel)?.capabilities;
+    budgetRef.current = {
+      window: effectiveContextWindow(caps),
+      usable: usableInputTokens(caps),
+    };
+  }, [models, selectedModel]);
 
   // Carga el catálogo de recursos (permission-projected) para gatear las tools de escritura
   // por rol y mostrar la procedencia. Si falla, queda vacío -> ninguna escritura se ofrece.
@@ -205,6 +239,12 @@ export function CopilotPanel() {
             ...prev,
             { id: nextId(), role: "assistant", text: next.assistantText },
           ]);
+        }
+        // Usage REPORTADO por el gateway: es el conteo real de tokens de entrada del turno.
+        // Actualiza el indicador con la fuente "reportado" (más fiable que la estimación).
+        const reportedInput = next.usage?.input_tokens;
+        if (typeof reportedInput === "number" && budgetRef.current.window > 0) {
+          setContextStats(contextUsage(reportedInput, budgetRef.current.window, "reportado"));
         }
         turnRef.current = initialTurnState();
         setTurn(turnRef.current);
@@ -404,7 +444,8 @@ export function CopilotPanel() {
       ...(image ? { image } : {}),
     };
     const history = [...messagesRef.current, userMessage];
-    const wireMessages: WireMessage[] = history.map((message) => {
+    // Cada mensaje de la charla es un SEGMENTO atómico para la compactación (texto + cable).
+    const historySegments: ContextSegment[] = history.map((message) => {
       const content: WireContentPart[] = [];
       if (message.text) {
         content.push({ type: "text", text: message.text });
@@ -415,7 +456,7 @@ export function CopilotPanel() {
       if (content.length === 0) {
         content.push({ type: "text", text: "" });
       }
-      return { role: message.role, content };
+      return { messages: [{ role: message.role, content }], text: message.text ?? "" };
     });
 
     setMessages(history);
@@ -425,7 +466,26 @@ export function CopilotPanel() {
     // RECALL antes de que el modelo responda: las memorias se inyectan como un mensaje
     // ``system`` delimitado al frente del contexto (datos, no instrucciones; ver memory-recall).
     const recall = await recallMemoryMessage();
-    const outgoing = recall ? [recall, ...wireMessages] : wireMessages;
+    const toolsWire = toWireToolDefinitions(effectiveTools(listTools(), creatableRef.current));
+
+    // CONTEXTO (P3): el overhead fijo (esquema de tools + bloque de memorias) no se compacta;
+    // los planes APROBADOS se conservan verbatim y la charla vieja se resume si excede el
+    // presupuesto. Solo afecta la ventana que ve el modelo; el expediente en FastAPI no se toca.
+    const overhead =
+      estimateToolSchemaTokens(toolsWire) + (recall ? estimateTokens(messageText(recall)) : 0);
+    const segments: ContextSegment[] = [...approvedPlansRef.current, ...historySegments];
+    const result = compactContext(segments, {
+      usableInputTokens: budgetRef.current.usable,
+      overheadTokens: overhead,
+    });
+    const outgoing = recall ? [recall, ...result.messages] : result.messages;
+
+    const usedEstimate =
+      overhead + result.messages.reduce((sum, message) => sum + estimateTokens(messageText(message)), 0);
+    setContextStats(contextUsage(usedEstimate, budgetRef.current.window, "estimado"));
+    setCompaction(
+      result.compacted ? { dropped: result.droppedSegments, preservedIds: result.preservedIds } : null,
+    );
 
     clientRef.current?.startTurn({
       // El profileId es el id del modelo seleccionado (providerId/providerModelId); el
@@ -434,7 +494,7 @@ export function CopilotPanel() {
       messages: outgoing,
       // Declara al modelo SOLO las tools efectivas: lecturas + escrituras permitidas por el
       // rol del médico (gating por permiso). FastAPI revalida en cada ejecución.
-      tools: toWireToolDefinitions(effectiveTools(listTools(), creatableRef.current)),
+      tools: toolsWire,
       generation: { max_output_tokens: 1024 },
     });
   };
@@ -473,6 +533,7 @@ export function CopilotPanel() {
     patchToolCall(callId, { status: "running" });
     // Se ejecuta EXACTAMENTE el payload aprobado (plan inmutable), no los args originales.
     const payload = { ...outcome.request.plan.exactPayload };
+    const plan = outcome.request.plan;
     void executeTool(pending.tool, payload).then((result) => {
       patchToolCall(
         callId,
@@ -480,6 +541,23 @@ export function CopilotPanel() {
           ? { status: "success", resultText: previewContent(result.content), resultContent: result.content }
           : { status: "error", errorText: result.message },
       );
+      // CONTEXTO (P3): al ejecutarse, el plan APROBADO se conserva verbatim como segmento
+      // ``preserve`` (nunca se elide al compactar). Incluye el id del recurso creado, para que
+      // el modelo pueda referenciarlo en turnos siguientes aunque la charla se compacte.
+      if (result.status === "success") {
+        const createdId =
+          typeof result.content === "object" && result.content !== null && "id" in result.content
+            ? String((result.content as { id?: unknown }).id ?? "")
+            : "";
+        const note =
+          `Acción clínica APROBADA y ejecutada (${plan.actionType} → ${plan.targetResource}): ` +
+          `${plan.humanReadableSummary}` +
+          (createdId ? ` Identificador del registro creado: ${createdId}.` : "");
+        approvedPlansRef.current = [
+          ...approvedPlansRef.current,
+          { messages: [{ role: "system", content: [{ type: "text", text: note }] }], text: note, preserve: true },
+        ];
+      }
       clientRef.current?.sendToolResult(pending.turnId, callId, result);
     });
   };
@@ -582,6 +660,8 @@ export function CopilotPanel() {
           <span>{recallIndicatorText(recalledCount)}</span>
         </div>
       )}
+
+      {contextStats && <ContextUsageBar usage={contextStats} compaction={compaction} />}
 
       <ToolCatalogPanel entries={toolCatalog} />
 
@@ -686,6 +766,56 @@ export function CopilotPanel() {
           </div>
         </div>
       </Card>
+    </div>
+  );
+}
+
+function ContextUsageBar({
+  usage,
+  compaction,
+}: Readonly<{
+  usage: ContextUsage;
+  compaction: { dropped: number; preservedIds: string[] } | null;
+}>) {
+  const tone =
+    usage.percent >= 90 ? "var(--danger)" : usage.percent >= 75 ? "var(--warn)" : "var(--accent)";
+  return (
+    <div className="flex flex-col gap-1.5 rounded-[12px] border border-[var(--border2)] bg-[var(--panel2)] px-3.5 py-2.5 text-xs text-[var(--tx2)]">
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-semibold uppercase tracking-wide">Contexto</span>
+        {usage.unknownBudget ? (
+          <span>Presupuesto del modelo no informado</span>
+        ) : (
+          <span>
+            {usage.used.toLocaleString("es")} / {usage.budget.toLocaleString("es")} tokens ·{" "}
+            {usage.percent}% · {usage.source}
+          </span>
+        )}
+      </div>
+      {!usage.unknownBudget && (
+        <div
+          className="h-1.5 w-full overflow-hidden rounded-full bg-[var(--border2)]"
+          role="progressbar"
+          aria-valuenow={usage.percent}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-label="Uso del contexto del modelo"
+        >
+          <div
+            className="h-full rounded-full transition-all"
+            style={{ width: `${usage.percent}%`, backgroundColor: tone }}
+          />
+        </div>
+      )}
+      {compaction && (
+        <p>
+          Se compactó la conversación: se resumieron {compaction.dropped} intercambio(s) antiguo(s)
+          {compaction.preservedIds.length > 0
+            ? `, conservando ${compaction.preservedIds.length} identificador(es) clínico(s).`
+            : "."}{" "}
+          Los datos del expediente no se modificaron.
+        </p>
+      )}
     </div>
   );
 }
