@@ -55,7 +55,7 @@ Leyenda UI: ✅ existe y funciona · ⚠️ existe pero rota/incompleta · ❌ n
 | 14 | **appointments** (agenda) | CRUD + confirm/cancel/no-show/reschedule | ✅ | ✅ | ✅ | ✅ acciones | **F2 lo arregla (`number`+`datetime`)** | **F2 (hecho)** |
 | 15 | **clinical_documents** | CRUD multipart + download/archive/restore | ✅ | ✅ (multipart) | ⚠️ (metadata) | ✅ archive/restore/delete | **F3 lo arregla (subida multipart)** | **F3 (hecho)** |
 | 16 | **ai_providers** | credenciales API key + OAuth ChatGPT | n/a | ✅ (en `/account`) | n/a (rotación = borrar+crear) | ✅ eliminar | OK (UI dedicada) | — |
-| 17 | **agent_memories** | CRUD de memorias del agente | ❌ | ❌ | ❌ | ❌ | **sin UI** | **F4** |
+| 17 | **agent_memories** | CRUD de memorias del agente | ✅ | ✅ | ✅ | ✅ eliminar | **F4 lo arregla (UI dedicada)** | **F4 (hecho)** |
 
 ### Huecos transversales (afectan a varias filas)
 
@@ -85,5 +85,9 @@ Leyenda UI: ✅ existe y funciona · ⚠️ existe pero rota/incompleta · ❌ n
 - **F3 (hecho, commit 9357703):** alta multipart (subida de archivo) guiada por capability
   (transport + file_field) en el flujo de creación genérico → documentos clínicos. Validación
   de archivo requerido/tamaño en cliente; descarga ya existente verificada.
-- **F4:** UI de memorias del agente (agent_memories).
+- **F4 (hecho, commit feat F4):** UI dedicada de memorias del agente bajo `/account`
+  (sección `AgentMemoriesSection`, junto a Proveedores de IA). NO usa el framework genérico:
+  los endpoints son owner-only (no RBAC) y el contenido vuelve descifrado al dueño. Cliente
+  tipado (`core/agent-memories/agent-memories-client.ts`) + helpers de vista + tests
+  (client/view). Alta/lista (contenido en claro)/edición inline/borrado con confirmación.
 - **F5:** picker de relación para FK (UX de recursos hijos).
