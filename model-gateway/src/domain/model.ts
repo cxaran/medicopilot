@@ -12,6 +12,10 @@ export type ProviderProtocol =
   // OpenCode Go: misma API OpenAI-compatible que Zen pero otro base URL y catalogo
   // (suscripcion); se enruta con su propio provider id para arrendar la credencial correcta.
   | "opencode_go"
+  // OpenAI / Codex (P6): un solo provider id "openai" cubre dos "auth shapes" (API key vs
+  // OAuth de suscripcion ChatGPT Plus). El adaptador habla la familia OpenAI: chat/completions
+  // (API key) o el app-server Responses de Codex (OAuth). El lease entrega el Bearer correcto.
+  | "openai"
   | "fake";
 
 // Formato de "thinking"/razonamiento que entiende el proveedor en el cable (patrón

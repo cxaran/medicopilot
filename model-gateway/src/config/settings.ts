@@ -32,6 +32,14 @@ export interface GatewaySettings {
   opencodeGoEnabled?: boolean | undefined;
   opencodeGoBaseUrl?: string | undefined;
   opencodeGoDefaultModel?: string | undefined;
+  // OpenAI / Codex (P6, opt-in): un provider id "openai" con dos auth shapes (API key vs
+  // OAuth ChatGPT Plus). apiFlavor elige la familia de cable: "chat_completions" (API key,
+  // default) o "codex_responses" (app-server Responses de la suscripción). La credencial NO
+  // se configura aquí: llega por arriendo (B4/B10). Opcionales para no obligar a los tests.
+  openaiEnabled?: boolean | undefined;
+  openaiBaseUrl?: string | undefined;
+  openaiDefaultModel?: string | undefined;
+  openaiApiFlavor?: string | undefined;
 }
 
 function numberFromEnv(name: string, fallback: number): number {
@@ -87,6 +95,14 @@ export function loadSettings(): GatewaySettings {
     // endpoint Go y con provider id opencode_go. Modelo por defecto del bundle Go.
     opencodeGoEnabled: process.env.GATEWAY_OPENCODE_GO_ENABLED === "true",
     opencodeGoBaseUrl: process.env.GATEWAY_OPENCODE_GO_BASE_URL ?? "https://opencode.ai/zen/go/v1",
-    opencodeGoDefaultModel: process.env.GATEWAY_OPENCODE_GO_DEFAULT_MODEL ?? "qwen3.7-plus"
+    opencodeGoDefaultModel: process.env.GATEWAY_OPENCODE_GO_DEFAULT_MODEL ?? "qwen3.7-plus",
+    // OpenAI / Codex (opt-in). Para API key: flavor chat_completions + base https://api.openai.com/v1.
+    // Para ChatGPT Plus (OAuth/Codex): flavor codex_responses + base del backend de ChatGPT
+    // (se confirma en el e2e en vivo). El modelo por defecto se usa como fila curada cuando el
+    // proveedor no expone /models (caso Codex).
+    openaiEnabled: process.env.GATEWAY_OPENAI_ENABLED === "true",
+    openaiBaseUrl: process.env.GATEWAY_OPENAI_BASE_URL ?? "https://api.openai.com/v1",
+    openaiDefaultModel: process.env.GATEWAY_OPENAI_DEFAULT_MODEL ?? "gpt-5-codex",
+    openaiApiFlavor: process.env.GATEWAY_OPENAI_API_FLAVOR ?? "chat_completions"
   };
 }

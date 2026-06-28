@@ -11,12 +11,18 @@ import {
   createOpencodeModel,
   OPENCODE_GO_PROVIDER_ID
 } from "../providers/opencode/adapter.js";
+import {
+  OpenAIProviderAdapter,
+  createOpenAIModel,
+  type OpenAIApiFlavor
+} from "../providers/openai/adapter.js";
 import { ProviderRegistry } from "../providers/registry.js";
 import { createFakeModel } from "../domain/model.js";
 import { InMemoryBrowserSessionStore } from "../application/browser-sessions/session-store.js";
 import { ModelDiscoveryService } from "../application/capabilities/model-discovery.js";
 import type { GatewaySettings } from "../config/settings.js";
 import type { ControlPlanePort } from "../ports/control-plane.port.js";
+import type { ProviderAdapter } from "../ports/provider-adapter.port.js";
 import type { ModelCatalogPort } from "../ports/model-catalog.port.js";
 import type { ProviderRegistryPort } from "../ports/provider-registry.port.js";
 import type { RateLimiterPort } from "../ports/rate-limiter.port.js";
@@ -49,7 +55,7 @@ export function createContainer(settings = loadSettings()): GatewayContainer {
   // OpenCode Go (opt-in): mismo adaptador OpenAI-compatible, otro base URL y provider id
   // (opencode_go) para que el arriendo busque la credencial Go correcta. La misma key
   // opencode sirve, pero contra el endpoint Go.
-  const adapters = [new FakeProviderAdapter(), opencodeAdapter];
+  const adapters: ProviderAdapter[] = [new FakeProviderAdapter(), opencodeAdapter];
   const catalogModels = [createFakeModel(), opencodeModel];
   if (settings.opencodeGoEnabled && settings.opencodeGoBaseUrl) {
     const opencodeGoAdapter = new OpencodeProviderAdapter({
@@ -63,6 +69,25 @@ export function createContainer(settings = loadSettings()): GatewayContainer {
     });
     adapters.push(opencodeGoAdapter);
     catalogModels.push(opencodeGoModel);
+  }
+
+  // OpenAI / Codex (P6, opt-in). Mismo provider id "openai" para ambas auth shapes; el
+  // arriendo (B4/B10) entrega el Bearer correcto (API key o access token OAuth). El flavor
+  // elige la familia de cable. El modelo por defecto se registra como fila curada (útil
+  // cuando el proveedor no expone /models, p. ej. Codex/suscripción); el discovery añade los
+  // reales cuando sí hay /models.
+  if (settings.openaiEnabled && settings.openaiBaseUrl) {
+    const openaiAdapter = new OpenAIProviderAdapter({
+      baseUrl: settings.openaiBaseUrl,
+      apiFlavor: (settings.openaiApiFlavor as OpenAIApiFlavor) ?? "chat_completions"
+    });
+    const openaiModel = createOpenAIModel({
+      baseUrl: settings.openaiBaseUrl,
+      modelId: settings.openaiDefaultModel ?? "gpt-5-codex",
+      apiFlavor: (settings.openaiApiFlavor as OpenAIApiFlavor) ?? "chat_completions"
+    });
+    adapters.push(openaiAdapter);
+    catalogModels.push(openaiModel);
   }
 
   const modelCatalog = new InMemoryModelCatalog(catalogModels);
