@@ -1,7 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { discoverMcpTools, mcpServerConfig, type McpServerConfig } from "./mcp-client.ts";
+import {
+  callMcpTool,
+  discoverMcpTools,
+  mcpServerConfig,
+  type McpServerConfig,
+} from "./mcp-client.ts";
 
 const config: McpServerConfig = { url: "https://mcp.test/rpc", name: "filesystem" };
 
@@ -129,4 +134,72 @@ test("discoverMcpTools: soporta respuesta SSE (text/event-stream) en tools/list"
 test("discoverMcpTools: lanza si initialize devuelve error JSON-RPC", async () => {
   const { fetchImpl } = fakeMcp(() => jsonRpc({ jsonrpc: "2.0", id: 1, error: { code: -32000, message: "no autorizado" } }));
   await assert.rejects(() => discoverMcpTools(config, fetchImpl), /initialize/);
+});
+
+// --- tools/call (rebanada 2) ---
+
+test("callMcpTool: tras el handshake, invoca tools/call con name + arguments y devuelve content", async () => {
+  const { fetchImpl, calls } = fakeMcp((method) => {
+    if (method === "initialize") return jsonRpc({ jsonrpc: "2.0", id: 1, result: { capabilities: {} } });
+    if (method === "tools/call") {
+      return jsonRpc({ jsonrpc: "2.0", id: 3, result: { content: [{ type: "text", text: "hola" }], isError: false } });
+    }
+    return new Response(null, { status: 202 });
+  });
+
+  const result = await callMcpTool(config, "read_file", { path: "/x" }, { fetchImpl });
+  assert.equal(result.isError, false);
+  assert.deepEqual(result.content, [{ type: "text", text: "hola" }]);
+
+  // El cuerpo de tools/call usa el nombre RAW del servidor y pasa los argumentos.
+  const callBody = calls.find((c) => c.body.method === "tools/call")!;
+  const params = callBody.body.params as Record<string, unknown>;
+  assert.equal(params.name, "read_file");
+  assert.deepEqual(params.arguments, { path: "/x" });
+});
+
+test("callMcpTool: marca isError cuando el servidor lo reporta", async () => {
+  const { fetchImpl } = fakeMcp((method) => {
+    if (method === "initialize") return jsonRpc({ jsonrpc: "2.0", id: 1, result: {} });
+    if (method === "tools/call") {
+      return jsonRpc({ jsonrpc: "2.0", id: 3, result: { content: "archivo no encontrado", isError: true } });
+    }
+    return new Response(null, { status: 202 });
+  });
+  const result = await callMcpTool(config, "read_file", {}, { fetchImpl });
+  assert.equal(result.isError, true);
+});
+
+test("callMcpTool: error JSON-RPC en tools/call se surface con mensaje útil", async () => {
+  const { fetchImpl } = fakeMcp((method) => {
+    if (method === "initialize") return jsonRpc({ jsonrpc: "2.0", id: 1, result: {} });
+    if (method === "tools/call") {
+      return jsonRpc({ jsonrpc: "2.0", id: 3, error: { code: -32602, message: "argumentos inválidos" } });
+    }
+    return new Response(null, { status: 202 });
+  });
+  await assert.rejects(() => callMcpTool(config, "read_file", {}, { fetchImpl }), /tools\/call/);
+});
+
+test("callMcpTool: timeout aborta y surface 'tiempo de espera agotado' (no cuelga)", async () => {
+  // fetch que respeta el signal: si se aborta antes de los 50ms, rechaza con AbortError.
+  const slowFetch = ((_url: string | URL | Request, init?: RequestInit) =>
+    new Promise<Response>((resolve, reject) => {
+      const timer = setTimeout(
+        () => resolve(new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: {} }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })),
+        50,
+      );
+      init?.signal?.addEventListener("abort", () => {
+        clearTimeout(timer);
+        reject(new DOMException("Aborted", "AbortError"));
+      });
+    })) as unknown as typeof fetch;
+
+  await assert.rejects(
+    () => callMcpTool(config, "read_file", {}, { fetchImpl: slowFetch, timeoutMs: 5 }),
+    /tiempo de espera/,
+  );
 });

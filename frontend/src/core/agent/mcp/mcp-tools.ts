@@ -1,12 +1,18 @@
 import { ToolExecutionError, type ToolDefinition } from "@/core/agent/tools/registry";
 import type { ObjectSchema } from "@/core/agent/tools/schema-validator";
 
-import { discoverMcpTools, mcpServerConfig, type McpToolListItem } from "./mcp-client";
+import {
+  callMcpTool,
+  discoverMcpTools,
+  mcpServerConfig,
+  type McpServerConfig,
+  type McpToolListItem,
+} from "./mcp-client";
 
 /**
  * Mapeo de tools MCP descubiertas al shape ToolDefinition existente, para que se SURFACEEN por el
  * MISMO camino que cualquier otra tool: catálogo con procedencia, gating por rol y
- * tool_search / tool_describe. REBANADA 1: SOLO descubrimiento/listado, sin ejecución.
+ * tool_search / tool_describe.
  *
  * Procedencia: "MCP: <servidor>" (vía el campo ``source`` de ToolDefinition).
  *
@@ -17,9 +23,15 @@ import { discoverMcpTools, mcpServerConfig, type McpToolListItem } from "./mcp-c
  * escritura). Así una tool MCP de escritura queda gated-out salvo permiso, exactamente como
  * cualquier escritura.
  *
- * SIN ejecución (rebanada 1): estas ToolDefinitions NO se registran en el ejecutor (``getTool``),
- * así que ``resolveToolCall`` jamás las encuentra; además su ``execute`` lanza un error explícito
- * de "no habilitado". La EJECUCIÓN de tools MCP + APROBACIÓN P1 + AISLAMIENTO son la REBANADA 2.
+ * EJECUCIÓN (rebanada 2): ``execute`` invoca ``tools/call`` del servidor (ver ``callMcpTool``).
+ * Las ToolDefinitions MCP siguen SIN registrarse en el ejecutor nativo (``getTool``); el panel las
+ * despacha pasándolas como tools extra a ``resolveToolCall`` (sólo las EFECTIVAS tras el gating).
+ * INVARIANTES: (a) toda tool MCP de ESCRITURA pasa por la APROBACIÓN P1 (es kind "write" con
+ * approval) antes de ejecutarse; sólo las read-only corren directo. (b) el gating por rol se
+ * mantiene (el panel sólo despacha las efectivas). (c) la salida es DATO EXTERNO NO CONFIABLE: se
+ * entrega como tool_result, nunca como instrucciones, y no dispara escrituras por sí sola.
+ * (d) robustez: ``callMcpTool`` aplica timeout y surface de errores; aquí se traducen a
+ * ToolExecutionError con mensaje útil. Sin secretos/PHI en logs.
  */
 
 /** Recurso sintético que gatea las tools MCP de escritura (un despliegue concede su creación). */
@@ -54,11 +66,22 @@ const PASSTHROUGH_SCHEMA: ObjectSchema = {
   additionalProperties: true,
 };
 
-/** Mapea los items de ``tools/list`` de un servidor a ToolDefinitions con procedencia MCP. */
+/** Resume (acotado) un valor para mensajes de error, sin volcar todo el contenido. */
+function clampText(value: string): string {
+  return value.replace(/\s+/g, " ").trim().slice(0, 300);
+}
+
+/**
+ * Mapea los items de ``tools/list`` de un servidor a ToolDefinitions con procedencia MCP y un
+ * ``execute`` que llama ``tools/call`` (rebanada 2). El llamador (panel) sigue siendo quien aplica
+ * gating y APROBACIÓN P1 antes de invocar ``execute``.
+ */
 export function mapMcpToolsToDefinitions(
-  serverName: string,
+  config: McpServerConfig,
   items: readonly McpToolListItem[],
+  fetchImpl?: typeof fetch,
 ): ToolDefinition[] {
+  const serverName = config.name;
   const source = mcpProvenance(serverName);
   return items.map((item) => {
     const readOnly = item.annotations?.readOnlyHint === true;
@@ -77,13 +100,26 @@ export function mapMcpToolsToDefinitions(
       source,
       inputSchema: PASSTHROUGH_SCHEMA,
       wireSchema,
-      // REBANADA 1: sin ejecución. Si algo intentara ejecutarla, falla explícito (rebanada 2).
-      execute: async (): Promise<never> => {
-        throw new ToolExecutionError(
-          "mcp_execution_not_enabled",
-          "La ejecución de herramientas MCP aún no está habilitada (llega en la siguiente rebanada, " +
-            "con aprobación del médico).",
-        );
+      // EJECUCIÓN (rebanada 2): invoca tools/call. La salida es DATO EXTERNO NO CONFIABLE; se
+      // devuelve tal cual para entregarla como tool_result. Los errores (timeout, upstream,
+      // isError del servidor) se traducen a ToolExecutionError con mensaje útil y acotado.
+      execute: async (args: Record<string, unknown>): Promise<unknown> => {
+        let result;
+        try {
+          result = await callMcpTool(config, item.name, args, fetchImpl ? { fetchImpl } : {});
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Error al llamar la herramienta MCP.";
+          throw new ToolExecutionError("mcp_call_failed", clampText(message));
+        }
+        if (result.isError) {
+          throw new ToolExecutionError(
+            "mcp_tool_error",
+            clampText(
+              typeof result.content === "string" ? result.content : JSON.stringify(result.content),
+            ),
+          );
+        }
+        return result.content;
       },
     };
 
@@ -98,7 +134,7 @@ export function mapMcpToolsToDefinitions(
         targetResource: MCP_WRITE_RESOURCE,
         summarize: (args: Record<string, unknown>) =>
           `Ejecutar la herramienta MCP «${item.name}» (${serverName}) con argumentos ` +
-          `${JSON.stringify(args)}. (La ejecución MCP llega en la siguiente rebanada.)`,
+          `${JSON.stringify(args)}.`,
       },
     };
   });
@@ -116,7 +152,7 @@ export async function loadMcpTools(fetchImpl: typeof fetch = fetch): Promise<Too
   }
   try {
     const items = await discoverMcpTools(config, fetchImpl);
-    return mapMcpToolsToDefinitions(config.name, items);
+    return mapMcpToolsToDefinitions(config, items, fetchImpl);
   } catch {
     return [];
   }

@@ -89,6 +89,7 @@ async function postRpc(
   message: Record<string, unknown>,
   sessionId: string | null,
   fetchImpl: typeof fetch,
+  signal?: AbortSignal,
 ): Promise<{ response: JsonRpcResponse | null; sessionId: string | null; status: number }> {
   const headers: Record<string, string> = {
     "content-type": "application/json",
@@ -102,6 +103,7 @@ async function postRpc(
     method: "POST",
     headers,
     body: JSON.stringify(message),
+    ...(signal ? { signal } : {}),
   });
   const nextSession = res.headers.get("mcp-session-id") ?? sessionId;
   // Una notificación puede responder 202 sin cuerpo.
@@ -113,6 +115,33 @@ async function postRpc(
   return { response: parseRpcBody(contentType, text), sessionId: nextSession, status: res.status };
 }
 
+/** Handshake MCP: initialize -> notifications/initialized. Devuelve el session id (o null). */
+async function initializeSession(
+  config: McpServerConfig,
+  fetchImpl: typeof fetch,
+  signal?: AbortSignal,
+): Promise<string | null> {
+  const init = await postRpc(
+    config,
+    {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: { protocolVersion: MCP_PROTOCOL_VERSION, capabilities: {}, clientInfo: CLIENT_INFO },
+    },
+    null,
+    fetchImpl,
+    signal,
+  );
+  if (!init.response || init.response.error) {
+    throw new Error(`MCP initialize falló: ${init.response?.error?.message ?? `status ${init.status}`}`);
+  }
+  const sessionId = init.sessionId;
+  // Notificación obligatoria tras initialize (sin id; respuesta ignorada).
+  await postRpc(config, { jsonrpc: "2.0", method: "notifications/initialized" }, sessionId, fetchImpl, signal);
+  return sessionId;
+}
+
 /**
  * Descubre las tools de UN servidor MCP: handshake ``initialize`` -> ``notifications/initialized``
  * -> ``tools/list``. Devuelve los items de tool. Lanza si el handshake o el listado fallan (el
@@ -122,34 +151,7 @@ export async function discoverMcpTools(
   config: McpServerConfig,
   fetchImpl: typeof fetch = fetch,
 ): Promise<McpToolListItem[]> {
-  const init = await postRpc(
-    config,
-    {
-      jsonrpc: "2.0",
-      id: 1,
-      method: "initialize",
-      params: {
-        protocolVersion: MCP_PROTOCOL_VERSION,
-        capabilities: {},
-        clientInfo: CLIENT_INFO,
-      },
-    },
-    null,
-    fetchImpl,
-  );
-  if (!init.response || init.response.error) {
-    throw new Error(`MCP initialize falló: ${init.response?.error?.message ?? `status ${init.status}`}`);
-  }
-  const sessionId = init.sessionId;
-
-  // Notificación obligatoria tras initialize (sin id; respuesta ignorada).
-  await postRpc(
-    config,
-    { jsonrpc: "2.0", method: "notifications/initialized" },
-    sessionId,
-    fetchImpl,
-  );
-
+  const sessionId = await initializeSession(config, fetchImpl);
   const list = await postRpc(
     config,
     { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
@@ -161,4 +163,56 @@ export async function discoverMcpTools(
   }
   const result = list.response.result as { tools?: McpToolListItem[] } | undefined;
   return Array.isArray(result?.tools) ? result.tools : [];
+}
+
+/** Resultado de ``tools/call``: el contenido (datos externos NO confiables) y si fue error. */
+export interface McpCallResult {
+  content: unknown;
+  isError: boolean;
+}
+
+/** Tiempo máximo por defecto de una llamada MCP (handshake + tools/call). */
+export const DEFAULT_MCP_CALL_TIMEOUT_MS = 30_000;
+
+/**
+ * EJECUTA una tool MCP (``tools/call``) — REBANADA 2. Reusa el handshake hand-rolled e invoca
+ * la tool con sus argumentos. Robusto: timeout (AbortController) y errores upstream con mensaje
+ * útil (patrón MP-CTRL-0077), nunca un cuelgue silencioso. El resultado es DATO EXTERNO NO
+ * CONFIABLE: el llamador lo entrega como tool_result, jamás como instrucciones. No registra logs.
+ *
+ * El gating por rol y la APROBACIÓN P1 son responsabilidad del llamador (panel): este cliente
+ * sólo habla con el servidor; no decide si se permite ejecutar.
+ */
+export async function callMcpTool(
+  config: McpServerConfig,
+  toolName: string,
+  args: Record<string, unknown>,
+  options: { fetchImpl?: typeof fetch; timeoutMs?: number } = {},
+): Promise<McpCallResult> {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const timeoutMs = options.timeoutMs ?? DEFAULT_MCP_CALL_TIMEOUT_MS;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const sessionId = await initializeSession(config, fetchImpl, controller.signal);
+    const res = await postRpc(
+      config,
+      { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: toolName, arguments: args } },
+      sessionId,
+      fetchImpl,
+      controller.signal,
+    );
+    if (!res.response || res.response.error) {
+      throw new Error(`MCP tools/call falló: ${res.response?.error?.message ?? `status ${res.status}`}`);
+    }
+    const result = res.response.result as { content?: unknown; isError?: boolean } | undefined;
+    return { content: result?.content ?? null, isError: result?.isError === true };
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error("MCP tools/call: tiempo de espera agotado.");
+    }
+    throw error instanceof Error ? error : new Error("MCP tools/call: error desconocido.");
+  } finally {
+    clearTimeout(timer);
+  }
 }

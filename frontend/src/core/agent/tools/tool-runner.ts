@@ -29,9 +29,18 @@ function asArgsObject(args: unknown): Record<string, unknown> {
  * Busca la tool por nombre y valida los argumentos contra su input schema. No ejecuta
  * nada: separa el lookup/validación (puro) de la ejecución (efecto de red). Una tool
  * desconocida o con args inválidos produce un tool_result de error para el modelo.
+ *
+ * ``extraTools`` permite despachar tools que NO están en el registro nativo (``getTool``),
+ * como las de MCP: el panel pasa SÓLO las EFECTIVAS tras el gating, de modo que una tool MCP
+ * gateada por rol nunca se resuelve (no se puede ejecutar). El registro nativo tiene prioridad,
+ * así que no hay regresión para las tools nativas.
  */
-export function resolveToolCall(name: string, args: unknown): ResolvedToolCall {
-  const tool = getTool(name);
+export function resolveToolCall(
+  name: string,
+  args: unknown,
+  extraTools: readonly ToolDefinition[] = [],
+): ResolvedToolCall {
+  const tool = getTool(name) ?? extraTools.find((candidate) => candidate.name === name);
   if (!tool) {
     return {
       outcome: "unknown_tool",

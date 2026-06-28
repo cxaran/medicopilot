@@ -403,7 +403,14 @@ export function CopilotPanel() {
       toolName: string,
       args: unknown,
     ): void => {
-      const resolved = resolveToolCall(toolName, args);
+      // Despacho de tools MCP (rebanada 2): se pasan SÓLO las MCP EFECTIVAS (tras el gating por
+      // rol) como tools extra; una MCP gateada nunca se resuelve -> nunca se ejecuta. Las nativas
+      // se resuelven por el registro (getTool) con prioridad, sin regresión.
+      const mcpEffective = effectiveTools(
+        [...listTools(), ...mcpToolsRef.current],
+        creatableRef.current,
+      ).filter((candidate) => candidate.source?.startsWith("MCP:"));
+      const resolved = resolveToolCall(toolName, args, mcpEffective);
       if (resolved.outcome !== "ready") {
         const message = resolved.result.status === "error" ? resolved.result.message : "Error";
         upsertToolCall({
