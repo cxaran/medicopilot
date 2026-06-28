@@ -16,6 +16,7 @@ import {
   createOpenAIModel,
   type OpenAIApiFlavor
 } from "../providers/openai/adapter.js";
+import { AnthropicProviderAdapter, createAnthropicModel } from "../providers/anthropic/adapter.js";
 import { ProviderRegistry } from "../providers/registry.js";
 import { createFakeModel } from "../domain/model.js";
 import { InMemoryBrowserSessionStore } from "../application/browser-sessions/session-store.js";
@@ -88,6 +89,19 @@ export function createContainer(settings = loadSettings()): GatewayContainer {
     });
     adapters.push(openaiAdapter);
     catalogModels.push(openaiModel);
+  }
+
+  // Anthropic (opt-in). FAMILIA DE CABLE distinta (Messages API): demuestra que el gateway
+  // maneja un segundo protocolo, no solo OpenAI-compatible. La key llega por arriendo (B3/B4);
+  // el modelo por defecto se registra curado y el discovery añade los reales de /v1/models.
+  if (settings.anthropicEnabled && settings.anthropicBaseUrl) {
+    const anthropicAdapter = new AnthropicProviderAdapter({ baseUrl: settings.anthropicBaseUrl });
+    const anthropicModel = createAnthropicModel({
+      baseUrl: settings.anthropicBaseUrl,
+      modelId: settings.anthropicDefaultModel ?? "claude-sonnet-4-5"
+    });
+    adapters.push(anthropicAdapter);
+    catalogModels.push(anthropicModel);
   }
 
   const modelCatalog = new InMemoryModelCatalog(catalogModels);

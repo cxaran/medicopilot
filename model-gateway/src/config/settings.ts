@@ -40,6 +40,12 @@ export interface GatewaySettings {
   openaiBaseUrl?: string | undefined;
   openaiDefaultModel?: string | undefined;
   openaiApiFlavor?: string | undefined;
+  // Anthropic (opt-in): familia de cable Messages API (distinta a OpenAI). La API key NO se
+  // configura aquí (llega por arriendo de B4/B3, cifrada por usuario). Solo se registra el
+  // proveedor anthropic si está habilitado. Opcionales para no obligar a los tests.
+  anthropicEnabled?: boolean | undefined;
+  anthropicBaseUrl?: string | undefined;
+  anthropicDefaultModel?: string | undefined;
 }
 
 function numberFromEnv(name: string, fallback: number): number {
@@ -103,6 +109,11 @@ export function loadSettings(): GatewaySettings {
     openaiEnabled: process.env.GATEWAY_OPENAI_ENABLED === "true",
     openaiBaseUrl: process.env.GATEWAY_OPENAI_BASE_URL ?? "https://api.openai.com/v1",
     openaiDefaultModel: process.env.GATEWAY_OPENAI_DEFAULT_MODEL ?? "gpt-5-codex",
-    openaiApiFlavor: process.env.GATEWAY_OPENAI_API_FLAVOR ?? "chat_completions"
+    openaiApiFlavor: process.env.GATEWAY_OPENAI_API_FLAVOR ?? "chat_completions",
+    // Anthropic (opt-in). La key llega por arriendo; el modelo por defecto se registra como
+    // fila curada (capacidades por mapa documentado) y el discovery añade los reales de /v1/models.
+    anthropicEnabled: process.env.GATEWAY_ANTHROPIC_ENABLED === "true",
+    anthropicBaseUrl: process.env.GATEWAY_ANTHROPIC_BASE_URL ?? "https://api.anthropic.com/v1",
+    anthropicDefaultModel: process.env.GATEWAY_ANTHROPIC_DEFAULT_MODEL ?? "claude-sonnet-4-5"
   };
 }
