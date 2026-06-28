@@ -68,7 +68,10 @@ export function loadSettings(): GatewaySettings {
     globalMaxContextTokens: numberFromEnv("GATEWAY_GLOBAL_MAX_CONTEXT_TOKENS", 128000),
     safetyReserveTokens: numberFromEnv("GATEWAY_SAFETY_RESERVE_TOKENS", 1024),
     maxWebSocketMessageBytes: numberFromEnv("GATEWAY_MAX_WS_MESSAGE_BYTES", 1024 * 1024),
-    maxToolsPerTurn: numberFromEnv("GATEWAY_MAX_TOOLS_PER_TURN", 16),
+    // El set curado de tools clínicas del navegador creció (lecturas + borradores de
+    // escritura gateados por rol). 24 da holgura sobre las 17 actuales; el descubrimiento
+    // por tool_search será la solución de escala definitiva.
+    maxToolsPerTurn: numberFromEnv("GATEWAY_MAX_TOOLS_PER_TURN", 24),
     maxToolResultBytes: numberFromEnv("GATEWAY_MAX_TOOL_RESULT_BYTES", 64 * 1024),
     toolResultTimeoutMs: numberFromEnv("GATEWAY_TOOL_RESULT_TIMEOUT_MS", 30_000),
     devTicket: process.env.GATEWAY_DEV_TICKET ?? "dev-ticket",
