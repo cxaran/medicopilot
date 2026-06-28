@@ -13,6 +13,9 @@ export interface GatewaySettings {
   maxToolResultBytes: number;
   toolResultTimeoutMs: number;
   devTicket: string;
+  // MG-002: secreto HS256 compartido con FastAPI (AGENT_GATEWAY_TICKET_SECRET) para
+  // verificar el JWT de connection-ticket. Si está vacío, solo opera el dev-ticket.
+  agentTicketSecret: string;
 }
 
 function numberFromEnv(name: string, fallback: number): number {
@@ -52,6 +55,7 @@ export function loadSettings(): GatewaySettings {
     maxToolsPerTurn: numberFromEnv("GATEWAY_MAX_TOOLS_PER_TURN", 16),
     maxToolResultBytes: numberFromEnv("GATEWAY_MAX_TOOL_RESULT_BYTES", 64 * 1024),
     toolResultTimeoutMs: numberFromEnv("GATEWAY_TOOL_RESULT_TIMEOUT_MS", 30_000),
-    devTicket: process.env.GATEWAY_DEV_TICKET ?? "dev-ticket"
+    devTicket: process.env.GATEWAY_DEV_TICKET ?? "dev-ticket",
+    agentTicketSecret: process.env.GATEWAY_AGENT_TICKET_SECRET ?? ""
   };
 }

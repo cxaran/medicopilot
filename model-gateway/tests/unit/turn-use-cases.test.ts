@@ -24,7 +24,8 @@ const baseSettings: GatewaySettings = {
   maxToolResultBytes: 64 * 1024,
   // Alto para que el timeout de tool-result no dispare durante el test.
   toolResultTimeoutMs: 60000,
-  devTicket: "test-ticket"
+  devTicket: "test-ticket",
+  agentTicketSecret: ""
 };
 
 function createCapturingTelemetry(): TelemetryPort & {
@@ -82,6 +83,7 @@ function browserSession(): BrowserSession {
   return {
     id: "bs_test",
     userId: "user_test",
+    sessionRef: "session_test",
     createdAt: new Date(),
     expiresAt: new Date(Date.now() + 3_600_000)
   };

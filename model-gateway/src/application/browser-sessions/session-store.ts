@@ -4,11 +4,12 @@ import type { BrowserSession } from "../../domain/gateway-session.js";
 export class InMemoryBrowserSessionStore {
   private readonly sessions = new Map<string, BrowserSession>();
 
-  create(userId = "dev-user"): BrowserSession {
+  create(userId = "dev-user", sessionRef = ""): BrowserSession {
     const now = new Date();
     const session: BrowserSession = {
       id: createId("bs"),
       userId,
+      sessionRef,
       createdAt: now,
       expiresAt: new Date(now.getTime() + 30 * 60_000)
     };

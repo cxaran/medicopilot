@@ -18,7 +18,8 @@ const baseSettings: GatewaySettings = {
   maxToolsPerTurn: 16,
   maxToolResultBytes: 64 * 1024,
   toolResultTimeoutMs: 1000,
-  devTicket: "test-ticket"
+  devTicket: "test-ticket",
+  agentTicketSecret: ""
 };
 
 let app: FastifyInstance | null = null;
