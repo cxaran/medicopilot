@@ -29,7 +29,9 @@ import { executeTool, resolveToolCall } from "@/core/agent/tools/tool-runner";
 import {
   listTools,
   toWireToolDefinitions,
+  defaultToolContext,
   type ToolDefinition,
+  type ToolExecutionContext,
 } from "@/core/agent/tools/registry";
 import {
   buildToolCatalog,
@@ -37,6 +39,11 @@ import {
   effectiveTools,
   type ToolCatalogEntry,
 } from "@/core/agent/tool-catalog";
+import {
+  declaredTools,
+  declaredToolNames,
+  isMetaTool,
+} from "@/core/agent/tool-discovery";
 import {
   ApprovalStore,
   applyApprovalDecision,
@@ -151,6 +158,10 @@ export function CopilotPanel() {
   // profundidad; FastAPI revalida igual). ``toolCatalog`` es la vista de procedencia/auditoría.
   const [toolCatalog, setToolCatalog] = useState<ToolCatalogEntry[]>([]);
   const creatableRef = useRef<Set<string>>(new Set());
+  // Descubrimiento a escala (tool_search/tool_describe): nombres de tools CARGADAS bajo demanda
+  // en este hilo. Se suman al set declarado en los turnos siguientes (el set por turno se
+  // mantiene pequeño: núcleo + meta + cargadas). Persiste durante la vida del panel.
+  const loadedToolsRef = useRef<Set<string>>(new Set());
 
   // RECALL (P2): nº de memorias del médico inyectadas en el último turno, para el indicador
   // de contexto. ``null`` = aún no hay turno con recall. Las memorias viajan como contexto NO
@@ -224,12 +235,18 @@ export function CopilotPanel() {
         if (!active) return;
         const creatable = creatableResources(catalog);
         creatableRef.current = creatable;
-        setToolCatalog(buildToolCatalog(listTools(), creatable));
+        const eff = effectiveTools(listTools(), creatable);
+        setToolCatalog(
+          buildToolCatalog(listTools(), creatable, declaredToolNames(eff, loadedToolsRef.current)),
+        );
       })
       .catch(() => {
         if (!active) return;
         creatableRef.current = new Set();
-        setToolCatalog(buildToolCatalog(listTools(), new Set()));
+        const eff = effectiveTools(listTools(), new Set());
+        setToolCatalog(
+          buildToolCatalog(listTools(), new Set(), declaredToolNames(eff, loadedToolsRef.current)),
+        );
       });
     return () => {
       active = false;
@@ -321,7 +338,35 @@ export function CopilotPanel() {
 
       if (tool.kind === "read") {
         upsertToolCall({ callId, turnId, name: tool.name, kind: "read", argsText, status: "running" });
-        void executeTool(tool, validArgs).then((result) => {
+        // Contexto de descubrimiento para las meta-tools (tool_search/tool_describe): el set
+        // BUSCABLE es el efectivo (ya gateado por rol) sin las meta-tools; markLoaded suma las
+        // cargadas (se declararán en turnos siguientes) y refresca la vista de procedencia.
+        const eff = effectiveTools(listTools(), creatableRef.current);
+        const ctx: ToolExecutionContext = {
+          ...defaultToolContext,
+          discovery: {
+            searchable: eff.filter((candidate) => !isMetaTool(candidate.name)),
+            markLoaded: (names) => {
+              let changed = false;
+              for (const name of names) {
+                if (!loadedToolsRef.current.has(name)) {
+                  loadedToolsRef.current.add(name);
+                  changed = true;
+                }
+              }
+              if (changed) {
+                setToolCatalog(
+                  buildToolCatalog(
+                    listTools(),
+                    creatableRef.current,
+                    declaredToolNames(eff, loadedToolsRef.current),
+                  ),
+                );
+              }
+            },
+          },
+        };
+        void executeTool(tool, validArgs, ctx).then((result) => {
           patchToolCall(
             callId,
             result.status === "success"
@@ -496,7 +541,13 @@ export function CopilotPanel() {
     // RECALL antes de que el modelo responda: las memorias se inyectan como un mensaje
     // ``system`` delimitado al frente del contexto (datos, no instrucciones; ver memory-recall).
     const recall = await recallMemoryMessage();
-    const toolsWire = toWireToolDefinitions(effectiveTools(listTools(), creatableRef.current));
+    // Descubrimiento a escala: se declara solo el set ACOTADO (núcleo + meta + tools cargadas
+    // bajo demanda), no todo el catálogo. El resto sigue accesible vía tool_search/tool_describe.
+    const declared = declaredTools(
+      effectiveTools(listTools(), creatableRef.current),
+      loadedToolsRef.current,
+    );
+    const toolsWire = toWireToolDefinitions(declared);
 
     // PERSONA (P4): capas LÍDER en orden fijo [SEGURIDAD] -> [PERSONA] -> [MEMORIAS]. La capa
     // de seguridad clínica es fija (código), SIEMPRE primera y presente; la persona va después
@@ -893,6 +944,7 @@ function ToolCatalogPanel({ entries }: Readonly<{ entries: ToolCatalogEntry[] }>
     return null;
   }
   const declared = entries.filter((entry) => entry.status === "declared");
+  const discoverable = entries.filter((entry) => entry.status === "discoverable");
   const gatedOut = entries.filter((entry) => entry.status === "gated_out");
 
   return (
@@ -907,15 +959,18 @@ function ToolCatalogPanel({ entries }: Readonly<{ entries: ToolCatalogEntry[] }>
           Herramientas del copiloto
         </span>
         <span className="text-xs text-[var(--tx2)]">
-          {declared.length} disponibles · {gatedOut.length} restringidas {open ? "▲" : "▼"}
+          {declared.length} activas · {discoverable.length} bajo demanda · {gatedOut.length} restringidas{" "}
+          {open ? "▲" : "▼"}
         </span>
       </button>
 
       {open && (
         <div className="space-y-2">
           <p className="text-xs text-[var(--tx2)]">
-            Las acciones de escritura solo se ofrecen al modelo si tu rol permite crear en el
-            recurso. El servidor revalida cada acción.
+            Para no inflar el contexto, cada turno se declara solo un núcleo pequeño de
+            herramientas; el modelo descubre el resto «bajo demanda» con tool_search/tool_describe.
+            Las acciones de escritura solo se ofrecen si tu rol permite crear en el recurso, y el
+            servidor revalida cada acción.
           </p>
           <ul className="space-y-1">
             {entries.map((entry) => (
@@ -928,8 +983,20 @@ function ToolCatalogPanel({ entries }: Readonly<{ entries: ToolCatalogEntry[] }>
                 </Badge>
                 <code className="text-xs text-[var(--tx)]">{entry.name}</code>
                 <span className="text-xs text-[var(--tx2)]">· {entry.source}</span>
-                <Badge tone={entry.status === "declared" ? "ok" : "neutral"}>
-                  {entry.status === "declared" ? "Disponible" : "Restringida"}
+                <Badge
+                  tone={
+                    entry.status === "declared"
+                      ? "ok"
+                      : entry.status === "discoverable"
+                        ? "accent"
+                        : "neutral"
+                  }
+                >
+                  {entry.status === "declared"
+                    ? "Activa"
+                    : entry.status === "discoverable"
+                      ? "Bajo demanda"
+                      : "Restringida"}
                 </Badge>
                 {entry.reason ? (
                   <span className="text-xs text-[var(--tx2)]">{entry.reason}</span>

@@ -15,7 +15,10 @@ import type { ToolDefinition } from "./tools/registry";
  * presente si el médico tiene el permiso de creación de ese recurso.
  */
 
-export type ToolStatus = "declared" | "gated_out";
+// "declared" = se declara al modelo este turno (núcleo + meta + cargadas); "discoverable" = no
+// se declara por defecto pero es accesible bajo demanda vía tool_search/tool_describe (no gateada);
+// "gated_out" = restringida por rol/permiso (nunca buscable ni declarable).
+export type ToolStatus = "declared" | "discoverable" | "gated_out";
 
 export interface ToolCatalogEntry {
   name: string;
@@ -62,26 +65,57 @@ export function creatableResources(catalog: ResourceCatalog): Set<string> {
 }
 
 /**
- * Proyecta el catálogo de tools con su procedencia y estado de gating. Lecturas siempre
- * declaradas; escrituras declaradas solo si su recurso destino es creable por el médico.
+ * Proyecta el catálogo de tools con su procedencia y estado de gating. Lecturas nunca se gatean
+ * por rol; escrituras solo pasan el gate si su recurso destino es creable por el médico. Si se
+ * pasa ``declaredNames`` (descubrimiento a escala), una tool NO gateada se marca "declared" si
+ * está en ese set (núcleo + meta + cargadas) o "discoverable" si solo está disponible bajo
+ * demanda. Sin ``declaredNames`` (compat), toda tool no gateada queda "declared".
  */
 export function buildToolCatalog(
   tools: readonly ToolDefinition[],
   creatable: Set<string>,
+  declaredNames?: ReadonlySet<string>,
 ): ToolCatalogEntry[] {
+  // Estado de una tool que pasa el gating de rol: declarada o solo descubrible bajo demanda.
+  const availableStatus = (name: string): ToolStatus =>
+    declaredNames && !declaredNames.has(name) ? "discoverable" : "declared";
+  const availableReason = (name: string): string | null =>
+    declaredNames && !declaredNames.has(name) ? "Disponible bajo demanda vía tool_search." : null;
+
   return tools.map((tool) => {
     const source = toolSource(tool.name);
     if (tool.kind === "read") {
-      return { name: tool.name, kind: "read", source, targetResource: null, status: "declared", reason: null };
+      return {
+        name: tool.name,
+        kind: "read",
+        source,
+        targetResource: null,
+        status: availableStatus(tool.name),
+        reason: availableReason(tool.name),
+      };
     }
     const target = tool.approval?.targetResource ?? null;
     // Escritura OWNER-SCOPED (p. ej. memorias del médico): no se gatea por el catálogo RBAC
     // (no es un recurso global), siempre disponible para el dueño. Igual pasa por aprobación.
     if (tool.approval?.ownerScoped) {
-      return { name: tool.name, kind: "write", source, targetResource: target, status: "declared", reason: null };
+      return {
+        name: tool.name,
+        kind: "write",
+        source,
+        targetResource: target,
+        status: availableStatus(tool.name),
+        reason: availableReason(tool.name),
+      };
     }
     if (target && creatable.has(target)) {
-      return { name: tool.name, kind: "write", source, targetResource: target, status: "declared", reason: null };
+      return {
+        name: tool.name,
+        kind: "write",
+        source,
+        targetResource: target,
+        status: availableStatus(tool.name),
+        reason: availableReason(tool.name),
+      };
     }
     return {
       name: tool.name,
