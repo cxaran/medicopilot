@@ -98,18 +98,24 @@ export function personaLayerMessage(persona: PersonaFields | null | undefined): 
 }
 
 /**
- * Capas LÍDER del contexto, en el orden fijo [SEGURIDAD] -> [PERSONA] -> [MEMORIAS]. La
- * seguridad SIEMPRE está y SIEMPRE es la primera, sin importar el contenido de la persona.
- * El llamador antepone esto a la conversación (ya compactada).
+ * Capas LÍDER del contexto, en el orden fijo
+ * [SEGURIDAD] -> [PERSONA] -> [CONTEXTO ACTIVO] -> [MEMORIAS]. La seguridad SIEMPRE está y
+ * SIEMPRE es la primera, sin importar el contenido de la persona. El contexto clínico activo
+ * (paciente/consulta) es instrucción de confianza nuestra y va ANTES de las memorias (datos no
+ * confiables). El llamador antepone esto a la conversación (ya compactada).
  */
 export function composeLeadingLayers(
   persona: PersonaFields | null | undefined,
   memory: WireMessage | null,
+  activeContext: WireMessage | null = null,
 ): WireMessage[] {
   const layers: WireMessage[] = [safetyLayerMessage()];
   const personaMessage = personaLayerMessage(persona);
   if (personaMessage) {
     layers.push(personaMessage);
+  }
+  if (activeContext) {
+    layers.push(activeContext);
   }
   if (memory) {
     layers.push(memory);

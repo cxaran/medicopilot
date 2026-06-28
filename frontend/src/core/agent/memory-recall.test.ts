@@ -11,6 +11,7 @@ import {
   MEMORY_BLOCK_HEADER,
   buildMemoryBlock,
   buildRecallMessage,
+  fetchRecall,
   recallIndicatorText,
   selectRelevantMemories,
 } from "./memory-recall.ts";
@@ -117,6 +118,37 @@ test("buildRecallMessage: mensaje de rol system con el bloque como texto", () =>
   assert.equal(message?.content[0]?.type, "text");
   const text = message?.content[0]?.type === "text" ? message.content[0].text : "";
   assert.ok(text.includes(MEMORY_BLOCK_HEADER));
+});
+
+// --- fetchRecall: el fetch se acota al paciente activo (P2) ---
+
+test("fetchRecall: llama al fetcher CON el patientId cuando hay paciente activo", async () => {
+  const calls: Array<string | undefined> = [];
+  const listMemories = async (patientId?: string) => {
+    calls.push(patientId);
+    return [memory({ id: "m1", patient_id: "p-1" })];
+  };
+  const { message, count } = await fetchRecall(listMemories, { patientId: "p-1", consultationId: null });
+  assert.deepEqual(calls, ["p-1"]);
+  assert.equal(count, 1);
+  assert.ok(message);
+});
+
+test("fetchRecall: llama al fetcher SIN patientId cuando no hay paciente activo (owner por recencia)", async () => {
+  const calls: Array<string | undefined> = [];
+  const listMemories = async (patientId?: string) => {
+    calls.push(patientId);
+    return [memory({ id: "m1" }), memory({ id: "m2" })];
+  };
+  const { count } = await fetchRecall(listMemories, {});
+  assert.deepEqual(calls, [undefined]);
+  assert.equal(count, 2);
+});
+
+test("fetchRecall: sin memorias -> mensaje null y count 0", async () => {
+  const { message, count } = await fetchRecall(async () => [], { patientId: "p-1" });
+  assert.equal(message, null);
+  assert.equal(count, 0);
 });
 
 // --- indicador de contexto ---

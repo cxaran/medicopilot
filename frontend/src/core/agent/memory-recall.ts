@@ -124,6 +124,23 @@ export function buildRecallMessage(memories: readonly AgentMemoryRead[]): WireMe
   return { role: "system", content: [{ type: "text", text: block }] };
 }
 
+/**
+ * Recupera y arma el bloque de recall acotado por ámbito. Recibe el fetcher de memorias por
+ * inyección (el panel pasa ``listAgentMemories``) para mantener esta función pura y testeable:
+ * cuando el ámbito trae paciente, el fetch se acota a ese paciente (server-side) y sólo sus
+ * memorias se inyectan; sin paciente, el fetcher se llama SIN filtro (comportamiento actual,
+ * owner-scoped por recencia). Devuelve el mensaje a inyectar (o null) y cuántas se eligieron.
+ */
+export async function fetchRecall(
+  listMemories: (patientId?: string) => Promise<readonly AgentMemoryRead[]>,
+  scope: RecallScope = {},
+): Promise<{ message: WireMessage | null; count: number }> {
+  const patientId = scope.patientId ?? undefined;
+  const memories = await listMemories(patientId);
+  const selected = selectRelevantMemories(memories, scope);
+  return { message: buildRecallMessage(selected), count: selected.length };
+}
+
 /** Texto del indicador de contexto que ve el médico (cuántas memorias se inyectaron). */
 export function recallIndicatorText(count: number): string {
   if (count <= 0) {

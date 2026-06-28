@@ -51,10 +51,16 @@ import {
   type ClinicalActionPlan,
 } from "@/core/agent/approval-protocol";
 import {
-  buildRecallMessage,
+  fetchRecall,
   recallIndicatorText,
-  selectRelevantMemories,
 } from "@/core/agent/memory-recall";
+import {
+  activeContextChipText,
+  buildActiveContextMessage,
+  recallScopeFor,
+  type ActiveClinicalContext,
+} from "@/core/agent/active-context";
+import { ActiveContextPicker } from "@/components/copilot/ActiveContextPicker";
 import {
   compactContext,
   contextUsage,
@@ -181,6 +187,12 @@ export function CopilotPanel() {
   // confiable; nunca como instrucciones (ver memory-recall).
   const [recalledCount, setRecalledCount] = useState<number | null>(null);
 
+  // CONTEXTO CLÍNICO ACTIVO: paciente (y consulta opcional) sobre los que asiste el copiloto.
+  // Acota el recall (P2) y se SURFACEA en el turno y el chip indicador. Sólo fija el ámbito (no
+  // carga PHI del expediente). Ref para usarlo en los handlers del turno (closures con deps vacías).
+  const [activeContext, setActiveContext] = useState<ActiveClinicalContext | null>(null);
+  const activeContextRef = useRef<ActiveClinicalContext | null>(null);
+
   // CONTEXTO (P3): contabilidad usado/presupuesto para el indicador, y aviso de compactación.
   // ``usage`` se actualiza con la estimación local al enviar y con el usage REPORTADO por el
   // gateway al completar el turno. ``compaction`` describe la última compactación (si la hubo).
@@ -241,6 +253,11 @@ export function CopilotPanel() {
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
+
+  // Mantiene el ref del contexto activo en sincronía para los handlers del turno (closures).
+  useEffect(() => {
+    activeContextRef.current = activeContext;
+  }, [activeContext]);
 
   // Mantiene el presupuesto de contexto del modelo seleccionado (ventana efectiva + usable) y
   // su tarifa de precio (para el costo estimado P7).
@@ -533,13 +550,15 @@ export function CopilotPanel() {
   };
 
   // RECALL (P2): recupera las memorias del médico (owner-scoped, cookie del médico) y arma el
-  // bloque de contexto NO confiable. Si falla, no bloquea el turno: simplemente no se inyecta.
+  // bloque de contexto NO confiable. Si hay paciente activo, el fetch se acota a ese paciente
+  // (server-side) y sólo sus memorias se inyectan; sin paciente activo, owner-scoped por
+  // recencia (comportamiento actual). Si falla, no bloquea el turno: simplemente no se inyecta.
   const recallMemoryMessage = async (): Promise<WireMessage | null> => {
     try {
-      const memories = await listAgentMemories();
-      const selected = selectRelevantMemories(memories);
-      setRecalledCount(selected.length);
-      return buildRecallMessage(selected);
+      const scope = recallScopeFor(activeContextRef.current);
+      const { message, count } = await fetchRecall(listAgentMemories, scope);
+      setRecalledCount(count);
+      return message;
     } catch {
       setRecalledCount(0);
       return null;
@@ -587,10 +606,12 @@ export function CopilotPanel() {
     );
     const toolsWire = toWireToolDefinitions(declared);
 
-    // PERSONA (P4): capas LÍDER en orden fijo [SEGURIDAD] -> [PERSONA] -> [MEMORIAS]. La capa
-    // de seguridad clínica es fija (código), SIEMPRE primera y presente; la persona va después
-    // y no puede anularla. La conversación (compactada) va al final.
-    const leadingLayers = composeLeadingLayers(personaRef.current, recall);
+    // PERSONA (P4) + CONTEXTO ACTIVO: capas LÍDER en orden fijo
+    // [SEGURIDAD] -> [PERSONA] -> [CONTEXTO ACTIVO] -> [MEMORIAS]. La seguridad es fija (código),
+    // SIEMPRE primera; el contexto activo (ámbito del paciente) es instrucción de confianza y va
+    // antes de las memorias (datos no confiables). La conversación (compactada) va al final.
+    const activeContextMessage = buildActiveContextMessage(activeContextRef.current);
+    const leadingLayers = composeLeadingLayers(personaRef.current, recall, activeContextMessage);
 
     // CONTEXTO (P3): el overhead fijo (esquema de tools + capas líder) no se compacta; los
     // planes APROBADOS se conservan verbatim y la charla vieja se resume si excede el
@@ -806,6 +827,18 @@ export function CopilotPanel() {
           )}
         </Card>
       </div>
+
+      <ActiveContextPicker context={activeContext} onChange={setActiveContext} />
+
+      {activeContext && (
+        <div
+          role="status"
+          className="flex items-center gap-2 rounded-[12px] border border-[var(--border2)] bg-[var(--panel2)] px-3.5 py-2 text-xs text-[var(--tx2)]"
+        >
+          <span aria-hidden="true">🩺</span>
+          <span>{activeContextChipText(activeContext)}</span>
+        </div>
+      )}
 
       {recalledCount !== null && (
         <div
