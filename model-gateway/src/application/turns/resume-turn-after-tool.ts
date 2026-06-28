@@ -40,10 +40,9 @@ export class ResumeTurnAfterTool {
       const { turn } = await this.dependencies.turnStore.consumeToolResult(turnId, result);
       await this.dependencies.turnStore.transition(turn.id, "resuming");
 
-      const model = await this.dependencies.modelCatalog.resolve({
-        providerId: turn.providerId,
-        modelId: turn.modelId
-      });
+      // El modelo (con sus capacidades reales) se fijó al crear el turn; se reutiliza para
+      // que el resume no dependa de que el modelo siga en el catálogo curado.
+      const model = turn.model;
       const authorization = await this.dependencies.controlPlane.authorizeTurn({
         browserSessionId: turn.browserSessionId,
         profileId: turn.profileId

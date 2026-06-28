@@ -90,35 +90,57 @@ export class HttpControlPlaneClient implements ControlPlanePort {
     authorization: TurnAuthorization;
     purpose: "model_turn";
   }): Promise<ProviderCredentialLease> {
-    const base = this.options.backendInternalUrl.replace(/\/+$/, "");
-    const url = `${base}/api/v1/internal/agent/credential-lease`;
-
-    let response: Response;
-    try {
-      response = await this.fetchImpl(url, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-internal-auth": this.options.backendInternalSecret
-        },
-        body: JSON.stringify({
-          user_id: input.authorization.userId,
-          provider: input.authorization.providerId
-        })
-      });
-    } catch {
-      // No se incluye el error original para no arriesgar fugas de secreto/URL.
-      throw new GatewayError("CREDENTIAL_LEASE_UNAVAILABLE", "Credential lease request failed");
-    }
-
+    const response = await this.postLease(
+      input.authorization.userId,
+      input.authorization.providerId
+    );
     if (!response.ok) {
       throw new GatewayError(
         "CREDENTIAL_LEASE_FAILED",
         `Credential lease rejected with status ${response.status}`
       );
     }
+    return this.mapLease((await response.json()) as CredentialLeaseResponse);
+  }
 
-    const data = (await response.json()) as CredentialLeaseResponse;
+  async leaseCredentialForProvider(input: {
+    userId: string;
+    providerId: string;
+  }): Promise<ProviderCredentialLease | null> {
+    let response: Response;
+    try {
+      response = await this.postLease(input.userId, input.providerId);
+    } catch {
+      // Discovery best-effort: si el backend no responde, ese proveedor no se ofrece.
+      return null;
+    }
+    // 404 = el usuario no tiene credencial para ese proveedor (no es error: se omite).
+    // Cualquier otro fallo también se trata como "no disponible" para no romper la lista.
+    if (!response.ok) {
+      return null;
+    }
+    return this.mapLease((await response.json()) as CredentialLeaseResponse);
+  }
+
+  private async postLease(userId: string, provider: string): Promise<Response> {
+    const base = this.options.backendInternalUrl.replace(/\/+$/, "");
+    const url = `${base}/api/v1/internal/agent/credential-lease`;
+    try {
+      return await this.fetchImpl(url, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-internal-auth": this.options.backendInternalSecret
+        },
+        body: JSON.stringify({ user_id: userId, provider })
+      });
+    } catch {
+      // No se incluye el error original para no arriesgar fugas de secreto/URL.
+      throw new GatewayError("CREDENTIAL_LEASE_UNAVAILABLE", "Credential lease request failed");
+    }
+  }
+
+  private mapLease(data: CredentialLeaseResponse): ProviderCredentialLease {
     return {
       leaseId: data.lease_id,
       secret: data.secret,

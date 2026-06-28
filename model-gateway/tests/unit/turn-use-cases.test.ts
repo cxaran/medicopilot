@@ -63,6 +63,7 @@ function setup(settingsOverride: Partial<GatewaySettings> = {}) {
   const startTurn = new StartTurn({
     controlPlane: container.controlPlane,
     modelCatalog: container.modelCatalog,
+    modelDiscovery: container.modelDiscovery,
     providerRegistry: container.providerRegistry,
     turnStore: container.turnStore,
     limiter: container.limiter,

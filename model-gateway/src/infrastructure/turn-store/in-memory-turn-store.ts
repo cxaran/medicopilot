@@ -17,6 +17,7 @@ export class InMemoryTurnStore implements TurnStorePort {
       profileId: input.authorization.profileId,
       providerId: input.authorization.providerId,
       modelId: input.authorization.modelId,
+      model: input.model,
       status: "created",
       createdAt: now,
       updatedAt: now,

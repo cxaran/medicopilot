@@ -7,6 +7,7 @@ import type { BrowserSession } from "../../domain/gateway-session.js";
 import type { GatewaySettings } from "../../config/settings.js";
 import type { ControlPlanePort, TurnAuthorization } from "../../ports/control-plane.port.js";
 import type { ModelCatalogPort } from "../../ports/model-catalog.port.js";
+import type { ModelDiscoveryService } from "../capabilities/model-discovery.js";
 import type { ProviderRegistryPort } from "../../ports/provider-registry.port.js";
 import type { RateLimiterPort } from "../../ports/rate-limiter.port.js";
 import type { TurnStorePort } from "../../ports/turn-store.port.js";
@@ -33,6 +34,9 @@ export interface TurnEventSink {
 export interface StartTurnDependencies {
   controlPlane: ControlPlanePort;
   modelCatalog: ModelCatalogPort;
+  // Resuelve el modelo seleccionado consultando el proveedor (capacidades reales), con
+  // fallback al catálogo curado.
+  modelDiscovery: ModelDiscoveryService;
   providerRegistry: ProviderRegistryPort;
   turnStore: TurnStorePort;
   limiter: RateLimiterPort;
@@ -62,10 +66,13 @@ export class StartTurn {
         profileId: request.profileId
       });
 
-      const model = await this.dependencies.modelCatalog.resolve({
-        providerId: authorization.providerId,
-        modelId: authorization.modelId
-      });
+      // Capacidades del modelo desde el proveedor (discovery real), no asumidas; cae al
+      // catálogo curado si el proveedor no se puede consultar.
+      const model = await this.dependencies.modelDiscovery.resolveForUser(
+        authorization.userId,
+        authorization.providerId,
+        authorization.modelId
+      );
 
       const negotiated = negotiateCapabilities({
         model,

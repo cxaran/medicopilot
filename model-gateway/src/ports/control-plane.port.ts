@@ -22,6 +22,13 @@ export interface TurnAuthorization {
 export interface ControlPlanePort {
   authorizeTurn(input: { browserSessionId: string; profileId: string }): Promise<TurnAuthorization>;
   leaseCredential(input: { authorization: TurnAuthorization; purpose: "model_turn" }): Promise<ProviderCredentialLease>;
+  // Arrienda la credencial de un proveedor concreto del usuario para DESCUBRIR sus modelos
+  // (consultar /models del proveedor). Devuelve null si el usuario no tiene credencial para
+  // ese proveedor (no es un error: ese proveedor simplemente no se ofrece).
+  leaseCredentialForProvider(input: {
+    userId: string;
+    providerId: string;
+  }): Promise<ProviderCredentialLease | null>;
   releaseCredentialLease(leaseId: string): Promise<void>;
   reportTurnUsage(input: { turnId: string; authorization: TurnAuthorization; usage: unknown }): Promise<void>;
 }

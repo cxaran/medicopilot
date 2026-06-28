@@ -1,4 +1,4 @@
-import type { ModelId, ProviderId } from "./model.js";
+import type { ModelDescriptor, ModelId, ProviderId } from "./model.js";
 import type { ToolCallRequest } from "./tool.js";
 import type { TurnUsage } from "./usage.js";
 
@@ -19,6 +19,10 @@ export interface ModelTurn {
   profileId: string;
   providerId: ProviderId;
   modelId: ModelId;
+  // Descriptor del modelo resuelto al crear el turn (discovery real del proveedor o
+  // catálogo curado). Se guarda para que el resume use EXACTAMENTE el mismo modelo y sus
+  // capacidades, sin depender de que siga en el catálogo curado.
+  model: ModelDescriptor;
   status: TurnStatus;
   createdAt: Date;
   updatedAt: Date;

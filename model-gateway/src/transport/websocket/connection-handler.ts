@@ -80,7 +80,9 @@ export function createWebSocketHandler(container: GatewayContainer) {
             }
 
             case "models.list": {
-              const models = await container.modelCatalog.list({ view: parsed.view });
+              // Discovery real: consulta los modelos disponibles de cada proveedor del
+              // usuario (con su credencial); fallback al catálogo curado por proveedor.
+              const models = await container.modelDiscovery.listForUser(browserSession.userId);
               send({
                 type: "models.list.result",
                 request_id: parsed.requestId,

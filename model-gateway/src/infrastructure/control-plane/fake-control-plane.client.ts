@@ -37,6 +37,12 @@ export class FakeControlPlaneClient implements ControlPlanePort {
     };
   }
 
+  async leaseCredentialForProvider(): Promise<ProviderCredentialLease | null> {
+    // Dev/tests: no hay credenciales reales por proveedor → sin discovery (se usa el
+    // catálogo curado). Devolver null hace que el servicio de discovery haga fallback.
+    return null;
+  }
+
   async releaseCredentialLease(): Promise<void> {
     return;
   }

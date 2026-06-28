@@ -14,6 +14,7 @@ import {
 import { ProviderRegistry } from "../providers/registry.js";
 import { createFakeModel } from "../domain/model.js";
 import { InMemoryBrowserSessionStore } from "../application/browser-sessions/session-store.js";
+import { ModelDiscoveryService } from "../application/capabilities/model-discovery.js";
 import type { GatewaySettings } from "../config/settings.js";
 import type { ControlPlanePort } from "../ports/control-plane.port.js";
 import type { ModelCatalogPort } from "../ports/model-catalog.port.js";
@@ -26,6 +27,7 @@ export interface GatewayContainer {
   settings: GatewaySettings;
   controlPlane: ControlPlanePort;
   modelCatalog: ModelCatalogPort;
+  modelDiscovery: ModelDiscoveryService;
   providerRegistry: ProviderRegistryPort;
   turnStore: TurnStorePort;
   limiter: RateLimiterPort;
@@ -78,14 +80,35 @@ export function createContainer(settings = loadSettings()): GatewayContainer {
         })
       : new FakeControlPlaneClient();
 
+  const providerRegistry = new ProviderRegistry(adapters);
+  const telemetry = new PinoTelemetry();
+
+  // Discovery real: descubre los modelos de los proveedores REALES (no el fake) consultando
+  // su /models con la credencial del usuario. El fake solo vive en el catálogo curado.
+  const discoverableProviderIds = [
+    ...new Set(
+      catalogModels
+        .map((model) => model.route.providerId)
+        .filter((providerId) => providerId !== "fake")
+    )
+  ];
+  const modelDiscovery = new ModelDiscoveryService({
+    controlPlane,
+    providerRegistry,
+    modelCatalog,
+    telemetry,
+    discoverableProviderIds
+  });
+
   return {
     settings,
     controlPlane,
     modelCatalog,
-    providerRegistry: new ProviderRegistry(adapters),
+    modelDiscovery,
+    providerRegistry,
     turnStore: new InMemoryTurnStore(),
     limiter: new NoopRateLimiter(),
-    telemetry: new PinoTelemetry(),
+    telemetry,
     browserSessions
   };
 }
