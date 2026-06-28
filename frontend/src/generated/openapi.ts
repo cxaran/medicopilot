@@ -183,6 +183,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/users/me/agent-persona": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Persona */
+        get: operations["get_persona_api_v1_users_me_agent_persona_get"];
+        /** Upsert Persona */
+        put: operations["upsert_persona_api_v1_users_me_agent_persona_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/users/me/ai-providers": {
         parameters: {
             query?: never;
@@ -1491,6 +1509,40 @@ export interface components {
             patient_id?: string | null;
             /** Consultation Id */
             consultation_id?: string | null;
+        };
+        /**
+         * AgentPersonaRead
+         * @description Persona del copiloto para su dueño (config en claro, owner-only).
+         */
+        AgentPersonaRead: {
+            /** Tone */
+            tone?: string | null;
+            /** Specialty Focus */
+            specialty_focus?: string | null;
+            /** Language Locale */
+            language_locale?: string | null;
+            /** Consultation Style */
+            consultation_style?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /**
+         * AgentPersonaUpdate
+         * @description Actualización (upsert) de la persona del copiloto del usuario autenticado.
+         *
+         *     Todos los campos son opcionales: se aplican solo los enviados. Es config NO
+         *     secreta (tono/especialidad/idioma/estilo); la capa de seguridad clínica es fija
+         *     y NO se declara aquí (la posee el código).
+         */
+        AgentPersonaUpdate: {
+            /** Tono */
+            tone?: string | null;
+            /** Enfoque de especialidad */
+            specialty_focus?: string | null;
+            /** Idioma / locale */
+            language_locale?: string | null;
+            /** Estilo de consulta */
+            consultation_style?: string | null;
         };
         /**
          * AiCredentialType
@@ -4940,6 +4992,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MessageResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_persona_api_v1_users_me_agent_persona_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentPersonaRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upsert_persona_api_v1_users_me_agent_persona_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentPersonaUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentPersonaRead"];
                 };
             };
             /** @description Validation Error */

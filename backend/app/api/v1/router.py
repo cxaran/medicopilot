@@ -4,6 +4,7 @@ from backend.app.api.v1.agent import router as agent_router
 from backend.app.api.v1.agent_internal import router as agent_internal_router
 from backend.app.api.v1.agent_memories import router as agent_memories_router
 from backend.app.api.v1.agent_oauth import router as agent_oauth_router
+from backend.app.api.v1.agent_persona import router as agent_persona_router
 from backend.app.api.v1.ai_providers import router as ai_providers_router
 from backend.app.api.v1.appointments import router as appointments_router
 from backend.app.api.v1.auth import router as auth_router
@@ -42,6 +43,7 @@ router.include_router(agent_router)
 router.include_router(agent_internal_router)
 router.include_router(agent_memories_router)
 router.include_router(agent_oauth_router)
+router.include_router(agent_persona_router)
 router.include_router(ai_providers_router)
 router.include_router(appointments_router)
 router.include_router(auth_router)

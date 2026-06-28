@@ -1,6 +1,7 @@
 import { AccountPasswordForm } from "@/components/account/AccountPasswordForm";
 import { AccountProfileForm } from "@/components/account/AccountProfileForm";
 import { AgentMemoriesSection } from "@/components/account/AgentMemoriesSection";
+import { AgentPersonaSection } from "@/components/account/AgentPersonaSection";
 import { AiProvidersSection } from "@/components/account/AiProvidersSection";
 import { requireSession } from "@/core/auth/session";
 import { getProfile } from "@/core/auth/account-client";
@@ -23,6 +24,7 @@ export default async function AccountPage() {
       <AccountProfileForm profile={profile} />
       <AccountPasswordForm />
       <AiProvidersSection />
+      <AgentPersonaSection />
       <AgentMemoriesSection />
     </div>
   );

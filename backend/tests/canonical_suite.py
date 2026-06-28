@@ -48,6 +48,7 @@ BACKEND_CANONICAL_TEST_MODULES = (
     "backend.tests.test_agent_internal_lease",
     "backend.tests.test_agent_oauth",
     "backend.tests.test_agent_memories_routes",
+    "backend.tests.test_agent_persona_routes",
     "backend.tests.test_research_pubmed",
 )
 

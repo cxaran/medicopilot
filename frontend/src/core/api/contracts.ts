@@ -26,6 +26,11 @@ export type AgentMemoryRead = components["schemas"]["AgentMemoryRead"];
 export type AgentMemoryCreate = components["schemas"]["AgentMemoryCreate"];
 export type AgentMemoryUpdate = components["schemas"]["AgentMemoryUpdate"];
 
+// Persona del copiloto del usuario (owner-only, singleton P4): config en claro de
+// tono/especialidad/idioma/estilo. La capa de seguridad clínica es fija (la posee el código).
+export type AgentPersonaRead = components["schemas"]["AgentPersonaRead"];
+export type AgentPersonaUpdate = components["schemas"]["AgentPersonaUpdate"];
+
 // Capabilities de recursos (Commit 3 backend). Aliases type-only sobre los schemas
 // generados; nunca interfaces escritas a mano.
 export type ResourceCapability = components["schemas"]["ResourceCapability"];

@@ -59,6 +59,8 @@ import {
   type ContextUsage,
 } from "@/core/agent/context-window";
 import { listAgentMemories } from "@/core/agent-memories/agent-memories-client";
+import { getAgentPersona } from "@/core/agent-persona/agent-persona-client";
+import { composeLeadingLayers, type PersonaFields } from "@/core/agent/persona";
 import { browserApi } from "@/core/api/browser-client";
 import type { ResourceCatalog } from "@/core/api/contracts";
 import { isUiSpec, type UiSpec } from "@/core/agent/tools/ui-spec";
@@ -164,6 +166,9 @@ export function CopilotPanel() {
   // Presupuesto del modelo seleccionado (ventana efectiva + input usable), para usarlo dentro
   // de los handlers del turno (closures con deps vacías).
   const budgetRef = useRef<{ window: number; usable: number }>({ window: 0, usable: 0 });
+  // PERSONA (P4): capa configurable del médico (tono/especialidad/idioma/estilo). La capa de
+  // SEGURIDAD clínica es fija y la posee el código (persona.ts); no se almacena ni se edita.
+  const personaRef = useRef<PersonaFields | null>(null);
 
   const clientRef = useRef<AgentClient | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -221,6 +226,22 @@ export function CopilotPanel() {
         if (!active) return;
         creatableRef.current = new Set();
         setToolCatalog(buildToolCatalog(listTools(), new Set()));
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Carga la persona configurable del médico (P4). Si falla, queda null -> solo la capa de
+  // seguridad fija (siempre presente). La seguridad NUNCA depende de esta carga.
+  useEffect(() => {
+    let active = true;
+    getAgentPersona()
+      .then((persona) => {
+        if (active) personaRef.current = persona;
+      })
+      .catch(() => {
+        if (active) personaRef.current = null;
       });
     return () => {
       active = false;
@@ -468,17 +489,25 @@ export function CopilotPanel() {
     const recall = await recallMemoryMessage();
     const toolsWire = toWireToolDefinitions(effectiveTools(listTools(), creatableRef.current));
 
-    // CONTEXTO (P3): el overhead fijo (esquema de tools + bloque de memorias) no se compacta;
-    // los planes APROBADOS se conservan verbatim y la charla vieja se resume si excede el
+    // PERSONA (P4): capas LÍDER en orden fijo [SEGURIDAD] -> [PERSONA] -> [MEMORIAS]. La capa
+    // de seguridad clínica es fija (código), SIEMPRE primera y presente; la persona va después
+    // y no puede anularla. La conversación (compactada) va al final.
+    const leadingLayers = composeLeadingLayers(personaRef.current, recall);
+
+    // CONTEXTO (P3): el overhead fijo (esquema de tools + capas líder) no se compacta; los
+    // planes APROBADOS se conservan verbatim y la charla vieja se resume si excede el
     // presupuesto. Solo afecta la ventana que ve el modelo; el expediente en FastAPI no se toca.
-    const overhead =
-      estimateToolSchemaTokens(toolsWire) + (recall ? estimateTokens(messageText(recall)) : 0);
+    const leadingTokens = leadingLayers.reduce(
+      (sum, message) => sum + estimateTokens(messageText(message)),
+      0,
+    );
+    const overhead = estimateToolSchemaTokens(toolsWire) + leadingTokens;
     const segments: ContextSegment[] = [...approvedPlansRef.current, ...historySegments];
     const result = compactContext(segments, {
       usableInputTokens: budgetRef.current.usable,
       overheadTokens: overhead,
     });
-    const outgoing = recall ? [recall, ...result.messages] : result.messages;
+    const outgoing = [...leadingLayers, ...result.messages];
 
     const usedEstimate =
       overhead + result.messages.reduce((sum, message) => sum + estimateTokens(messageText(message)), 0);

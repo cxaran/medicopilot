@@ -1,4 +1,5 @@
 from backend.app.models.agent_memory import AgentMemory
+from backend.app.models.agent_persona import AgentPersona
 from backend.app.models.ai_provider_credential import AiProviderCredential
 from backend.app.models.appointment import Appointment
 from backend.app.models.audit_event import AuditEvent
@@ -41,6 +42,7 @@ __all__ = [
     "ActiveInactiveStatus",
     "AgentMemory",
     "AgentMemoryKind",
+    "AgentPersona",
     "AiOutputStatus",
     "AiProvider",
     "AiProviderCredential",
