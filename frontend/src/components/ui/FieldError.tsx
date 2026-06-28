@@ -3,5 +3,5 @@ export function FieldError({ message }: Readonly<{ message?: string | null }>) {
     return null;
   }
 
-  return <p className="text-sm text-red-600">{message}</p>;
+  return <p className="text-sm text-[var(--danger)]">{message}</p>;
 }

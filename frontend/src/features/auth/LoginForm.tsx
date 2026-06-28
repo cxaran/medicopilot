@@ -7,6 +7,7 @@ import { ApiRequestError } from "@/core/api/api-error";
 import { browserApi } from "@/core/api/browser-client";
 import { Button } from "@/components/ui/Button";
 import { FieldError } from "@/components/ui/FieldError";
+import { Input } from "@/components/ui/Input";
 
 export function LoginForm() {
   const router = useRouter();
@@ -46,8 +47,7 @@ export function LoginForm() {
         <label className="text-sm font-medium" htmlFor="email">
           Email
         </label>
-        <input
-          className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-950"
+        <Input
           id="email"
           name="email"
           type="email"
@@ -59,8 +59,7 @@ export function LoginForm() {
         <label className="text-sm font-medium" htmlFor="password">
           Contraseña
         </label>
-        <input
-          className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-950"
+        <Input
           id="password"
           name="password"
           type="password"
