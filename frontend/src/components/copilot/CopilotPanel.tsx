@@ -60,6 +60,7 @@ import {
   isMetaTool,
 } from "@/core/agent/tool-discovery";
 import { loadMcpTools } from "@/core/agent/mcp/mcp-tools";
+import { loadPharmacologyTools } from "@/core/agent/pharmacology/pharmacology-tools";
 import {
   ApprovalStore,
   applyApprovalDecision,
@@ -372,16 +373,23 @@ export function CopilotPanel() {
     // Se recompone cuando llegan las tools MCP (descubrimiento asíncrono).
   }, [mcpTools]);
 
-  // Descubrimiento MCP (rebanada 1): carga las tools del servidor MCP configurado, si lo hay.
-  // Sin servidor o ante cualquier fallo, queda [] (no rompe el copiloto, no es error).
+  // Descubrimiento MCP: carga las tools del servidor MCP configurado (si lo hay) MÁS la fuente de
+  // farmacología (servidor MCP real si está configurado, o el proveedor de referencia local). Ambas
+  // fluyen por el MISMO camino (registro/gating/procedencia/tool_search). Cualquier fallo degrada
+  // sin romper el copiloto. Las dos cargas son independientes.
   useEffect(() => {
     let active = true;
-    loadMcpTools()
-      .then((tools) => {
-        if (active) setMcpTools(tools);
+    Promise.allSettled([loadMcpTools(), loadPharmacologyTools()])
+      .then(([mcp, pharma]) => {
+        if (!active) return;
+        const merged: ToolDefinition[] = [
+          ...(mcp.status === "fulfilled" ? mcp.value : []),
+          ...(pharma.status === "fulfilled" ? pharma.value : []),
+        ];
+        setMcpTools(merged);
       })
       .catch(() => {
-        /* degradación silenciosa: sin tools MCP */
+        /* degradación silenciosa: sin tools externas */
       });
     return () => {
       active = false;

@@ -5,6 +5,7 @@ import {
   callMcpTool,
   discoverMcpTools,
   mcpServerConfig,
+  type McpCallResult,
   type McpServerConfig,
   type McpToolListItem,
 } from "./mcp-client";
@@ -72,20 +73,46 @@ function clampText(value: string): string {
 }
 
 /**
+ * Opciones para reusar el mapeo MCP en OTRAS fuentes que respetan el MISMO contrato de tool
+ * (mismo shape ``McpToolListItem`` / ``McpCallResult``) sin duplicar el mapeo ni el JSON-RPC:
+ * - ``provenance``: procedencia legible alternativa (p. ej. "Farmacología (MCP)").
+ * - ``namespaceTool``: cómo namespacear el nombre (por defecto ``mcp.<servidor>.<tool>``).
+ * - ``callTool``: ejecutor alternativo (p. ej. un proveedor LOCAL en proceso que implementa el
+ *   mismo contrato); por defecto, ``tools/call`` por JSON-RPC al servidor.
+ * - ``wrapContent``: envoltura del contenido devuelto (p. ej. marcarlo como referencia NO
+ *   confiable). La salida sigue entregándose como tool_result, nunca como instrucciones.
+ */
+export interface MapMcpToolsOptions {
+  provenance?: string;
+  namespaceTool?: (itemName: string) => string;
+  callTool?: (toolName: string, args: Record<string, unknown>) => Promise<McpCallResult>;
+  wrapContent?: (content: unknown) => unknown;
+}
+
+/**
  * Mapea los items de ``tools/list`` de un servidor a ToolDefinitions con procedencia MCP y un
  * ``execute`` que llama ``tools/call`` (rebanada 2). El llamador (panel) sigue siendo quien aplica
  * gating y APROBACIÓN P1 antes de invocar ``execute``.
+ *
+ * ``options`` permite reusar este mapeo (y su manejo de errores/ejecución) para otras fuentes que
+ * cumplen el MISMO contrato MCP (p. ej. el origen de farmacología, real o local) sin duplicar nada.
  */
 export function mapMcpToolsToDefinitions(
   config: McpServerConfig,
   items: readonly McpToolListItem[],
   fetchImpl?: typeof fetch,
+  options: MapMcpToolsOptions = {},
 ): ToolDefinition[] {
   const serverName = config.name;
-  const source = mcpProvenance(serverName);
+  const source = options.provenance ?? mcpProvenance(serverName);
+  const nameFor = options.namespaceTool ?? ((itemName: string) => mcpToolName(serverName, itemName));
+  const callTool =
+    options.callTool ??
+    ((toolName: string, args: Record<string, unknown>) =>
+      callMcpTool(config, toolName, args, fetchImpl ? { fetchImpl } : {}));
   return items.map((item) => {
     const readOnly = item.annotations?.readOnlyHint === true;
-    const name = mcpToolName(serverName, item.name);
+    const name = nameFor(item.name);
     const description =
       (item.description && item.description.trim()) ||
       `Herramienta MCP «${item.name}» del servidor ${serverName}.`;
@@ -106,7 +133,7 @@ export function mapMcpToolsToDefinitions(
       execute: async (args: Record<string, unknown>): Promise<unknown> => {
         let result;
         try {
-          result = await callMcpTool(config, item.name, args, fetchImpl ? { fetchImpl } : {});
+          result = await callTool(item.name, args);
         } catch (error) {
           const message = error instanceof Error ? error.message : "Error al llamar la herramienta MCP.";
           throw new ToolExecutionError("mcp_call_failed", clampText(message));
@@ -119,7 +146,7 @@ export function mapMcpToolsToDefinitions(
             ),
           );
         }
-        return result.content;
+        return options.wrapContent ? options.wrapContent(result.content) : result.content;
       },
     };
 
