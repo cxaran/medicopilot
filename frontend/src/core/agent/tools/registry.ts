@@ -223,6 +223,41 @@ function buildCohortBody(args: Record<string, unknown>): Record<string, unknown>
   return body;
 }
 
+// Mapea (report_type + params) al endpoint REST de reportes correcto y su query string. Solo
+// se envían los parámetros que cada reporte honra (verificado contra los routers reales).
+function buildReportPath(args: Record<string, unknown>): string {
+  const type = String(args.report_type);
+  const params = new URLSearchParams();
+  const setStr = (key: string) => {
+    const value = args[key];
+    if (typeof value === "string" && value !== "") params.set(key, value);
+  };
+  const setNum = (key: string) => {
+    const value = args[key];
+    if (typeof value === "number") params.set(key, String(value));
+  };
+  const withQuery = (path: string) => {
+    const qs = params.toString();
+    return qs ? `${path}?${qs}` : path;
+  };
+  switch (type) {
+    case "activity":
+      setStr("date_from"); setStr("date_to"); setStr("doctor_id");
+      return withQuery("/api/v1/reports/activity");
+    case "top_diagnoses":
+      setStr("date_from"); setStr("date_to"); setNum("limit");
+      return withQuery("/api/v1/reports/top-diagnoses");
+    case "unsigned_notes":
+      setStr("doctor_id");
+      return withQuery("/api/v1/reports/unsigned-notes");
+    case "attendance":
+      setStr("date_from"); setStr("date_to"); setStr("doctor_id");
+      return withQuery("/api/v1/reports/attendance");
+    default:
+      throw new ToolExecutionError("invalid_report_type", `Tipo de reporte no soportado: ${type}`);
+  }
+}
+
 // Todas las tools mapean a la API REST EXISTENTE de FastAPI usando la cookie del médico.
 // FastAPI valida cookie+rol+permiso+paciente en cada llamada; el gateway nunca toca el
 // expediente. Las de escritura crean BORRADORES y van siempre gated por confirmación.
@@ -746,6 +781,38 @@ const TOOLS: ToolDefinition[] = [
     },
     execute: (args, ctx) =>
       ctx.api(`/api/v1/population/cohort`, { method: "POST", body: buildCohortBody(args) }),
+  },
+  {
+    // Reportes agregados (G5 fase 2): punto único para los cuatro reportes de calidad/
+    // auditoría. Solo lectura; FastAPI exige reports:read y devuelve DATOS AGREGADOS
+    // (series/conteos) para revisión del médico, NUNCA filas con PHI ni una acción automática.
+    name: "clinical.get_report",
+    description:
+      "Devuelve un reporte AGREGADO (series/conteos, sin datos de pacientes) para revisión " +
+      "del médico. report_type: 'activity' (consultas y citas por mes en date_from..date_to, " +
+      "opcional doctor_id), 'top_diagnoses' (ranking de diagnósticos en date_from..date_to, " +
+      "limit opcional), 'unsigned_notes' (consultas en borrador por médico, opcional " +
+      "doctor_id) o 'attendance' (tasas de asistencia/inasistencia/cancelación en " +
+      "date_from..date_to, opcional doctor_id). Es información para revisión, no una acción " +
+      "automática. Solo lectura.",
+    kind: "read",
+    inputSchema: {
+      type: "object",
+      properties: {
+        report_type: {
+          type: "string",
+          description: "Tipo de reporte agregado.",
+          enum: ["activity", "top_diagnoses", "unsigned_notes", "attendance"],
+        },
+        date_from: DATE_FROM_PROP,
+        date_to: DATE_TO_PROP,
+        doctor_id: DOCTOR_FILTER_PROP,
+        limit: LIMIT_PROP,
+      },
+      required: ["report_type"],
+      additionalProperties: false,
+    },
+    execute: (args, ctx) => ctx.api(buildReportPath(args)),
   },
   {
     // Acceso clínico estructurado estilo FHIR: equivalente NATIVO a un MCP-server FHIR

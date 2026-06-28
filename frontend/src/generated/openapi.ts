@@ -1189,6 +1189,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/reports/activity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Report Activity */
+        get: operations["report_activity_api_v1_reports_activity_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reports/top-diagnoses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Report Top Diagnoses */
+        get: operations["report_top_diagnoses_api_v1_reports_top_diagnoses_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reports/unsigned-notes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Report Unsigned Notes */
+        get: operations["report_unsigned_notes_api_v1_reports_unsigned_notes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reports/attendance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Report Attendance */
+        get: operations["report_attendance_api_v1_reports_attendance_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/research/pubmed": {
         parameters: {
             query?: never;
@@ -1596,6 +1664,18 @@ export interface components {
          */
         ActiveInactiveStatus: "active" | "inactive";
         /**
+         * ActivityPoint
+         * @description Actividad de un mes: consultas y citas en el periodo (``YYYY-MM``).
+         */
+        ActivityPoint: {
+            /** Period */
+            period: string;
+            /** Consultations */
+            consultations: number;
+            /** Appointments */
+            appointments: number;
+        };
+        /**
          * AgeRangeCriterion
          * @description Rango de edad (años cumplidos) calculado desde la fecha de nacimiento.
          *
@@ -1989,6 +2069,29 @@ export interface components {
             reason?: string | null;
             /** Notas internas */
             internal_notes?: string | null;
+        };
+        /**
+         * AttendanceReport
+         * @description Resultados de citas en una ventana: asistencia vs inasistencia vs cancelación.
+         *
+         *     Las tasas son fracciones (0..1) sobre el total de citas resueltas
+         *     (``attended + no_show + cancelled``); 0 cuando no hay citas resueltas.
+         */
+        AttendanceReport: {
+            /** Attended */
+            attended: number;
+            /** No Show */
+            no_show: number;
+            /** Cancelled */
+            cancelled: number;
+            /** Total */
+            total: number;
+            /** Attended Rate */
+            attended_rate: number;
+            /** No Show Rate */
+            no_show_rate: number;
+            /** Cancelled Rate */
+            cancelled_rate: number;
         };
         /**
          * AuthPolicyRead
@@ -5229,10 +5332,35 @@ export interface components {
             /** Resultado vinculado */
             result_lab_result_id?: string | null;
         };
+        /**
+         * TopDiagnosis
+         * @description Frecuencia de un diagnóstico (por código si existe, si no texto normalizado).
+         */
+        TopDiagnosis: {
+            /** Code Or Text */
+            code_or_text: string;
+            /** Count */
+            count: number;
+        };
         /** UnlockAccountRequest */
         UnlockAccountRequest: {
             /** Token */
             token: string;
+        };
+        /**
+         * UnsignedNotesItem
+         * @description Consultas en borrador (sin firmar) agrupadas por médico tratante.
+         */
+        UnsignedNotesItem: {
+            /**
+             * Doctor Id
+             * Format: uuid
+             */
+            doctor_id: string;
+            /** Doctor Name */
+            doctor_name: string;
+            /** Count */
+            count: number;
         };
         /**
          * UserAdminCreate
@@ -9570,6 +9698,154 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PrescriptionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    report_activity_api_v1_reports_activity_get: {
+        parameters: {
+            query: {
+                /** @description Inicio del rango (YYYY-MM-DD), inclusivo. */
+                date_from: string;
+                /** @description Fin del rango (YYYY-MM-DD), inclusivo. */
+                date_to: string;
+                /** @description Filtra por médico. */
+                doctor_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActivityPoint"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    report_top_diagnoses_api_v1_reports_top_diagnoses_get: {
+        parameters: {
+            query: {
+                /** @description Inicio de la ventana (YYYY-MM-DD), inclusivo. */
+                date_from: string;
+                /** @description Fin de la ventana (YYYY-MM-DD), inclusivo. */
+                date_to: string;
+                /** @description Máximo de diagnósticos. */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TopDiagnosis"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    report_unsigned_notes_api_v1_reports_unsigned_notes_get: {
+        parameters: {
+            query?: {
+                /** @description Filtra por médico. */
+                doctor_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnsignedNotesItem"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    report_attendance_api_v1_reports_attendance_get: {
+        parameters: {
+            query: {
+                /** @description Inicio de la ventana (YYYY-MM-DD), inclusivo. */
+                date_from: string;
+                /** @description Fin de la ventana (YYYY-MM-DD), inclusivo. */
+                date_to: string;
+                /** @description Filtra por médico. */
+                doctor_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttendanceReport"];
                 };
             };
             /** @description Validation Error */

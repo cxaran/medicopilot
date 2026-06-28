@@ -65,6 +65,7 @@ from backend.app.security.groups.population import (  # noqa: E402
 from backend.app.security.groups.prescriptions import (  # noqa: E402
     PrescriptionPermissions,
 )
+from backend.app.security.groups.reports import ReportsPermissions  # noqa: E402
 from backend.app.security.groups.roles import RolePermissions  # noqa: E402
 from backend.app.security.groups.study_orders import (  # noqa: E402
     StudyOrderPermissions,
@@ -97,6 +98,7 @@ class SecurityCatalogTest(unittest.TestCase):
                 AppointmentPermissions,
                 ClinicalDocumentPermissions,
                 PopulationPermissions,
+                ReportsPermissions,
                 PermissionPermissions,
             ],
         )
@@ -186,6 +188,7 @@ class SecurityCatalogTest(unittest.TestCase):
                 "clinical_documents:delete",
                 "clinical_documents:download",
                 "population:read",
+                "reports:read",
                 "permissions:read",
             ],
         )
