@@ -1,14 +1,89 @@
 @import "tailwindcss";
 
-:root {
+/*
+ * Design tokens (R1) — portados de MediCopilot.dc.html (paleta purpura).
+ * Fundacion de presentacion: define las CSS custom properties de tema (light/dark)
+ * para que las rebanadas siguientes (R2+) las consuman. No restylea componentes aqui.
+ */
+
+[data-theme="light"] {
   color-scheme: light;
+  --bg: #faf9f8;
+  --bg2: #f6f5f3;
+  --panel: #ffffff;
+  --panel2: #f4f4f5;
+  --elev: #ffffff;
+  --border: #eae8e5;
+  --border2: #e0ddd9;
+  --tx: #292524;
+  --tx2: #57534e;
+  --tx3: #a8a29e;
+  --accent: #8b7ff0;
+  --accent-tx: #6655dd;
+  --accent-dim: rgba(139, 127, 240, 0.11);
+  --accent-bd: rgba(139, 127, 240, 0.32);
+  --on-accent: #ffffff;
+  --danger: #dc2626;
+  --warn: #b45309;
+  --ok: #059669;
+  --info: #2563eb;
+  --purple: #7c3aed;
+  --soft:
+    rgba(14, 63, 126, 0.04) 0px 0px 0px 1px, rgba(42, 51, 69, 0.04) 0px 1px 1px -0.5px,
+    rgba(42, 51, 70, 0.04) 0px 3px 3px -1.5px, rgba(42, 51, 70, 0.04) 0px 6px 6px -3px,
+    rgba(14, 63, 126, 0.04) 0px 12px 12px -6px, rgba(14, 63, 126, 0.04) 0px 24px 24px -12px;
+  --soft2:
+    rgba(14, 63, 126, 0.06) 0px 0px 0px 1px, rgba(42, 51, 69, 0.06) 0px 1px 1px -0.5px,
+    rgba(42, 51, 70, 0.06) 0px 3px 3px -1.5px, rgba(42, 51, 70, 0.06) 0px 6px 6px -3px,
+    rgba(14, 63, 126, 0.06) 0px 12px 12px -6px, rgba(14, 63, 126, 0.06) 0px 24px 24px -12px;
+  --shadow: 0 18px 50px rgba(41, 37, 36, 0.13);
+  --glow: 0 0 0 1px rgba(139, 127, 240, 0.2), 0 10px 34px rgba(139, 127, 240, 0.14);
 }
 
-body {
-  margin: 0;
-  background: #f1f5f9;
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #1a1715;
+  --bg2: #141110;
+  --panel: #272320;
+  --panel2: #36302b;
+  --elev: #322c28;
+  --border: #46403a;
+  --border2: #574f48;
+  --tx: #fafaf9;
+  --tx2: #d8d4d1;
+  --tx3: #b2aaa3;
+  --accent: #a59bf6;
+  --accent-tx: #cbc4fc;
+  --accent-dim: rgba(165, 155, 246, 0.17);
+  --accent-bd: rgba(165, 155, 246, 0.42);
+  --on-accent: #16121f;
+  --danger: #fca5a5;
+  --warn: #fcd34d;
+  --ok: #4ade80;
+  --info: #7cb8ff;
+  --purple: #c4b5fd;
+  --soft:
+    rgba(255, 255, 255, 0.07) 0 0 0 1px, rgba(0, 0, 0, 0.2) 0px 1px 2px,
+    rgba(0, 0, 0, 0.24) 0px 6px 16px -4px, rgba(0, 0, 0, 0.3) 0px 18px 40px -12px;
+  --soft2:
+    rgba(255, 255, 255, 0.09) 0 0 0 1px, rgba(0, 0, 0, 0.26) 0px 1px 2px,
+    rgba(0, 0, 0, 0.32) 0px 8px 22px -4px, rgba(0, 0, 0, 0.4) 0px 22px 48px -12px;
+  --shadow: 0 20px 54px rgba(0, 0, 0, 0.5);
+  --glow: 0 0 0 1px rgba(165, 155, 246, 0.3), 0 10px 34px rgba(165, 155, 246, 0.18);
 }
 
 * {
   box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--tx);
+  font-family: var(--font-geist), system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+textarea::placeholder,
+input::placeholder {
+  color: var(--tx3);
 }
