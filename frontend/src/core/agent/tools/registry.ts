@@ -573,6 +573,64 @@ const TOOLS: ToolDefinition[] = [
       ),
   },
   {
+    name: "clinical.list_study_orders",
+    description:
+      "Lista órdenes de estudio/laboratorio del paciente (pendientes, en proceso, con resultado " +
+      "o canceladas). Puede filtrar por paciente (patient_id), médico que ordena (ordered_by), " +
+      "estado (status) y rango de fecha de la orden (date_from/date_to, sobre ordered_at). Solo " +
+      "lectura.",
+    kind: "read",
+    inputSchema: clinicalListSchema({
+      patient_id: PATIENT_FILTER_PROP,
+      ordered_by: DOCTOR_FILTER_PROP,
+      status: {
+        type: "string",
+        description: "Estado de la orden.",
+        enum: ["pending", "in_progress", "resulted", "cancelled"],
+      },
+      date_from: DATE_FROM_PROP,
+      date_to: DATE_TO_PROP,
+    }),
+    execute: (args, ctx) =>
+      ctx.api(
+        `/api/v1/study-orders${clinicalListQuery(args, {
+          eq: ["patient_id", "ordered_by", "status"],
+          dateField: "ordered_at",
+        })}`,
+      ),
+  },
+  {
+    name: "clinical.list_tasks",
+    description:
+      "Lista tareas clínicas de seguimiento (pendientes/vencidas). Puede filtrar por responsable " +
+      "(owner_id), paciente (patient_id), estado (status), prioridad (priority) y rango de fecha " +
+      "de vencimiento (date_from/date_to, sobre due_at). Solo lectura.",
+    kind: "read",
+    inputSchema: clinicalListSchema({
+      owner_id: { type: "string", description: "Filtra por id (UUID) del usuario responsable.", format: "uuid" },
+      patient_id: PATIENT_FILTER_PROP,
+      status: {
+        type: "string",
+        description: "Estado de la tarea.",
+        enum: ["open", "done", "cancelled"],
+      },
+      priority: {
+        type: "string",
+        description: "Prioridad de la tarea.",
+        enum: ["low", "medium", "high"],
+      },
+      date_from: DATE_FROM_PROP,
+      date_to: DATE_TO_PROP,
+    }),
+    execute: (args, ctx) =>
+      ctx.api(
+        `/api/v1/clinical-tasks${clinicalListQuery(args, {
+          eq: ["owner_id", "patient_id", "status", "priority"],
+          dateField: "due_at",
+        })}`,
+      ),
+  },
+  {
     // Acceso clínico estructurado estilo FHIR: equivalente NATIVO a un MCP-server FHIR
     // (p.ej. wso2/fhir-mcp-server) respetando la AUTORIDAD CLÍNICA. Se ejecuta en el
     // NAVEGADOR con la cookie del médico (ctx.api -> credentials:include); FastAPI valida
@@ -945,6 +1003,90 @@ const TOOLS: ToolDefinition[] = [
     },
     execute: (args, ctx) =>
       ctx.api(`/api/v1/clinical-events`, { method: "POST", body: args as Record<string, unknown> }),
+  },
+  {
+    name: "clinical.create_study_order_draft",
+    description:
+      "Crea una orden de estudio/laboratorio EN BORRADOR para un paciente. Acción de escritura: " +
+      "requiere confirmación explícita del médico antes de guardarse. El médico revisa y aprueba " +
+      "la orden exacta; nada se guarda de forma autónoma.",
+    kind: "write",
+    inputSchema: {
+      type: "object",
+      properties: {
+        patient_id: { type: "string", description: "Id (UUID) del paciente.", format: "uuid" },
+        ordered_by: { type: "string", description: "Id (UUID) del médico que ordena.", format: "uuid" },
+        study_name: { type: "string", description: "Nombre del estudio solicitado." },
+        code: { type: "string", description: "Código del estudio (LOINC), opcional." },
+        reason: { type: "string", description: "Motivo clínico (opcional)." },
+        ordered_at: {
+          type: "string",
+          description: "Fecha y hora ISO 8601 de la orden (opcional; por defecto, ahora).",
+        },
+        status: {
+          type: "string",
+          description: "Estado de la orden (opcional).",
+          enum: ["pending", "in_progress", "resulted", "cancelled"],
+        },
+      },
+      required: ["patient_id", "ordered_by", "study_name"],
+      additionalProperties: false,
+    },
+    approval: {
+      actionType: "create_study_order_draft",
+      targetResource: "study_orders",
+      summarize: (args) =>
+        `Crear una orden de estudio EN BORRADOR para el paciente ${String(args.patient_id ?? "—")}: ` +
+        `${String(args.study_name ?? "—")}.`,
+    },
+    execute: (args, ctx) =>
+      ctx.api(`/api/v1/study-orders`, { method: "POST", body: args as Record<string, unknown> }),
+  },
+  {
+    name: "clinical.create_task_draft",
+    description:
+      "Crea una tarea clínica de seguimiento EN BORRADOR. Acción de escritura: requiere " +
+      "confirmación explícita del médico antes de guardarse. Por defecto, el responsable es el " +
+      "propio médico; puede referir a un paciente. Nada se guarda de forma autónoma.",
+    kind: "write",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Título de la tarea." },
+        description: { type: "string", description: "Detalle de la tarea (opcional)." },
+        patient_id: {
+          type: "string",
+          description: "Id (UUID) del paciente relacionado (opcional).",
+          format: "uuid",
+        },
+        due_at: {
+          type: "string",
+          description: "Fecha y hora ISO 8601 de vencimiento (opcional).",
+        },
+        priority: {
+          type: "string",
+          description: "Prioridad (opcional).",
+          enum: ["low", "medium", "high"],
+        },
+        status: {
+          type: "string",
+          description: "Estado (opcional).",
+          enum: ["open", "done", "cancelled"],
+        },
+      },
+      required: ["title"],
+      additionalProperties: false,
+    },
+    approval: {
+      actionType: "create_task_draft",
+      targetResource: "clinical_tasks",
+      summarize: (args) =>
+        `Crear una tarea clínica EN BORRADOR: "${String(args.title ?? "—")}"` +
+        `${args.patient_id ? ` (paciente ${String(args.patient_id)})` : ""}` +
+        `${args.due_at ? `, vence ${String(args.due_at)}` : ""}.`,
+    },
+    execute: (args, ctx) =>
+      ctx.api(`/api/v1/clinical-tasks`, { method: "POST", body: args as Record<string, unknown> }),
   },
   {
     // REMEMBER (P2): el agente PROPONE persistir una memoria del médico. Es una escritura

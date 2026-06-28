@@ -17,6 +17,7 @@ from backend.app.core.settings import settings
 from backend.app.models.appointment import Appointment
 from backend.app.models.clinical_document import ClinicalDocument
 from backend.app.models.clinical_event import ClinicalEvent
+from backend.app.models.clinical_task import ClinicalTask
 from backend.app.models.consultation import Consultation
 from backend.app.models.consultation_diagnosis import ConsultationDiagnosis
 from backend.app.models.doctor import Doctor
@@ -26,6 +27,7 @@ from backend.app.models.medication_template import MedicationTemplate
 from backend.app.models.patient import Patient
 from backend.app.models.patient_clinical_item import PatientClinicalItem
 from backend.app.models.prescription import Prescription, PrescriptionItem
+from backend.app.models.study_order import StudyOrder
 from backend.app.models.user import Role, User
 from backend.app.models.vital_sign import VitalSign
 from backend.app.query import QueryOptions, ResourceQuery
@@ -76,6 +78,11 @@ from backend.app.schemas.clinical_event import (
     ClinicalEventListItem,
     ClinicalEventUpdate,
 )
+from backend.app.schemas.clinical_task import (
+    ClinicalTaskCreate,
+    ClinicalTaskListItem,
+    ClinicalTaskUpdate,
+)
 from backend.app.schemas.consultation import (
     ConsultationCreate,
     ConsultationListItem,
@@ -123,6 +130,11 @@ from backend.app.schemas.vital_sign import (
     VitalSignUpdate,
 )
 from backend.app.schemas.role import RoleCreate, RoleListItem, RoleRead, RoleUpdate
+from backend.app.schemas.study_order import (
+    StudyOrderCreate,
+    StudyOrderListItem,
+    StudyOrderUpdate,
+)
 from backend.app.schemas.user_admin import (
     UserAdminCreate,
     UserAdminListItem,
@@ -130,6 +142,8 @@ from backend.app.schemas.user_admin import (
 )
 from backend.app.security.groups.clinical_documents import ClinicalDocumentPermissions
 from backend.app.security.groups.clinical_events import ClinicalEventPermissions
+from backend.app.security.groups.clinical_tasks import ClinicalTaskPermissions
+from backend.app.security.groups.study_orders import StudyOrderPermissions
 from backend.app.security.groups.consultation_diagnoses import (
     ConsultationDiagnosisPermissions,
 )
@@ -366,6 +380,40 @@ CLINICAL_EVENTS = ResourceQuery(
         in_fields=("id",),
         field_operators={"started_at": _CREATED_AT_OPERATORS},
         default_sort="-started_at",
+    ),
+)
+
+STUDY_ORDERS = ResourceQuery(
+    name="StudyOrderQuery",
+    model=StudyOrder,
+    schema=StudyOrderListItem,
+    options=QueryOptions(
+        # ``patient_id``/``ordered_by`` (UUID) y ``status`` (enum) por igualdad. ``ordered_at``
+        # admite rango de calendario. Búsqueda libre por nombre del estudio. Los listados excluyen
+        # órdenes eliminadas (``deleted_at``) vía stmt base en el router.
+        filter_fields=("patient_id", "ordered_by", "status"),
+        sort_fields=("ordered_at", "created_at", "updated_at"),
+        search_fields=("study_name", "code"),
+        in_fields=("id",),
+        field_operators={"ordered_at": _CREATED_AT_OPERATORS},
+        default_sort="-ordered_at",
+    ),
+)
+
+CLINICAL_TASKS = ResourceQuery(
+    name="ClinicalTaskQuery",
+    model=ClinicalTask,
+    schema=ClinicalTaskListItem,
+    options=QueryOptions(
+        # ``owner_id``/``patient_id`` (UUID), ``status`` y ``priority`` (enums) por igualdad: los
+        # pendientes/vencidos se consultan por responsable + estado + rango de ``due_at``. Búsqueda
+        # libre por título. Los listados excluyen tareas eliminadas vía stmt base en el router.
+        filter_fields=("owner_id", "patient_id", "status", "priority"),
+        sort_fields=("due_at", "created_at", "updated_at"),
+        search_fields=("title",),
+        in_fields=("id",),
+        field_operators={"due_at": _CREATED_AT_OPERATORS},
+        default_sort="-created_at",
     ),
 )
 
@@ -1134,6 +1182,68 @@ RESOURCE_REGISTRY: tuple[ResourceDefinition, ...] = (
                 confirmation=ConfirmationDef(
                     title="Eliminar evento clínico",
                     message="El evento se dará de baja lógica.",
+                    confirm_label="Eliminar",
+                    destructive=True,
+                ),
+            ),
+        ),
+    ),
+    ResourceDefinition(
+        name="study_orders",
+        label="Órdenes de estudio",
+        api_path="/api/v1/study-orders",
+        view=ResourceView.TABLE,
+        read_permission=StudyOrderPermissions.READ,
+        list_query=STUDY_ORDERS,
+        list_schema=StudyOrderListItem,
+        create_schema=StudyOrderCreate,
+        update_schema=StudyOrderUpdate,
+        create_permission=StudyOrderPermissions.CREATE,
+        update_permission=StudyOrderPermissions.UPDATE,
+        detail_url_template="/api/v1/study-orders/{id}",
+        actions=(
+            ActionDef(
+                name="delete",
+                label="Eliminar",
+                method=HttpMethod.DELETE,
+                url_template="/api/v1/study-orders/{id}",
+                scope=ActionScope.ITEM,
+                danger=True,
+                permission=StudyOrderPermissions.DELETE,
+                confirmation=ConfirmationDef(
+                    title="Eliminar orden de estudio",
+                    message="La orden se dará de baja lógica.",
+                    confirm_label="Eliminar",
+                    destructive=True,
+                ),
+            ),
+        ),
+    ),
+    ResourceDefinition(
+        name="clinical_tasks",
+        label="Tareas clínicas",
+        api_path="/api/v1/clinical-tasks",
+        view=ResourceView.TABLE,
+        read_permission=ClinicalTaskPermissions.READ,
+        list_query=CLINICAL_TASKS,
+        list_schema=ClinicalTaskListItem,
+        create_schema=ClinicalTaskCreate,
+        update_schema=ClinicalTaskUpdate,
+        create_permission=ClinicalTaskPermissions.CREATE,
+        update_permission=ClinicalTaskPermissions.UPDATE,
+        detail_url_template="/api/v1/clinical-tasks/{id}",
+        actions=(
+            ActionDef(
+                name="delete",
+                label="Eliminar",
+                method=HttpMethod.DELETE,
+                url_template="/api/v1/clinical-tasks/{id}",
+                scope=ActionScope.ITEM,
+                danger=True,
+                permission=ClinicalTaskPermissions.DELETE,
+                confirmation=ConfirmationDef(
+                    title="Eliminar tarea clínica",
+                    message="La tarea se dará de baja lógica.",
                     confirm_label="Eliminar",
                     destructive=True,
                 ),

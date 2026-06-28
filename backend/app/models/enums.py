@@ -171,6 +171,31 @@ class ClinicalEventStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
+class StudyOrderStatus(str, Enum):
+    """Estado de una orden de estudio/laboratorio."""
+
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    RESULTED = "resulted"
+    CANCELLED = "cancelled"
+
+
+class ClinicalTaskPriority(str, Enum):
+    """Prioridad de una tarea clínica de seguimiento."""
+
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+
+class ClinicalTaskStatus(str, Enum):
+    """Estado de una tarea clínica de seguimiento."""
+
+    OPEN = "open"
+    DONE = "done"
+    CANCELLED = "cancelled"
+
+
 class LabResultAbnormalFlag(str, Enum):
     """Marca de anormalidad de un resultado de laboratorio/observación.
 

@@ -13,6 +13,7 @@ from backend.app.api.v1.clinical_documents import (
     router as clinical_documents_router,
 )
 from backend.app.api.v1.clinical_events import router as clinical_events_router
+from backend.app.api.v1.clinical_tasks import router as clinical_tasks_router
 from backend.app.api.v1.consultation_diagnoses import (
     router as consultation_diagnoses_router,
 )
@@ -35,6 +36,7 @@ from backend.app.api.v1.prescriptions import router as prescriptions_router
 from backend.app.api.v1.research import router as research_router
 from backend.app.api.v1.resources import router as resources_router
 from backend.app.api.v1.roles import router as roles_router
+from backend.app.api.v1.study_orders import router as study_orders_router
 from backend.app.api.v1.users import router as users_router
 from backend.app.api.v1.users_admin import router as users_admin_router
 from backend.app.api.v1.vital_signs import router as vital_signs_router
@@ -52,6 +54,7 @@ router.include_router(auth_router)
 router.include_router(bootstrap_router)
 router.include_router(clinical_documents_router)
 router.include_router(clinical_events_router)
+router.include_router(clinical_tasks_router)
 router.include_router(consultation_diagnoses_router)
 router.include_router(consultations_router)
 router.include_router(doctors_router)
@@ -66,6 +69,7 @@ router.include_router(prescriptions_router)
 router.include_router(research_router)
 router.include_router(resources_router)
 router.include_router(roles_router)
+router.include_router(study_orders_router)
 router.include_router(users_router)
 router.include_router(users_admin_router)
 router.include_router(vital_signs_router)

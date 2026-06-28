@@ -680,6 +680,43 @@ export interface paths {
         patch: operations["update_clinical_event_api_v1_clinical_events__event_id__patch"];
         trace?: never;
     };
+    "/api/v1/clinical-tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Clinical Tasks */
+        get: operations["list_clinical_tasks_api_v1_clinical_tasks_get"];
+        put?: never;
+        /** Create Clinical Task */
+        post: operations["create_clinical_task_api_v1_clinical_tasks_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clinical-tasks/{task_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Clinical Task */
+        get: operations["get_clinical_task_api_v1_clinical_tasks__task_id__get"];
+        put?: never;
+        post?: never;
+        /** Delete Clinical Task */
+        delete: operations["delete_clinical_task_api_v1_clinical_tasks__task_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Clinical Task */
+        patch: operations["update_clinical_task_api_v1_clinical_tasks__task_id__patch"];
+        trace?: never;
+    };
     "/api/v1/consultation-diagnoses": {
         parameters: {
             query?: never;
@@ -1259,6 +1296,43 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/v1/study-orders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Study Orders */
+        get: operations["list_study_orders_api_v1_study_orders_get"];
+        put?: never;
+        /** Create Study Order */
+        post: operations["create_study_order_api_v1_study_orders_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/study-orders/{order_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Study Order */
+        get: operations["get_study_order_api_v1_study_orders__order_id__get"];
+        put?: never;
+        post?: never;
+        /** Delete Study Order */
+        delete: operations["delete_study_order_api_v1_study_orders__order_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Study Order */
+        patch: operations["update_study_order_api_v1_study_orders__order_id__patch"];
         trace?: never;
     };
     "/api/v1/users/me": {
@@ -2331,6 +2405,138 @@ export interface components {
          * @enum {string}
          */
         ClinicalSeverity: "low" | "moderate" | "high" | "critical";
+        /**
+         * ClinicalTaskCreate
+         * @description Creación de una tarea clínica de seguimiento.
+         *
+         *     ``owner_id`` es opcional: si se omite, el servidor asigna al usuario actual como
+         *     dueño. Crear una tarea es una ESCRITURA: en el copiloto pasa por el protocolo de
+         *     aprobación P1. La auditoría y el borrado los gobierna el servidor.
+         */
+        ClinicalTaskCreate: {
+            /**
+             * Responsable
+             * @description Usuario dueño de la tarea; por defecto, el usuario actual.
+             */
+            owner_id?: string | null;
+            /** Paciente */
+            patient_id?: string | null;
+            /** Título */
+            title: string;
+            /** Descripción */
+            description?: string | null;
+            /** Vencimiento */
+            due_at?: string | null;
+            /**
+             * Prioridad
+             * @default medium
+             */
+            priority: components["schemas"]["ClinicalTaskPriority"];
+            /**
+             * Estado
+             * @default open
+             */
+            status: components["schemas"]["ClinicalTaskStatus"];
+        };
+        /**
+         * ClinicalTaskListItem
+         * @description Versión de listado de una tarea clínica.
+         *
+         *     Declara los campos de filtro (``owner_id``, ``patient_id``, ``status``,
+         *     ``priority``, ``due_at``) que el motor de query exige presentes en el listado.
+         */
+        ClinicalTaskListItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Responsable
+             * Format: uuid
+             */
+            owner_id: string;
+            /** Paciente */
+            patient_id?: string | null;
+            /** Título */
+            title: string;
+            /** Vencimiento */
+            due_at?: string | null;
+            /** Prioridad */
+            priority: components["schemas"]["ClinicalTaskPriority"];
+            /** Estado */
+            status: components["schemas"]["ClinicalTaskStatus"];
+            /**
+             * Creado
+             * Format: date-time
+             */
+            created_at: string;
+            /** Actualizado */
+            updated_at?: string | null;
+        };
+        /**
+         * ClinicalTaskPriority
+         * @description Prioridad de una tarea clínica de seguimiento.
+         * @enum {string}
+         */
+        ClinicalTaskPriority: "low" | "medium" | "high";
+        /**
+         * ClinicalTaskRead
+         * @description Representación pública completa de una tarea clínica.
+         */
+        ClinicalTaskRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Owner Id
+             * Format: uuid
+             */
+            owner_id: string;
+            /** Patient Id */
+            patient_id?: string | null;
+            /** Title */
+            title: string;
+            /** Description */
+            description?: string | null;
+            /** Due At */
+            due_at?: string | null;
+            priority: components["schemas"]["ClinicalTaskPriority"];
+            status: components["schemas"]["ClinicalTaskStatus"];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /**
+         * ClinicalTaskStatus
+         * @description Estado de una tarea clínica de seguimiento.
+         * @enum {string}
+         */
+        ClinicalTaskStatus: "open" | "done" | "cancelled";
+        /**
+         * ClinicalTaskUpdate
+         * @description Edición parcial de una tarea (PATCH). ``owner_id`` no es editable aquí.
+         */
+        ClinicalTaskUpdate: {
+            /** Paciente */
+            patient_id?: string | null;
+            /** Título */
+            title?: string | null;
+            /** Descripción */
+            description?: string | null;
+            /** Vencimiento */
+            due_at?: string | null;
+            /** Prioridad */
+            priority?: components["schemas"]["ClinicalTaskPriority"] | null;
+            /** Estado */
+            status?: components["schemas"]["ClinicalTaskStatus"] | null;
+        };
         /**
          * ConnectionTicketRead
          * @description Ticket de conexión al Agent Gateway emitido a un usuario con sesión válida.
@@ -3531,6 +3737,12 @@ export interface components {
             items: components["schemas"]["ClinicalEventListItem"][];
             pagination: components["schemas"]["OffsetPagination"];
         };
+        /** OffsetPage[ClinicalTaskListItem] */
+        OffsetPage_ClinicalTaskListItem_: {
+            /** Items */
+            items: components["schemas"]["ClinicalTaskListItem"][];
+            pagination: components["schemas"]["OffsetPagination"];
+        };
         /** OffsetPage[ConsultationDiagnosisListItem] */
         OffsetPage_ConsultationDiagnosisListItem_: {
             /** Items */
@@ -3601,6 +3813,12 @@ export interface components {
         OffsetPage_RoleRead_: {
             /** Items */
             items: components["schemas"]["RoleRead"][];
+            pagination: components["schemas"]["OffsetPagination"];
+        };
+        /** OffsetPage[StudyOrderListItem] */
+        OffsetPage_StudyOrderListItem_: {
+            /** Items */
+            items: components["schemas"]["StudyOrderListItem"][];
             pagination: components["schemas"]["OffsetPagination"];
         };
         /** OffsetPage[UserAdminListItem] */
@@ -4736,6 +4954,153 @@ export interface components {
             max_terms: number;
             /** Max Length */
             max_length: number;
+        };
+        /**
+         * StudyOrderCreate
+         * @description Solicitud de una orden de estudio para un paciente.
+         *
+         *     Crear una orden es una ESCRITURA clínica: el médico aprueba el payload exacto
+         *     (protocolo P1 en el copiloto). La auditoría y el borrado los gobierna el
+         *     servidor; no se aceptan como entrada.
+         */
+        StudyOrderCreate: {
+            /**
+             * Paciente
+             * Format: uuid
+             */
+            patient_id: string;
+            /**
+             * Médico que ordena
+             * Format: uuid
+             */
+            ordered_by: string;
+            /** Estudio */
+            study_name: string;
+            /** Código (LOINC) */
+            code?: string | null;
+            /** Motivo */
+            reason?: string | null;
+            /** Fecha de la orden */
+            ordered_at?: string | null;
+            /**
+             * Estado
+             * @default pending
+             */
+            status: components["schemas"]["StudyOrderStatus"];
+            /** Resultado vinculado */
+            result_lab_result_id?: string | null;
+        };
+        /**
+         * StudyOrderListItem
+         * @description Versión de listado de una orden de estudio.
+         *
+         *     Declara los campos de filtro (``patient_id``, ``ordered_by``, ``status``,
+         *     ``ordered_at``) que el motor de query exige presentes en el schema de listado.
+         */
+        StudyOrderListItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Paciente
+             * Format: uuid
+             */
+            patient_id: string;
+            /**
+             * Médico
+             * Format: uuid
+             */
+            ordered_by: string;
+            /** Estudio */
+            study_name: string;
+            /** Código */
+            code?: string | null;
+            /** Estado */
+            status: components["schemas"]["StudyOrderStatus"];
+            /**
+             * Ordenado
+             * Format: date-time
+             */
+            ordered_at: string;
+            /** Resultado */
+            result_lab_result_id?: string | null;
+            /**
+             * Creado
+             * Format: date-time
+             */
+            created_at: string;
+            /** Actualizado */
+            updated_at?: string | null;
+        };
+        /**
+         * StudyOrderRead
+         * @description Representación pública completa de una orden de estudio.
+         */
+        StudyOrderRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Patient Id
+             * Format: uuid
+             */
+            patient_id: string;
+            /**
+             * Ordered By
+             * Format: uuid
+             */
+            ordered_by: string;
+            /** Study Name */
+            study_name: string;
+            /** Code */
+            code?: string | null;
+            /** Reason */
+            reason?: string | null;
+            /**
+             * Ordered At
+             * Format: date-time
+             */
+            ordered_at: string;
+            status: components["schemas"]["StudyOrderStatus"];
+            /** Result Lab Result Id */
+            result_lab_result_id?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /**
+         * StudyOrderStatus
+         * @description Estado de una orden de estudio/laboratorio.
+         * @enum {string}
+         */
+        StudyOrderStatus: "pending" | "in_progress" | "resulted" | "cancelled";
+        /**
+         * StudyOrderUpdate
+         * @description Edición parcial de una orden (PATCH).
+         *
+         *     ``patient_id`` y ``ordered_by`` no se declaran aquí: enviarlos da 422.
+         */
+        StudyOrderUpdate: {
+            /** Estudio */
+            study_name?: string | null;
+            /** Código (LOINC) */
+            code?: string | null;
+            /** Motivo */
+            reason?: string | null;
+            /** Fecha de la orden */
+            ordered_at?: string | null;
+            /** Estado */
+            status?: components["schemas"]["StudyOrderStatus"] | null;
+            /** Resultado vinculado */
+            result_lab_result_id?: string | null;
         };
         /** UnlockAccountRequest */
         UnlockAccountRequest: {
@@ -6838,6 +7203,191 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ClinicalEventRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_clinical_tasks_api_v1_clinical_tasks_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+                /** @description Campos de orden separados por coma. Use '-' para orden descendente. */
+                sort?: string;
+                owner_id?: string | null;
+                patient_id?: string | null;
+                status?: components["schemas"]["ClinicalTaskStatus"] | null;
+                priority?: components["schemas"]["ClinicalTaskPriority"] | null;
+                id_in?: string[] | null;
+                due_at_on?: string | null;
+                due_at_before?: string | null;
+                due_at_after?: string | null;
+                due_at_from?: string | null;
+                due_at_to?: string | null;
+                q?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OffsetPage_ClinicalTaskListItem_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_clinical_task_api_v1_clinical_tasks_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClinicalTaskCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClinicalTaskRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_clinical_task_api_v1_clinical_tasks__task_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClinicalTaskRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_clinical_task_api_v1_clinical_tasks__task_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClinicalTaskRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_clinical_task_api_v1_clinical_tasks__task_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClinicalTaskUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClinicalTaskRead"];
                 };
             };
             /** @description Validation Error */
@@ -9232,6 +9782,190 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RoleDetailRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_study_orders_api_v1_study_orders_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+                /** @description Campos de orden separados por coma. Use '-' para orden descendente. */
+                sort?: string;
+                patient_id?: string | null;
+                ordered_by?: string | null;
+                status?: components["schemas"]["StudyOrderStatus"] | null;
+                id_in?: string[] | null;
+                ordered_at_on?: string | null;
+                ordered_at_before?: string | null;
+                ordered_at_after?: string | null;
+                ordered_at_from?: string | null;
+                ordered_at_to?: string | null;
+                q?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OffsetPage_StudyOrderListItem_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_study_order_api_v1_study_orders_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StudyOrderCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StudyOrderRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_study_order_api_v1_study_orders__order_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                order_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StudyOrderRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_study_order_api_v1_study_orders__order_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                order_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StudyOrderRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_study_order_api_v1_study_orders__order_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                order_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StudyOrderUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StudyOrderRead"];
                 };
             };
             /** @description Validation Error */

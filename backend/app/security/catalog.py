@@ -1,6 +1,7 @@
 from backend.app.security.groups.appointments import AppointmentPermissions
 from backend.app.security.groups.clinical_documents import ClinicalDocumentPermissions
 from backend.app.security.groups.clinical_events import ClinicalEventPermissions
+from backend.app.security.groups.clinical_tasks import ClinicalTaskPermissions
 from backend.app.security.groups.consultation_diagnoses import (
     ConsultationDiagnosisPermissions,
 )
@@ -20,6 +21,7 @@ from backend.app.security.groups.patients import PatientPermissions
 from backend.app.security.groups.permissions import PermissionPermissions
 from backend.app.security.groups.prescriptions import PrescriptionPermissions
 from backend.app.security.groups.roles import RolePermissions
+from backend.app.security.groups.study_orders import StudyOrderPermissions
 from backend.app.security.groups.users import UserPermissions
 from backend.app.security.groups.vital_signs import VitalSignPermissions
 from backend.app.security.security_group import SecurityGroup
@@ -38,6 +40,8 @@ SECURITY_GROUPS: list[type[SecurityGroup]] = [
     VitalSignPermissions,
     LabResultPermissions,
     ClinicalEventPermissions,
+    StudyOrderPermissions,
+    ClinicalTaskPermissions,
     PrescriptionPermissions,
     AppointmentPermissions,
     ClinicalDocumentPermissions,
