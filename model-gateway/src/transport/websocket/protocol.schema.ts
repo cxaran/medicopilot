@@ -37,13 +37,15 @@ const ToolSchema = Type.Object({
 const GenerationSchema = Type.Object({
   max_output_tokens: Type.Integer({ minimum: 1 }),
   temperature: Type.Optional(Type.Number({ minimum: 0, maximum: 2 })),
+  // Escala NORMALIZADA de razonamiento (P5). El gateway la traduce por proveedor; "off"
+  // y los modelos sin soporte hacen que el parámetro se OMITA en el cable nativo.
   reasoning_effort: Type.Optional(
     Type.Union([
-      Type.Literal("minimal"),
+      Type.Literal("off"),
       Type.Literal("low"),
       Type.Literal("medium"),
       Type.Literal("high"),
-      Type.Literal("xhigh")
+      Type.Literal("max")
     ])
   ),
   response_format: Type.Optional(Type.Union([Type.Literal("text"), Type.Literal("json_object"), Type.Literal("json_schema")])),

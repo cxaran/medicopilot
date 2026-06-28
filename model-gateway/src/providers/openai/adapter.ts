@@ -1,6 +1,7 @@
 import { GatewayError } from "../../kernel/errors.js";
 import { createId } from "../../kernel/ids.js";
 import { emptyTurnUsage } from "../../domain/usage.js";
+import { nativeReasoningEffort } from "../../domain/reasoning.js";
 import type { GenerationOptions } from "../../application/capabilities/capability-negotiator.js";
 import type { CanonicalMessage } from "../../domain/message.js";
 import type { ModelDescriptor } from "../../domain/model.js";
@@ -339,8 +340,14 @@ export class OpenAIProviderAdapter implements ProviderAdapter {
     if (params.options.responseFormat === "json_object") {
       body.response_format = { type: "json_object" };
     }
-    if (params.options.reasoningEffort && compat.supportsReasoningEffort) {
-      body.reasoning_effort = params.options.reasoningEffort;
+    // Nivel normalizado -> reasoning_effort nativo (chat/completions). "max"->"high"; off o
+    // modelo sin soporte => se OMITE el parámetro.
+    const reasoningEffort =
+      compat.supportsReasoningEffort
+        ? nativeReasoningEffort(params.model.route.protocol, params.options.reasoningEffort)
+        : null;
+    if (reasoningEffort) {
+      body.reasoning_effort = reasoningEffort;
     }
 
     const response = await this.fetchImpl(`${this.baseUrl}/chat/completions`, {
@@ -470,8 +477,14 @@ export class OpenAIProviderAdapter implements ProviderAdapter {
       body.tools = params.tools;
       body.tool_choice = "auto";
     }
-    if (params.options.reasoningEffort && compat.supportsReasoningEffort) {
-      body.reasoning = { effort: params.options.reasoningEffort };
+    // Codex Responses: el razonamiento va en `reasoning.effort` (nivel nativo). "max"->"high";
+    // off o modelo sin soporte => se OMITE.
+    const reasoningEffort =
+      compat.supportsReasoningEffort
+        ? nativeReasoningEffort(params.model.route.protocol, params.options.reasoningEffort)
+        : null;
+    if (reasoningEffort) {
+      body.reasoning = { effort: reasoningEffort };
     }
 
     const response = await this.fetchImpl(`${this.baseUrl}/responses`, {

@@ -76,10 +76,14 @@ export interface WireTool {
   strict: boolean;
 }
 
+// Escala NORMALIZADA de razonamiento (P5). El gateway la traduce al parámetro nativo de
+// cada proveedor; "off" y los modelos sin soporte hacen que se OMITA en el cable nativo.
+export type NormalizedReasoningEffort = "off" | "low" | "medium" | "high" | "max";
+
 export interface WireGeneration {
   max_output_tokens: number;
   temperature?: number;
-  reasoning_effort?: "minimal" | "low" | "medium" | "high" | "xhigh";
+  reasoning_effort?: NormalizedReasoningEffort;
   response_format?: "text" | "json_object" | "json_schema";
   strict_json_schema?: boolean;
 }

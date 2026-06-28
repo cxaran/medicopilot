@@ -18,6 +18,7 @@ import {
   type TurnState,
 } from "@/core/agent/turn-reducer";
 import type {
+  NormalizedReasoningEffort,
   ServerEvent,
   WireContentPart,
   WireMessage,
@@ -135,6 +136,9 @@ export function CopilotPanel() {
   const [models, setModels] = useState<WireModel[]>([]);
   const [providers, setProviders] = useState<WireProviderStatus[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>("");
+  // Esfuerzo de razonamiento NORMALIZADO por turno (P5). Solo se ofrece/envía cuando el modelo
+  // negociado soporta el control; default "medium" (se omite en modelos sin razonamiento).
+  const [reasoningEffort, setReasoningEffort] = useState<NormalizedReasoningEffort>("medium");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [turn, setTurn] = useState<TurnState>(initialTurnState());
   const [toolCalls, setToolCalls] = useState<ToolCallView[]>([]);
@@ -396,6 +400,11 @@ export function CopilotPanel() {
     models
       .find((model) => model.id === selectedModel)
       ?.capabilities.input_modalities.includes("image") ?? false;
+  // El selector de razonamiento se muestra SOLO si el modelo negociado soporta el control
+  // (compat.supportsReasoningEffort); si no, se oculta y el parámetro se omite del turno.
+  const selectedModelSupportsReasoning =
+    models.find((model) => model.id === selectedModel)?.capabilities.compat.supportsReasoningEffort ??
+    false;
   const canSend =
     status === "connected" &&
     !isBusy &&
@@ -524,7 +533,12 @@ export function CopilotPanel() {
       // Declara al modelo SOLO las tools efectivas: lecturas + escrituras permitidas por el
       // rol del médico (gating por permiso). FastAPI revalida en cada ejecución.
       tools: toolsWire,
-      generation: { max_output_tokens: 1024 },
+      // Razonamiento (P5): solo se adjunta el effort cuando el modelo lo soporta. El gateway
+      // lo traduce al parámetro nativo del proveedor y omite "off"/modelos sin soporte.
+      generation: {
+        max_output_tokens: 1024,
+        ...(selectedModelSupportsReasoning ? { reasoning_effort: reasoningEffort } : {}),
+      },
     });
   };
 
@@ -660,6 +674,30 @@ export function CopilotPanel() {
             {models.length} modelo(s) en el catálogo del gateway.
             {selectedModelSupportsVision && " · admite imágenes"}
           </p>
+          {selectedModelSupportsReasoning && (
+            <div className="flex flex-col gap-1">
+              <label
+                htmlFor="copilot-reasoning-effort"
+                className="text-xs font-semibold uppercase tracking-wide text-[var(--tx2)]"
+              >
+                Razonamiento
+              </label>
+              <Select
+                id="copilot-reasoning-effort"
+                value={reasoningEffort}
+                onChange={(event) =>
+                  setReasoningEffort(event.target.value as NormalizedReasoningEffort)
+                }
+                aria-label="Esfuerzo de razonamiento del modelo"
+              >
+                <option value="off">Desactivado</option>
+                <option value="low">Bajo</option>
+                <option value="medium">Medio</option>
+                <option value="high">Alto</option>
+                <option value="max">Máximo</option>
+              </Select>
+            </div>
+          )}
         </Card>
 
         <Card className="flex flex-col gap-2">

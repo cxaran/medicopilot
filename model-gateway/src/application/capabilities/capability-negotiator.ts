@@ -1,11 +1,14 @@
 import { GatewayError } from "../../kernel/errors.js";
-import type { ModelDescriptor, ReasoningEffort } from "../../domain/model.js";
+import { honorReasoningEffort, type NormalizedReasoningEffort } from "../../domain/reasoning.js";
+import type { ModelDescriptor } from "../../domain/model.js";
 import type { ModelToolDefinition } from "../../domain/tool.js";
 
 export interface GenerationOptions {
   maxOutputTokens: number;
   temperature?: number;
-  reasoningEffort?: ReasoningEffort;
+  // Esfuerzo de razonamiento NORMALIZADO (off|low|medium|high|max). Cada adaptador lo
+  // traduce a su parámetro nativo; el negociador decide si se honra u OMITE.
+  reasoningEffort?: NormalizedReasoningEffort;
   responseFormat?: "text" | "json_object" | "json_schema";
   strictJsonSchema?: boolean;
 }
@@ -101,21 +104,22 @@ export function negotiateCapabilities(request: CapabilityNegotiationRequest): Ca
     }
   }
 
+  // Reasoning / thinking-effort (P5, escala normalizada off|low|medium|high|max). A
+  // diferencia de tools/structured-output, el esfuerzo de razonamiento es un knob suave:
+  // si el modelo o la política no lo soportan (o el nivel es "off"), se OMITE el parámetro
+  // por completo en lugar de rechazar el turno. Solo se honra cuando la capacidad granular
+  // del modelo y la política lo permiten; los adaptadores lo traducen al parámetro nativo.
+  let outGeneration = generation;
   if (generation.reasoningEffort) {
-    if (!policy.reasoning) {
-      throw new GatewayError("CAPABILITY_NOT_ALLOWED", "Reasoning controls are disabled by profile policy");
-    }
-
-    requireSupported(
-      model.capabilities.reasoning.support,
-      "CAPABILITY_UNSUPPORTED",
-      "Reasoning controls are not supported by the selected model"
-    );
-
-    if (!model.capabilities.reasoning.allowedEfforts.includes(generation.reasoningEffort)) {
-      throw new GatewayError("CAPABILITY_UNSUPPORTED", "Requested reasoning effort is not supported by the selected model", {
-        reasoningEffort: generation.reasoningEffort
-      });
+    const supported = policy.reasoning && model.capabilities.reasoning.support === "supported";
+    const honored = honorReasoningEffort(generation.reasoningEffort, supported);
+    if (honored === null) {
+      // OMITIR el parámetro por completo (exactOptionalPropertyTypes: borrar la clave, no
+      // dejarla en undefined).
+      const { reasoningEffort: _omitted, ...rest } = generation;
+      outGeneration = rest;
+    } else if (honored !== generation.reasoningEffort) {
+      outGeneration = { ...generation, reasoningEffort: honored };
     }
   }
 
@@ -126,5 +130,5 @@ export function negotiateCapabilities(request: CapabilityNegotiationRequest): Ca
     });
   }
 
-  return { tools, generation };
+  return { tools, generation: outGeneration };
 }

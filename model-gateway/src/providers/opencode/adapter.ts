@@ -1,6 +1,7 @@
 import { GatewayError } from "../../kernel/errors.js";
 import { createId } from "../../kernel/ids.js";
 import { emptyTurnUsage } from "../../domain/usage.js";
+import { nativeReasoningEffort } from "../../domain/reasoning.js";
 import type { GenerationOptions } from "../../application/capabilities/capability-negotiator.js";
 import type { CanonicalMessage } from "../../domain/message.js";
 import type { ModelDescriptor } from "../../domain/model.js";
@@ -261,8 +262,14 @@ export class OpencodeProviderAdapter implements ProviderAdapter {
     if (params.options.responseFormat === "json_object") {
       body.response_format = { type: "json_object" };
     }
-    if (params.options.reasoningEffort && compat.supportsReasoningEffort) {
-      body.reasoning_effort = params.options.reasoningEffort;
+    // Nivel normalizado -> parámetro nativo (low|medium|high; "max"->"high"). Solo se envía
+    // si el modelo soporta el control (compat) y el mapeo da un valor; si no, se OMITE.
+    const reasoningEffort =
+      compat.supportsReasoningEffort
+        ? nativeReasoningEffort(params.model.route.protocol, params.options.reasoningEffort)
+        : null;
+    if (reasoningEffort) {
+      body.reasoning_effort = reasoningEffort;
     }
 
     const response = await this.fetchImpl(`${this.baseUrl}/chat/completions`, {

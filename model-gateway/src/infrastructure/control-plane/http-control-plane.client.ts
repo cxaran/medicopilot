@@ -71,7 +71,10 @@ export class HttpControlPlaneClient implements ControlPlanePort {
       allowedCapabilities: {
         tools: true,
         structuredOutput: true,
-        reasoning: false,
+        // P5: la política permite razonamiento; la capacidad real del modelo
+        // (reasoning.support + compat) es el gate efectivo en la negociación. Modelos sin
+        // razonamiento simplemente omiten el parámetro.
+        reasoning: true,
         // La política permite imágenes; la capacidad real del modelo (inputModalities) es el
         // gate efectivo en la negociación. Modelos text-only rechazan el turno con imagen.
         images: true,

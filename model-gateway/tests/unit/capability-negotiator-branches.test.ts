@@ -55,7 +55,7 @@ describe("negotiateCapabilities: camino feliz", () => {
     expect(result.generation).toBe(generation);
   });
 
-  it("permite un effort de reasoning soportado y dentro de allowedEfforts", () => {
+  it("honra un effort de reasoning cuando el modelo lo soporta", () => {
     const model = modelWith({
       reasoning: { support: "supported", allowedEfforts: ["low", "high"], summaryOutput: "unsupported" }
     });
@@ -66,6 +66,59 @@ describe("negotiateCapabilities: camino feliz", () => {
       policy: fullPolicy
     });
     expect(result.generation.reasoningEffort).toBe("high");
+  });
+
+  it("honra 'max' (nivel normalizado máximo) cuando el modelo soporta razonamiento", () => {
+    const model = modelWith({
+      reasoning: { support: "supported", allowedEfforts: ["low", "medium", "high"], summaryOutput: "unsupported" }
+    });
+    const result = negotiateCapabilities({
+      model,
+      tools: [],
+      generation: { maxOutputTokens: 100, reasoningEffort: "max" },
+      policy: fullPolicy
+    });
+    // El negociador conserva el nivel NORMALIZADO; el mapeo a nativo ocurre en el adaptador.
+    expect(result.generation.reasoningEffort).toBe("max");
+  });
+});
+
+describe("negotiateCapabilities: razonamiento (P5) se OMITE, no se rechaza", () => {
+  it("omite el effort cuando la policy del perfil deshabilita razonamiento", () => {
+    const model = modelWith({
+      reasoning: { support: "supported", allowedEfforts: ["low", "high"], summaryOutput: "unsupported" }
+    });
+    const result = negotiateCapabilities({
+      model,
+      tools: [],
+      generation: { maxOutputTokens: 100, reasoningEffort: "high" },
+      policy: { ...fullPolicy, reasoning: false }
+    });
+    expect(result.generation.reasoningEffort).toBeUndefined();
+  });
+
+  it("omite el effort cuando el modelo no soporta razonamiento", () => {
+    // El fake por defecto tiene reasoning.support = "unsupported".
+    const result = negotiateCapabilities({
+      model: createFakeModel(),
+      tools: [],
+      generation: { maxOutputTokens: 100, reasoningEffort: "high" },
+      policy: fullPolicy
+    });
+    expect(result.generation.reasoningEffort).toBeUndefined();
+  });
+
+  it("omite el effort cuando el nivel es 'off' aunque el modelo lo soporte", () => {
+    const model = modelWith({
+      reasoning: { support: "supported", allowedEfforts: ["low", "high"], summaryOutput: "unsupported" }
+    });
+    const result = negotiateCapabilities({
+      model,
+      tools: [],
+      generation: { maxOutputTokens: 100, reasoningEffort: "off" },
+      policy: fullPolicy
+    });
+    expect(result.generation.reasoningEffort).toBeUndefined();
   });
 });
 
@@ -91,19 +144,6 @@ describe("negotiateCapabilities: rechazos por POLICY (CAPABILITY_NOT_ALLOWED)", 
           tools: [],
           generation: { maxOutputTokens: 100, responseFormat: "json_schema" },
           policy: { ...fullPolicy, structuredOutput: false }
-        }),
-      "CAPABILITY_NOT_ALLOWED"
-    );
-  });
-
-  it("reasoning deshabilitado por la policy del perfil", () => {
-    expectGatewayError(
-      () =>
-        negotiateCapabilities({
-          model: createFakeModel(),
-          tools: [],
-          generation: { maxOutputTokens: 100, reasoningEffort: "low" },
-          policy: { ...fullPolicy, reasoning: false }
         }),
       "CAPABILITY_NOT_ALLOWED"
     );
@@ -143,35 +183,6 @@ describe("negotiateCapabilities: rechazos por MODELO (CAPABILITY_UNSUPPORTED)", 
     );
   });
 
-  it("reasoning no soportado por el modelo (support unsupported)", () => {
-    // El fake por defecto tiene reasoning.support = "unsupported".
-    expectGatewayError(
-      () =>
-        negotiateCapabilities({
-          model: createFakeModel(),
-          tools: [],
-          generation: { maxOutputTokens: 100, reasoningEffort: "low" },
-          policy: fullPolicy
-        }),
-      "CAPABILITY_UNSUPPORTED"
-    );
-  });
-
-  it("effort de reasoning fuera de allowedEfforts", () => {
-    const model = modelWith({
-      reasoning: { support: "supported", allowedEfforts: ["low"], summaryOutput: "unsupported" }
-    });
-    expectGatewayError(
-      () =>
-        negotiateCapabilities({
-          model,
-          tools: [],
-          generation: { maxOutputTokens: 100, reasoningEffort: "xhigh" },
-          policy: fullPolicy
-        }),
-      "CAPABILITY_UNSUPPORTED"
-    );
-  });
 });
 
 describe("negotiateCapabilities: límite de salida", () => {

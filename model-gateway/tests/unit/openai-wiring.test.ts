@@ -230,3 +230,110 @@ describe("wiring OpenAI/Codex (StartTurn -> lease -> adapter -> stream -> resume
     expect((await turnStore.get(toolCall.turn_id))?.status).toBe("completed");
   });
 });
+
+describe("mapeo de reasoning normalizado -> nativo (P5)", () => {
+  function captureBody(responses: Response[]) {
+    const calls: { url: string; body: Record<string, unknown> }[] = [];
+    const queue = [...responses];
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(input), body: JSON.parse(String(init?.body ?? "{}")) });
+      const next = queue.shift();
+      if (!next) {
+        throw new Error("fetch mock: sin respuestas en cola");
+      }
+      return next;
+    }) as unknown as typeof fetch;
+    return { calls, fetchImpl };
+  }
+
+  const credential = { leaseId: "l1", secret: "tok", expiresAt: new Date(Date.now() + 60_000) };
+  const messages = [{ role: "user" as const, content: [{ type: "text" as const, text: "Hola" }] }];
+
+  async function drain(iterable: AsyncIterable<unknown>): Promise<void> {
+    for await (const _ of iterable) {
+      void _;
+    }
+  }
+
+  it("chat_completions: 'max' se envía como reasoning_effort 'high' en un modelo con razonamiento", async () => {
+    const { calls, fetchImpl } = captureBody([
+      sseResponse([JSON.stringify({ choices: [{ finish_reason: "stop" }] })])
+    ]);
+    const adapter = new OpenAIProviderAdapter({ baseUrl: BASE_URL, apiFlavor: "chat_completions", fetchImpl });
+    const model = createOpenAIModel({ baseUrl: BASE_URL, modelId: "gpt-5", apiFlavor: "chat_completions" });
+    expect(model.capabilities.compat.supportsReasoningEffort).toBe(true);
+    await drain(
+      adapter.startTurn({
+        turnId: "t1",
+        model,
+        credential,
+        messages,
+        tools: [],
+        options: { maxOutputTokens: 100, reasoningEffort: "max" },
+        signal: new AbortController().signal
+      })
+    );
+    expect(calls[0]?.body.reasoning_effort).toBe("high");
+  });
+
+  it("codex_responses: 'low' se envía como reasoning.effort 'low'", async () => {
+    const { calls, fetchImpl } = captureBody([
+      sseResponse([JSON.stringify({ type: "response.completed", response: { usage: {} } })])
+    ]);
+    const adapter = new OpenAIProviderAdapter({ baseUrl: BASE_URL, apiFlavor: "codex_responses", fetchImpl });
+    const model = createOpenAIModel({ baseUrl: BASE_URL, modelId: "gpt-5-codex", apiFlavor: "codex_responses" });
+    await drain(
+      adapter.startTurn({
+        turnId: "t1",
+        model,
+        credential,
+        messages,
+        tools: [],
+        options: { maxOutputTokens: 100, reasoningEffort: "low" },
+        signal: new AbortController().signal
+      })
+    );
+    expect((calls[0]?.body.reasoning as { effort?: string })?.effort).toBe("low");
+  });
+
+  it("omite el parámetro cuando el nivel es 'off'", async () => {
+    const { calls, fetchImpl } = captureBody([
+      sseResponse([JSON.stringify({ choices: [{ finish_reason: "stop" }] })])
+    ]);
+    const adapter = new OpenAIProviderAdapter({ baseUrl: BASE_URL, apiFlavor: "chat_completions", fetchImpl });
+    const model = createOpenAIModel({ baseUrl: BASE_URL, modelId: "gpt-5", apiFlavor: "chat_completions" });
+    await drain(
+      adapter.startTurn({
+        turnId: "t1",
+        model,
+        credential,
+        messages,
+        tools: [],
+        options: { maxOutputTokens: 100, reasoningEffort: "off" },
+        signal: new AbortController().signal
+      })
+    );
+    expect(calls[0]?.body.reasoning_effort).toBeUndefined();
+  });
+
+  it("omite el parámetro en un modelo sin razonamiento (gpt-4o)", async () => {
+    const { calls, fetchImpl } = captureBody([
+      sseResponse([JSON.stringify({ choices: [{ finish_reason: "stop" }] })])
+    ]);
+    const adapter = new OpenAIProviderAdapter({ baseUrl: BASE_URL, apiFlavor: "chat_completions", fetchImpl });
+    const model = createOpenAIModel({ baseUrl: BASE_URL, modelId: "gpt-4o", apiFlavor: "chat_completions" });
+    expect(model.capabilities.compat.supportsReasoningEffort).toBe(false);
+    await drain(
+      adapter.startTurn({
+        turnId: "t1",
+        model,
+        credential,
+        messages,
+        tools: [],
+        options: { maxOutputTokens: 100, reasoningEffort: "high" },
+        signal: new AbortController().signal
+      })
+    );
+    expect(calls[0]?.body.reasoning_effort).toBeUndefined();
+  });
+});
