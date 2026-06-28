@@ -19,6 +19,13 @@ export type OAuthStatusResponse = components["schemas"]["OAuthStatusResponse"];
 export type OAuthCompleteRequest = components["schemas"]["OAuthCompleteRequest"];
 export type MessageResponse = components["schemas"]["MessageResponse"];
 
+// Memorias del agente del usuario (owner-only). A diferencia de las API keys, el
+// contenido SÍ vuelve descifrado a su dueño: ``AgentMemoryRead.content`` está en claro.
+export type AgentMemoryKind = components["schemas"]["AgentMemoryKind"];
+export type AgentMemoryRead = components["schemas"]["AgentMemoryRead"];
+export type AgentMemoryCreate = components["schemas"]["AgentMemoryCreate"];
+export type AgentMemoryUpdate = components["schemas"]["AgentMemoryUpdate"];
+
 // Capabilities de recursos (Commit 3 backend). Aliases type-only sobre los schemas
 // generados; nunca interfaces escritas a mano.
 export type ResourceCapability = components["schemas"]["ResourceCapability"];
