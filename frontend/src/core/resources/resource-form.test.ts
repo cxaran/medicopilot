@@ -11,8 +11,28 @@ import {
   assertSupportedCreateForm,
   assertSupportedUpdateForm,
   buildCreatePayload,
+  buildMultipartPayload,
   buildUpdatePayload,
 } from "./resource-form.ts";
+
+function fileField(
+  overrides: Partial<{
+    name: string;
+    label: string;
+    accepted_mime_types: string[];
+    max_size_bytes: number;
+    required: boolean;
+  }> = {},
+) {
+  return {
+    name: "file",
+    label: "Archivo",
+    accepted_mime_types: ["application/pdf"],
+    max_size_bytes: 1000,
+    required: true,
+    ...overrides,
+  };
+}
 
 function field(
   name: string,
@@ -227,4 +247,67 @@ test("buildCreatePayload: number/datetime opcionales vacíos se omiten (no NaN n
     fd,
   );
   assert.deepEqual(payload, {});
+});
+
+// --- buildMultipartPayload (carga de archivo) ---
+
+test("buildMultipartPayload arma FormData con archivo, omite opcionales vacíos y serializa switch", () => {
+  const fd = new FormData();
+  fd.set("patient_id", "p-1");
+  fd.set("document_type", "laboratory");
+  fd.set("description", ""); // opcional vacío -> omitido
+  fd.set("notify", "on"); // switch marcado
+  const file = new File([new Uint8Array([1, 2, 3])], "lab.pdf", { type: "application/pdf" });
+  fd.set("file", file);
+
+  const body = buildMultipartPayload(
+    [
+      field("patient_id", "text", { required: true }),
+      field("document_type", "select", { required: true }),
+      field("description", "textarea"),
+      field("notify", "switch"),
+    ],
+    fd,
+    fileField(),
+  );
+
+  assert.ok(body instanceof FormData);
+  assert.equal(body.get("patient_id"), "p-1");
+  assert.equal(body.get("document_type"), "laboratory");
+  assert.equal(body.has("description"), false); // opcional vacío omitido
+  assert.equal(body.get("notify"), "true"); // switch -> "true"
+  const got = body.get("file");
+  assert.ok(got instanceof File);
+  assert.equal((got as File).name, "lab.pdf");
+});
+
+test("buildMultipartPayload no adjunta archivo cuando no se seleccionó (File vacío)", () => {
+  const fd = new FormData();
+  fd.set("patient_id", "p-1");
+  fd.set("file", new File([], "", { type: "application/octet-stream" }));
+
+  const body = buildMultipartPayload(
+    [field("patient_id", "text", { required: true })],
+    fd,
+    fileField(),
+  );
+
+  assert.equal(body.get("patient_id"), "p-1");
+  assert.equal(body.has("file"), false);
+});
+
+test("buildMultipartPayload conserva '' en metadata requerida vacía y omite opcional ausente", () => {
+  const fd = new FormData();
+  const file = new File([new Uint8Array([9])], "x.pdf", { type: "application/pdf" });
+  fd.set("file", file);
+
+  const body = buildMultipartPayload(
+    [field("patient_id", "text", { required: true }), field("description", "textarea")],
+    fd,
+    fileField(),
+  );
+
+  assert.equal(body.get("patient_id"), ""); // requerido vacío -> '' (backend lo reporta)
+  assert.equal(body.has("description"), false); // opcional ausente -> omitido
+  assert.ok(body.get("file") instanceof File);
 });

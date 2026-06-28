@@ -1,4 +1,5 @@
 import type {
+  ResourceFileFieldCapability,
   ResourceFormCapability,
   ResourceFormFieldCapability,
   WidgetType,
@@ -117,6 +118,46 @@ export function buildCreatePayload(
     }
   }
   return payload;
+}
+
+/**
+ * Construye el cuerpo ``multipart/form-data`` de una creación con archivo (transport
+ * ``multipart``). Los campos de metadata viajan como campos de formulario (mismos criterios
+ * de vacío que el JSON: el opcional vacío se OMITE para que el backend aplique su default;
+ * el requerido vacío se envía como ``""`` y el backend lo reporta). El binario va bajo el
+ * nombre declarado por ``fileField`` y solo si se seleccionó un archivo real. Como FormData
+ * solo admite strings/Blobs, los valores no-archivo se serializan como texto (``switch`` ->
+ * ``"true"``/``"false"``; ``number``/``date``/``datetime`` como su literal, que FastAPI coacciona).
+ */
+export function buildMultipartPayload(
+  fields: readonly ResourceFormFieldCapability[],
+  formData: FormData,
+  fileField: ResourceFileFieldCapability,
+): FormData {
+  const body = new FormData();
+  for (const field of fields) {
+    if (field.editable === false) {
+      continue;
+    }
+    if (field.widget === "switch") {
+      body.append(field.name, formData.has(field.name) ? "true" : "false");
+      continue;
+    }
+    const raw = formData.get(field.name);
+    const text = typeof raw === "string" ? raw : "";
+    if (text === "") {
+      if (field.required) {
+        body.append(field.name, "");
+      }
+      continue;
+    }
+    body.append(field.name, text);
+  }
+  const file = formData.get(fileField.name);
+  if (file instanceof File && file.size > 0) {
+    body.append(fileField.name, file);
+  }
+  return body;
 }
 
 // Payload allowlisted de actualización: solo campos editables declarados.
