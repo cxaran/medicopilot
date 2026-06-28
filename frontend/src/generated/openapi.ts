@@ -643,6 +643,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/clinical-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Clinical Events */
+        get: operations["list_clinical_events_api_v1_clinical_events_get"];
+        put?: never;
+        /** Create Clinical Event */
+        post: operations["create_clinical_event_api_v1_clinical_events_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clinical-events/{event_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Clinical Event */
+        get: operations["get_clinical_event_api_v1_clinical_events__event_id__get"];
+        put?: never;
+        post?: never;
+        /** Delete Clinical Event */
+        delete: operations["delete_clinical_event_api_v1_clinical_events__event_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Clinical Event */
+        patch: operations["update_clinical_event_api_v1_clinical_events__event_id__patch"];
+        trace?: never;
+    };
     "/api/v1/consultation-diagnoses": {
         parameters: {
             query?: never;
@@ -2125,6 +2162,164 @@ export interface components {
             deleted_by?: string | null;
         };
         /**
+         * ClinicalEventCreate
+         * @description Registro de un evento clínico en la línea de tiempo del paciente.
+         *
+         *     Registrar un evento es una ESCRITURA clínica: el médico aprueba el payload
+         *     exacto (protocolo P1 en el copiloto). La auditoría y el borrado los gobierna el
+         *     servidor; no se aceptan como entrada.
+         */
+        ClinicalEventCreate: {
+            /**
+             * Paciente
+             * Format: uuid
+             * @description Paciente al que pertenece el evento.
+             */
+            patient_id: string;
+            /** Tipo de evento */
+            event_type: components["schemas"]["ClinicalEventType"];
+            /** Título */
+            title: string;
+            /** Descripción */
+            description?: string | null;
+            /** Inicio */
+            started_at?: string | null;
+            /** Fin */
+            ended_at?: string | null;
+            /** Severidad */
+            severity?: components["schemas"]["ClinicalSeverity"] | null;
+            /** Especialidad */
+            specialty?: string | null;
+            /** Destino */
+            destination?: string | null;
+            /** Estado */
+            status?: components["schemas"]["ClinicalEventStatus"] | null;
+        };
+        /**
+         * ClinicalEventListItem
+         * @description Versión de listado de un evento clínico.
+         *
+         *     Declara los campos de filtro (``patient_id``, ``event_type``, ``status``,
+         *     ``started_at``) que el motor de query exige presentes en el schema de listado.
+         */
+        ClinicalEventListItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Paciente
+             * Format: uuid
+             */
+            patient_id: string;
+            /** Tipo */
+            event_type: components["schemas"]["ClinicalEventType"];
+            /** Título */
+            title: string;
+            /**
+             * Inicio
+             * Format: date-time
+             */
+            started_at: string;
+            /** Fin */
+            ended_at?: string | null;
+            /** Severidad */
+            severity?: components["schemas"]["ClinicalSeverity"] | null;
+            /** Especialidad */
+            specialty?: string | null;
+            /** Destino */
+            destination?: string | null;
+            /** Estado */
+            status?: components["schemas"]["ClinicalEventStatus"] | null;
+            /**
+             * Creado
+             * Format: date-time
+             */
+            created_at: string;
+            /** Actualizado */
+            updated_at?: string | null;
+        };
+        /**
+         * ClinicalEventRead
+         * @description Representación pública completa de un evento clínico.
+         */
+        ClinicalEventRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Patient Id
+             * Format: uuid
+             */
+            patient_id: string;
+            event_type: components["schemas"]["ClinicalEventType"];
+            /** Title */
+            title: string;
+            /** Description */
+            description?: string | null;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /** Ended At */
+            ended_at?: string | null;
+            severity?: components["schemas"]["ClinicalSeverity"] | null;
+            /** Specialty */
+            specialty?: string | null;
+            /** Destination */
+            destination?: string | null;
+            status?: components["schemas"]["ClinicalEventStatus"] | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /**
+         * ClinicalEventStatus
+         * @description Estado de un evento clínico.
+         * @enum {string}
+         */
+        ClinicalEventStatus: "active" | "resolved" | "cancelled";
+        /**
+         * ClinicalEventType
+         * @description Tipo de evento clínico de la línea de tiempo del paciente.
+         * @enum {string}
+         */
+        ClinicalEventType: "hospitalization" | "emergency" | "referral" | "procedure" | "other";
+        /**
+         * ClinicalEventUpdate
+         * @description Edición parcial de un evento (PATCH).
+         *
+         *     ``patient_id``, la auditoría y el borrado no se declaran aquí: enviarlos da 422.
+         */
+        ClinicalEventUpdate: {
+            /** Tipo de evento */
+            event_type?: components["schemas"]["ClinicalEventType"] | null;
+            /** Título */
+            title?: string | null;
+            /** Descripción */
+            description?: string | null;
+            /** Inicio */
+            started_at?: string | null;
+            /** Fin */
+            ended_at?: string | null;
+            /** Severidad */
+            severity?: components["schemas"]["ClinicalSeverity"] | null;
+            /** Especialidad */
+            specialty?: string | null;
+            /** Destino */
+            destination?: string | null;
+            /** Estado */
+            status?: components["schemas"]["ClinicalEventStatus"] | null;
+        };
+        /**
          * ClinicalItemStatus
          * @description Estado reusable para datos clínicos importantes del paciente.
          * @enum {string}
@@ -3330,6 +3525,12 @@ export interface components {
             items: components["schemas"]["ClinicalDocumentListItem"][];
             pagination: components["schemas"]["OffsetPagination"];
         };
+        /** OffsetPage[ClinicalEventListItem] */
+        OffsetPage_ClinicalEventListItem_: {
+            /** Items */
+            items: components["schemas"]["ClinicalEventListItem"][];
+            pagination: components["schemas"]["OffsetPagination"];
+        };
         /** OffsetPage[ConsultationDiagnosisListItem] */
         OffsetPage_ConsultationDiagnosisListItem_: {
             /** Items */
@@ -3616,6 +3817,15 @@ export interface components {
              * @default active
              */
             status: components["schemas"]["PatientStatus"];
+            /**
+             * Embarazo/lactancia
+             * @default none
+             */
+            pregnancy_status: components["schemas"]["PregnancyStatus"];
+            /** Inicio del embarazo/estado */
+            pregnancy_since?: string | null;
+            /** Fecha probable de parto */
+            estimated_due_date?: string | null;
         };
         /**
          * PatientListItem
@@ -3689,6 +3899,11 @@ export interface components {
             /** Emergency Contact Phone */
             emergency_contact_phone?: string | null;
             status: components["schemas"]["PatientStatus"];
+            pregnancy_status: components["schemas"]["PregnancyStatus"];
+            /** Pregnancy Since */
+            pregnancy_since?: string | null;
+            /** Estimated Due Date */
+            estimated_due_date?: string | null;
             /**
              * Created At
              * Format: date-time
@@ -3736,6 +3951,12 @@ export interface components {
             emergency_contact_phone?: string | null;
             /** Estado */
             status?: components["schemas"]["PatientStatus"] | null;
+            /** Embarazo/lactancia */
+            pregnancy_status?: components["schemas"]["PregnancyStatus"] | null;
+            /** Inicio del embarazo/estado */
+            pregnancy_since?: string | null;
+            /** Fecha probable de parto */
+            estimated_due_date?: string | null;
         };
         /** PermissionGroupRead */
         PermissionGroupRead: {
@@ -3755,6 +3976,12 @@ export interface components {
             /** Description */
             description?: string | null;
         };
+        /**
+         * PregnancyStatus
+         * @description Estado de embarazo/lactancia del paciente (relevante para seguridad del medicamento).
+         * @enum {string}
+         */
+        PregnancyStatus: "none" | "pregnant" | "postpartum" | "lactating";
         /**
          * PrescriptionApprove
          * @description Cuerpo de la aprobación: vacío por diseño.
@@ -6427,6 +6654,190 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ClinicalDocumentRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_clinical_events_api_v1_clinical_events_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+                /** @description Campos de orden separados por coma. Use '-' para orden descendente. */
+                sort?: string;
+                patient_id?: string | null;
+                event_type?: components["schemas"]["ClinicalEventType"] | null;
+                status?: components["schemas"]["ClinicalEventStatus"] | null;
+                id_in?: string[] | null;
+                started_at_on?: string | null;
+                started_at_before?: string | null;
+                started_at_after?: string | null;
+                started_at_from?: string | null;
+                started_at_to?: string | null;
+                q?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OffsetPage_ClinicalEventListItem_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_clinical_event_api_v1_clinical_events_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClinicalEventCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClinicalEventRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_clinical_event_api_v1_clinical_events__event_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                event_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClinicalEventRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_clinical_event_api_v1_clinical_events__event_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                event_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClinicalEventRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_clinical_event_api_v1_clinical_events__event_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                event_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClinicalEventUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClinicalEventRead"];
                 };
             };
             /** @description Validation Error */

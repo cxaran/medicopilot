@@ -20,7 +20,7 @@ from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.app.models.base import Base
-from backend.app.models.enums import PatientStatus, Sex, enum_values
+from backend.app.models.enums import PatientStatus, PregnancyStatus, Sex, enum_values
 
 
 class Patient(Base):
@@ -101,6 +101,30 @@ class Patient(Base):
         nullable=False,
         default=PatientStatus.ACTIVE,
         comment="Estado administrativo del expediente: active, inactive o archived.",
+    )
+    pregnancy_status: Mapped[PregnancyStatus] = mapped_column(
+        SAEnum(
+            PregnancyStatus,
+            name="pregnancy_status",
+            native_enum=False,
+            create_constraint=True,
+            validate_strings=True,
+            values_callable=enum_values,
+        ),
+        nullable=False,
+        default=PregnancyStatus.NONE,
+        server_default=PregnancyStatus.NONE.value,
+        comment="Estado de embarazo/lactancia: none, pregnant, postpartum o lactating.",
+    )
+    pregnancy_since: Mapped[Optional[date]] = mapped_column(
+        Date,
+        nullable=True,
+        comment="Fecha de inicio del embarazo/estado, si aplica.",
+    )
+    estimated_due_date: Mapped[Optional[date]] = mapped_column(
+        Date,
+        nullable=True,
+        comment="Fecha probable de parto, si aplica.",
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime,

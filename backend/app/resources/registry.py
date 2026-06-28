@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from backend.app.core.settings import settings
 from backend.app.models.appointment import Appointment
 from backend.app.models.clinical_document import ClinicalDocument
+from backend.app.models.clinical_event import ClinicalEvent
 from backend.app.models.consultation import Consultation
 from backend.app.models.consultation_diagnosis import ConsultationDiagnosis
 from backend.app.models.doctor import Doctor
@@ -70,6 +71,11 @@ from backend.app.schemas.clinical_document import (
     ClinicalDocumentListItem,
     ClinicalDocumentMetadataUpdate,
 )
+from backend.app.schemas.clinical_event import (
+    ClinicalEventCreate,
+    ClinicalEventListItem,
+    ClinicalEventUpdate,
+)
 from backend.app.schemas.consultation import (
     ConsultationCreate,
     ConsultationListItem,
@@ -123,6 +129,7 @@ from backend.app.schemas.user_admin import (
     UserAdminUpdate,
 )
 from backend.app.security.groups.clinical_documents import ClinicalDocumentPermissions
+from backend.app.security.groups.clinical_events import ClinicalEventPermissions
 from backend.app.security.groups.consultation_diagnoses import (
     ConsultationDiagnosisPermissions,
 )
@@ -341,6 +348,24 @@ LAB_RESULTS = ResourceQuery(
             "measured_at": _CREATED_AT_OPERATORS,
         },
         default_sort="-measured_at",
+    ),
+)
+
+CLINICAL_EVENTS = ResourceQuery(
+    name="ClinicalEventQuery",
+    model=ClinicalEvent,
+    schema=ClinicalEventListItem,
+    options=QueryOptions(
+        # ``patient_id`` (UUID), ``event_type`` y ``status`` (enums) por igualdad: la línea de
+        # tiempo se consulta por paciente y se acota por tipo/estado. ``started_at`` admite rango
+        # de calendario. Búsqueda libre por título. Los listados excluyen eventos eliminados
+        # (``deleted_at``) vía stmt base en el router.
+        filter_fields=("patient_id", "event_type", "status"),
+        sort_fields=("started_at", "created_at", "updated_at"),
+        search_fields=("title",),
+        in_fields=("id",),
+        field_operators={"started_at": _CREATED_AT_OPERATORS},
+        default_sort="-started_at",
     ),
 )
 
@@ -1078,6 +1103,37 @@ RESOURCE_REGISTRY: tuple[ResourceDefinition, ...] = (
                 confirmation=ConfirmationDef(
                     title="Eliminar resultado de laboratorio",
                     message="El resultado se dará de baja lógica.",
+                    confirm_label="Eliminar",
+                    destructive=True,
+                ),
+            ),
+        ),
+    ),
+    ResourceDefinition(
+        name="clinical_events",
+        label="Eventos clínicos",
+        api_path="/api/v1/clinical-events",
+        view=ResourceView.TABLE,
+        read_permission=ClinicalEventPermissions.READ,
+        list_query=CLINICAL_EVENTS,
+        list_schema=ClinicalEventListItem,
+        create_schema=ClinicalEventCreate,
+        update_schema=ClinicalEventUpdate,
+        create_permission=ClinicalEventPermissions.CREATE,
+        update_permission=ClinicalEventPermissions.UPDATE,
+        detail_url_template="/api/v1/clinical-events/{id}",
+        actions=(
+            ActionDef(
+                name="delete",
+                label="Eliminar",
+                method=HttpMethod.DELETE,
+                url_template="/api/v1/clinical-events/{id}",
+                scope=ActionScope.ITEM,
+                danger=True,
+                permission=ClinicalEventPermissions.DELETE,
+                confirmation=ConfirmationDef(
+                    title="Eliminar evento clínico",
+                    message="El evento se dará de baja lógica.",
                     confirm_label="Eliminar",
                     destructive=True,
                 ),

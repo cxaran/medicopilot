@@ -4,7 +4,7 @@ from typing import Any, Optional
 
 from pydantic import EmailStr, Field, field_validator
 
-from backend.app.models.enums import PatientStatus, Sex
+from backend.app.models.enums import PatientStatus, PregnancyStatus, Sex
 from backend.app.schemas.base import ApiPatchSchema, ApiReadSchema, ApiWriteSchema
 
 # Opciones reutilizadas en formulario y filtro de lista (compatibles con la
@@ -20,6 +20,12 @@ _SEX_OPTIONS: list[dict[str, Any]] = [
     {"value": "other", "label": "Otro"},
     {"value": "unspecified", "label": "No especificado"},
 ]
+_PREGNANCY_OPTIONS: list[dict[str, Any]] = [
+    {"value": "none", "label": "Ninguno"},
+    {"value": "pregnant", "label": "Embarazada"},
+    {"value": "postpartum", "label": "Posparto"},
+    {"value": "lactating", "label": "Lactancia"},
+]
 
 # Blobs ``json_schema_extra`` precomputados y tipados ``dict[str, Any]``: pasar un
 # dict tipado evita el conflicto de invarianza de pyright con ``JsonValue`` cuando
@@ -29,6 +35,9 @@ _SEX_FORM_UI: dict[str, Any] = {
 }
 _STATUS_FORM_UI: dict[str, Any] = {
     "ui": {"form": True, "widget": "select", "options": _STATUS_OPTIONS}
+}
+_PREGNANCY_FORM_UI: dict[str, Any] = {
+    "ui": {"form": True, "widget": "select", "options": _PREGNANCY_OPTIONS}
 }
 _STATUS_LIST_FILTER_UI: dict[str, Any] = {
     "ui": {
@@ -134,6 +143,21 @@ class PatientCreate(ApiWriteSchema):
         title="Estado",
         json_schema_extra=_STATUS_FORM_UI,
     )
+    pregnancy_status: PregnancyStatus = Field(
+        default=PregnancyStatus.NONE,
+        title="Embarazo/lactancia",
+        json_schema_extra=_PREGNANCY_FORM_UI,
+    )
+    pregnancy_since: Optional[date] = Field(
+        default=None,
+        title="Inicio del embarazo/estado",
+        json_schema_extra={"ui": {"form": True, "widget": "date"}},
+    )
+    estimated_due_date: Optional[date] = Field(
+        default=None,
+        title="Fecha probable de parto",
+        json_schema_extra={"ui": {"form": True, "widget": "date"}},
+    )
 
     @field_validator("curp")
     @classmethod
@@ -226,6 +250,21 @@ class PatientUpdate(ApiPatchSchema):
         title="Estado",
         json_schema_extra=_STATUS_FORM_UI,
     )
+    pregnancy_status: Optional[PregnancyStatus] = Field(
+        default=None,
+        title="Embarazo/lactancia",
+        json_schema_extra=_PREGNANCY_FORM_UI,
+    )
+    pregnancy_since: Optional[date] = Field(
+        default=None,
+        title="Inicio del embarazo/estado",
+        json_schema_extra={"ui": {"form": True, "widget": "date"}},
+    )
+    estimated_due_date: Optional[date] = Field(
+        default=None,
+        title="Fecha probable de parto",
+        json_schema_extra={"ui": {"form": True, "widget": "date"}},
+    )
 
     @field_validator("curp")
     @classmethod
@@ -256,6 +295,9 @@ class PatientRead(ApiReadSchema):
     emergency_contact_relationship: Optional[str] = None
     emergency_contact_phone: Optional[str] = None
     status: PatientStatus
+    pregnancy_status: PregnancyStatus
+    pregnancy_since: Optional[date] = None
+    estimated_due_date: Optional[date] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 

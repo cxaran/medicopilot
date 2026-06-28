@@ -5,6 +5,7 @@ from backend.app.models.appointment import Appointment
 from backend.app.models.audit_event import AuditEvent
 from backend.app.models.base import Base
 from backend.app.models.clinical_document import ClinicalDocument
+from backend.app.models.clinical_event import ClinicalEvent
 from backend.app.models.consultation import Consultation
 from backend.app.models.consultation_ai_output import ConsultationAiOutput
 from backend.app.models.consultation_diagnosis import ConsultationDiagnosis
@@ -17,6 +18,8 @@ from backend.app.models.enums import (
     AppointmentStatus,
     ClinicalDocumentStatus,
     ClinicalDocumentType,
+    ClinicalEventStatus,
+    ClinicalEventType,
     ClinicalItemStatus,
     ClinicalSeverity,
     ConsultationAiOutputType,
@@ -26,6 +29,7 @@ from backend.app.models.enums import (
     MedicalHistoryVersionStatus,
     PatientClinicalItemType,
     PatientStatus,
+    PregnancyStatus,
     PrescriptionStatus,
     RecordStatus,
     Sex,
@@ -55,6 +59,9 @@ __all__ = [
     "ClinicalDocument",
     "ClinicalDocumentStatus",
     "ClinicalDocumentType",
+    "ClinicalEvent",
+    "ClinicalEventStatus",
+    "ClinicalEventType",
     "ClinicalItemStatus",
     "ClinicalSeverity",
     "Consultation",
@@ -73,6 +80,7 @@ __all__ = [
     "PatientClinicalItem",
     "PatientClinicalItemType",
     "PatientStatus",
+    "PregnancyStatus",
     "PlatformSetup",
     "Prescription",
     "PrescriptionItem",

@@ -542,6 +542,37 @@ const TOOLS: ToolDefinition[] = [
       ctx.api(`/api/v1/lab-results/${encodeURIComponent(String(args.lab_result_id))}`),
   },
   {
+    name: "clinical.list_clinical_events",
+    description:
+      "Lista eventos clínicos de la línea de tiempo del paciente (hospitalizaciones, urgencias, " +
+      "referencias, procedimientos u otros). Puede filtrar por paciente (patient_id), tipo " +
+      "(event_type), estado (status) y rango de fecha de inicio (date_from/date_to, sobre " +
+      "started_at). Solo lectura.",
+    kind: "read",
+    inputSchema: clinicalListSchema({
+      patient_id: PATIENT_FILTER_PROP,
+      event_type: {
+        type: "string",
+        description: "Tipo de evento.",
+        enum: ["hospitalization", "emergency", "referral", "procedure", "other"],
+      },
+      status: {
+        type: "string",
+        description: "Estado del evento.",
+        enum: ["active", "resolved", "cancelled"],
+      },
+      date_from: DATE_FROM_PROP,
+      date_to: DATE_TO_PROP,
+    }),
+    execute: (args, ctx) =>
+      ctx.api(
+        `/api/v1/clinical-events${clinicalListQuery(args, {
+          eq: ["patient_id", "event_type", "status"],
+          dateField: "started_at",
+        })}`,
+      ),
+  },
+  {
     // Acceso clínico estructurado estilo FHIR: equivalente NATIVO a un MCP-server FHIR
     // (p.ej. wso2/fhir-mcp-server) respetando la AUTORIDAD CLÍNICA. Se ejecuta en el
     // NAVEGADOR con la cookie del médico (ctx.api -> credentials:include); FastAPI valida
@@ -864,6 +895,56 @@ const TOOLS: ToolDefinition[] = [
     },
     execute: (args, ctx) =>
       ctx.api(`/api/v1/lab-results`, { method: "POST", body: args as Record<string, unknown> }),
+  },
+  {
+    name: "clinical.create_clinical_event_draft",
+    description:
+      "Registra un evento clínico EN BORRADOR en la línea de tiempo del paciente " +
+      "(hospitalización, urgencia, referencia, procedimiento u otro). Acción de escritura: " +
+      "requiere confirmación explícita del médico antes de guardarse. El médico revisa y aprueba " +
+      "el evento exacto; nada se guarda de forma autónoma.",
+    kind: "write",
+    inputSchema: {
+      type: "object",
+      properties: {
+        patient_id: { type: "string", description: "Id (UUID) del paciente.", format: "uuid" },
+        event_type: {
+          type: "string",
+          description: "Tipo de evento.",
+          enum: ["hospitalization", "emergency", "referral", "procedure", "other"],
+        },
+        title: { type: "string", description: "Título breve del evento." },
+        description: { type: "string", description: "Descripción o contexto (opcional)." },
+        started_at: {
+          type: "string",
+          description: "Fecha y hora ISO 8601 de inicio (opcional; por defecto, ahora).",
+        },
+        ended_at: { type: "string", description: "Fecha y hora ISO 8601 de fin (opcional)." },
+        severity: {
+          type: "string",
+          description: "Severidad (opcional).",
+          enum: ["low", "moderate", "high", "critical"],
+        },
+        specialty: { type: "string", description: "Especialidad relacionada (opcional)." },
+        destination: { type: "string", description: "Destino, p. ej. en una referencia (opcional)." },
+        status: {
+          type: "string",
+          description: "Estado del evento (opcional).",
+          enum: ["active", "resolved", "cancelled"],
+        },
+      },
+      required: ["patient_id", "event_type", "title"],
+      additionalProperties: false,
+    },
+    approval: {
+      actionType: "create_clinical_event_draft",
+      targetResource: "clinical_events",
+      summarize: (args) =>
+        `Registrar un evento clínico (${String(args.event_type ?? "—")}) para el paciente ` +
+        `${String(args.patient_id ?? "—")}: ${String(args.title ?? "—")}.`,
+    },
+    execute: (args, ctx) =>
+      ctx.api(`/api/v1/clinical-events`, { method: "POST", body: args as Record<string, unknown> }),
   },
   {
     // REMEMBER (P2): el agente PROPONE persistir una memoria del médico. Es una escritura

@@ -185,6 +185,34 @@ class PatientRoutesTest(unittest.TestCase):
         self.assertEqual(got.status_code, 200)
         self.assertEqual(got.json()["id"], patient["id"])
 
+    def test_pregnancy_status_defaults_and_updates(self) -> None:
+        # Por defecto 'none'; los campos opcionales nacen nulos.
+        created = self._create().json()
+        self.assertEqual(created["pregnancy_status"], "none")
+        self.assertIsNone(created["pregnancy_since"])
+        self.assertIsNone(created["estimated_due_date"])
+
+        # Alta con estado de embarazo + fechas estructuradas.
+        pregnant = self._create(
+            full_name="Embarazada Demo",
+            pregnancy_status="pregnant",
+            pregnancy_since="2026-01-10",
+            estimated_due_date="2026-10-10",
+        ).json()
+        self.assertEqual(pregnant["pregnancy_status"], "pregnant")
+        self.assertEqual(pregnant["pregnancy_since"], "2026-01-10")
+        self.assertEqual(pregnant["estimated_due_date"], "2026-10-10")
+
+        # PATCH actualiza el estado (p. ej. a lactancia).
+        patched = self.client.patch(
+            f"/api/v1/patients/{pregnant['id']}", json={"pregnancy_status": "lactating"}
+        )
+        self.assertEqual(patched.status_code, 200, patched.text)
+        self.assertEqual(patched.json()["pregnancy_status"], "lactating")
+
+        # Valor de enum inválido -> 422.
+        self.assertEqual(self._create(pregnancy_status="invalido").status_code, 422)
+
     def test_record_number_is_server_generated_and_immutable(self) -> None:
         a = self._create().json()
         b = self._create(full_name="Otro Paciente").json()

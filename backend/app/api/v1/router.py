@@ -12,6 +12,7 @@ from backend.app.api.v1.bootstrap import router as bootstrap_router
 from backend.app.api.v1.clinical_documents import (
     router as clinical_documents_router,
 )
+from backend.app.api.v1.clinical_events import router as clinical_events_router
 from backend.app.api.v1.consultation_diagnoses import (
     router as consultation_diagnoses_router,
 )
@@ -50,6 +51,7 @@ router.include_router(appointments_router)
 router.include_router(auth_router)
 router.include_router(bootstrap_router)
 router.include_router(clinical_documents_router)
+router.include_router(clinical_events_router)
 router.include_router(consultation_diagnoses_router)
 router.include_router(consultations_router)
 router.include_router(doctors_router)

@@ -1,5 +1,6 @@
 from backend.app.security.groups.appointments import AppointmentPermissions
 from backend.app.security.groups.clinical_documents import ClinicalDocumentPermissions
+from backend.app.security.groups.clinical_events import ClinicalEventPermissions
 from backend.app.security.groups.consultation_diagnoses import (
     ConsultationDiagnosisPermissions,
 )
@@ -36,6 +37,7 @@ SECURITY_GROUPS: list[type[SecurityGroup]] = [
     ConsultationDiagnosisPermissions,
     VitalSignPermissions,
     LabResultPermissions,
+    ClinicalEventPermissions,
     PrescriptionPermissions,
     AppointmentPermissions,
     ClinicalDocumentPermissions,

@@ -144,6 +144,33 @@ class ClinicalDocumentStatus(str, Enum):
     DELETED = "deleted"
 
 
+class PregnancyStatus(str, Enum):
+    """Estado de embarazo/lactancia del paciente (relevante para seguridad del medicamento)."""
+
+    NONE = "none"
+    PREGNANT = "pregnant"
+    POSTPARTUM = "postpartum"
+    LACTATING = "lactating"
+
+
+class ClinicalEventType(str, Enum):
+    """Tipo de evento clínico de la línea de tiempo del paciente."""
+
+    HOSPITALIZATION = "hospitalization"
+    EMERGENCY = "emergency"
+    REFERRAL = "referral"
+    PROCEDURE = "procedure"
+    OTHER = "other"
+
+
+class ClinicalEventStatus(str, Enum):
+    """Estado de un evento clínico."""
+
+    ACTIVE = "active"
+    RESOLVED = "resolved"
+    CANCELLED = "cancelled"
+
+
 class LabResultAbnormalFlag(str, Enum):
     """Marca de anormalidad de un resultado de laboratorio/observación.
 
