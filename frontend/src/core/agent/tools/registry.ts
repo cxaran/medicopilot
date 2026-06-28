@@ -58,6 +58,10 @@ export interface ToolDefinition {
   name: string;
   description: string;
   kind: ToolKind;
+  // Procedencia legible EXPLÍCITA (p. ej. "MCP: <servidor>"). Si se omite, la procedencia se
+  // infiere del prefijo del nombre (ver tool-catalog ``toolSource``). Lo usan las tools cuya
+  // familia no se deduce del nombre, como las descubiertas por MCP.
+  source?: string;
   // Esquema usado para validar args localmente (validador propio acotado).
   inputSchema: ObjectSchema;
   // Esquema rico (JSON Schema) que se declara al modelo cuando inputSchema es permisivo

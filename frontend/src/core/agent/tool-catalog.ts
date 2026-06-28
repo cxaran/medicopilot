@@ -51,6 +51,14 @@ export function toolSource(name: string): string {
 }
 
 /**
+ * Procedencia EFECTIVA de una tool: su ``source`` explícito si lo declara (p. ej. las MCP, que
+ * llevan "MCP: <servidor>"), o la inferida por prefijo del nombre en caso contrario.
+ */
+export function sourceOf(tool: { name: string; source?: string }): string {
+  return tool.source ?? toolSource(tool.name);
+}
+
+/**
  * Recursos en los que el médico puede CREAR, según el catálogo permission-projected.
  * ``forms.create`` solo aparece si el backend concede el permiso de creación.
  */
@@ -83,7 +91,7 @@ export function buildToolCatalog(
     declaredNames && !declaredNames.has(name) ? "Disponible bajo demanda vía tool_search." : null;
 
   return tools.map((tool) => {
-    const source = toolSource(tool.name);
+    const source = sourceOf(tool);
     if (tool.kind === "read") {
       return {
         name: tool.name,

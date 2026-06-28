@@ -1,4 +1,4 @@
-import { toolSource } from "./tool-catalog";
+import { sourceOf } from "./tool-catalog";
 
 import type { ToolDefinition, ToolKind } from "./tools/registry";
 
@@ -87,7 +87,7 @@ export function searchTools(
   const scored = candidates
     .filter((tool) => !isMetaTool(tool.name))
     .map((tool) => {
-      const haystack = normalize(`${tool.name} ${tool.description} ${toolSource(tool.name)}`);
+      const haystack = normalize(`${tool.name} ${tool.description} ${sourceOf(tool)}`);
       // Sin términos (consulta vacía) -> score 1 para devolver el catálogo navegable acotado.
       const score =
         queryTerms.length === 0
@@ -102,7 +102,7 @@ export function searchTools(
   return scored.map(({ tool }) => ({
     name: tool.name,
     kind: tool.kind,
-    source: toolSource(tool.name),
+    source: sourceOf(tool),
     description: tool.description,
   }));
 }

@@ -44,6 +44,7 @@ import {
   declaredToolNames,
   isMetaTool,
 } from "@/core/agent/tool-discovery";
+import { loadMcpTools } from "@/core/agent/mcp/mcp-tools";
 import {
   ApprovalStore,
   applyApprovalDecision,
@@ -181,6 +182,12 @@ export function CopilotPanel() {
   // en este hilo. Se suman al set declarado en los turnos siguientes (el set por turno se
   // mantiene pequeño: núcleo + meta + cargadas). Persiste durante la vida del panel.
   const loadedToolsRef = useRef<Set<string>>(new Set());
+  // MCP (rebanada 1, descubrimiento/listado de SOLO LECTURA): tools descubiertas del servidor MCP
+  // configurado. Se surfacean por el MISMO camino (catálogo + gating + tool_search/describe). NO
+  // hay ejecución (no se registran en el ejecutor). ``mcpToolsRef`` mira el estado para los
+  // closures de los handlers del turno (deps vacías).
+  const [mcpTools, setMcpTools] = useState<ToolDefinition[]>([]);
+  const mcpToolsRef = useRef<ToolDefinition[]>([]);
 
   // RECALL (P2): nº de memorias del médico inyectadas en el último turno, para el indicador
   // de contexto. ``null`` = aún no hay turno con recall. Las memorias viajan como contexto NO
@@ -259,6 +266,11 @@ export function CopilotPanel() {
     activeContextRef.current = activeContext;
   }, [activeContext]);
 
+  // Espeja las tools MCP en un ref para los handlers del turno (closures con deps vacías).
+  useEffect(() => {
+    mcpToolsRef.current = mcpTools;
+  }, [mcpTools]);
+
   // Mantiene el presupuesto de contexto del modelo seleccionado (ventana efectiva + usable) y
   // su tarifa de precio (para el costo estimado P7).
   useEffect(() => {
@@ -279,18 +291,37 @@ export function CopilotPanel() {
         if (!active) return;
         const creatable = creatableResources(catalog);
         creatableRef.current = creatable;
-        const eff = effectiveTools(listTools(), creatable);
+        const tools = [...listTools(), ...mcpTools];
+        const eff = effectiveTools(tools, creatable);
         setToolCatalog(
-          buildToolCatalog(listTools(), creatable, declaredToolNames(eff, loadedToolsRef.current)),
+          buildToolCatalog(tools, creatable, declaredToolNames(eff, loadedToolsRef.current)),
         );
       })
       .catch(() => {
         if (!active) return;
         creatableRef.current = new Set();
-        const eff = effectiveTools(listTools(), new Set());
+        const tools = [...listTools(), ...mcpTools];
+        const eff = effectiveTools(tools, new Set());
         setToolCatalog(
-          buildToolCatalog(listTools(), new Set(), declaredToolNames(eff, loadedToolsRef.current)),
+          buildToolCatalog(tools, new Set(), declaredToolNames(eff, loadedToolsRef.current)),
         );
+      });
+    return () => {
+      active = false;
+    };
+    // Se recompone cuando llegan las tools MCP (descubrimiento asíncrono).
+  }, [mcpTools]);
+
+  // Descubrimiento MCP (rebanada 1): carga las tools del servidor MCP configurado, si lo hay.
+  // Sin servidor o ante cualquier fallo, queda [] (no rompe el copiloto, no es error).
+  useEffect(() => {
+    let active = true;
+    loadMcpTools()
+      .then((tools) => {
+        if (active) setMcpTools(tools);
+      })
+      .catch(() => {
+        /* degradación silenciosa: sin tools MCP */
       });
     return () => {
       active = false;
@@ -396,7 +427,7 @@ export function CopilotPanel() {
         // Contexto de descubrimiento para las meta-tools (tool_search/tool_describe): el set
         // BUSCABLE es el efectivo (ya gateado por rol) sin las meta-tools; markLoaded suma las
         // cargadas (se declararán en turnos siguientes) y refresca la vista de procedencia.
-        const eff = effectiveTools(listTools(), creatableRef.current);
+        const eff = effectiveTools([...listTools(), ...mcpToolsRef.current], creatableRef.current);
         const ctx: ToolExecutionContext = {
           ...defaultToolContext,
           discovery: {
@@ -412,7 +443,7 @@ export function CopilotPanel() {
               if (changed) {
                 setToolCatalog(
                   buildToolCatalog(
-                    listTools(),
+                    [...listTools(), ...mcpToolsRef.current],
                     creatableRef.current,
                     declaredToolNames(eff, loadedToolsRef.current),
                   ),
@@ -601,7 +632,7 @@ export function CopilotPanel() {
     // Descubrimiento a escala: se declara solo el set ACOTADO (núcleo + meta + tools cargadas
     // bajo demanda), no todo el catálogo. El resto sigue accesible vía tool_search/tool_describe.
     const declared = declaredTools(
-      effectiveTools(listTools(), creatableRef.current),
+      effectiveTools([...listTools(), ...mcpToolsRef.current], creatableRef.current),
       loadedToolsRef.current,
     );
     const toolsWire = toWireToolDefinitions(declared);
