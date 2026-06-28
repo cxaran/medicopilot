@@ -17,6 +17,7 @@ import {
   type OpenAIApiFlavor
 } from "../providers/openai/adapter.js";
 import { AnthropicProviderAdapter, createAnthropicModel } from "../providers/anthropic/adapter.js";
+import { GeminiProviderAdapter, createGeminiModel } from "../providers/gemini/adapter.js";
 import { ProviderRegistry } from "../providers/registry.js";
 import { createFakeModel } from "../domain/model.js";
 import { InMemoryBrowserSessionStore } from "../application/browser-sessions/session-store.js";
@@ -102,6 +103,19 @@ export function createContainer(settings = loadSettings()): GatewayContainer {
     });
     adapters.push(anthropicAdapter);
     catalogModels.push(anthropicModel);
+  }
+
+  // Google Gemini (opt-in). TERCERA familia de cable (Generative Language API): refuerza la
+  // neutralidad de proveedor del gateway. La key llega por arriendo (B3/B4); el modelo por
+  // defecto se registra curado y el discovery añade los reales de /v1beta/models.
+  if (settings.geminiEnabled && settings.geminiBaseUrl) {
+    const geminiAdapter = new GeminiProviderAdapter({ baseUrl: settings.geminiBaseUrl });
+    const geminiModel = createGeminiModel({
+      baseUrl: settings.geminiBaseUrl,
+      modelId: settings.geminiDefaultModel ?? "gemini-2.5-flash"
+    });
+    adapters.push(geminiAdapter);
+    catalogModels.push(geminiModel);
   }
 
   const modelCatalog = new InMemoryModelCatalog(catalogModels);

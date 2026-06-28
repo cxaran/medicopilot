@@ -46,6 +46,12 @@ export interface GatewaySettings {
   anthropicEnabled?: boolean | undefined;
   anthropicBaseUrl?: string | undefined;
   anthropicDefaultModel?: string | undefined;
+  // Google Gemini (opt-in): familia de cable Generative Language API (distinta a OpenAI y
+  // Anthropic). La API key NO se configura aquí (llega por arriendo de B4/B3, cifrada por
+  // usuario). Solo se registra el proveedor gemini si está habilitado. Opcionales para los tests.
+  geminiEnabled?: boolean | undefined;
+  geminiBaseUrl?: string | undefined;
+  geminiDefaultModel?: string | undefined;
 }
 
 function numberFromEnv(name: string, fallback: number): number {
@@ -114,6 +120,11 @@ export function loadSettings(): GatewaySettings {
     // fila curada (capacidades por mapa documentado) y el discovery añade los reales de /v1/models.
     anthropicEnabled: process.env.GATEWAY_ANTHROPIC_ENABLED === "true",
     anthropicBaseUrl: process.env.GATEWAY_ANTHROPIC_BASE_URL ?? "https://api.anthropic.com/v1",
-    anthropicDefaultModel: process.env.GATEWAY_ANTHROPIC_DEFAULT_MODEL ?? "claude-sonnet-4-5"
+    anthropicDefaultModel: process.env.GATEWAY_ANTHROPIC_DEFAULT_MODEL ?? "claude-sonnet-4-5",
+    // Google Gemini (opt-in). La key llega por arriendo; el modelo por defecto se registra como
+    // fila curada y el discovery añade los reales de /v1beta/models (con sus límites de tokens).
+    geminiEnabled: process.env.GATEWAY_GEMINI_ENABLED === "true",
+    geminiBaseUrl: process.env.GATEWAY_GEMINI_BASE_URL ?? "https://generativelanguage.googleapis.com/v1beta",
+    geminiDefaultModel: process.env.GATEWAY_GEMINI_DEFAULT_MODEL ?? "gemini-2.5-flash"
   };
 }
