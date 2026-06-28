@@ -50,9 +50,9 @@ Leyenda UI: ✅ existe y funciona · ⚠️ existe pero rota/incompleta · ❌ n
 | 9 | users | full CRUD + roles/sesiones | ✅ | ✅ | ✅ | ✅ activate/deactivate/delete | OK | P2 |
 | 10 | roles | full CRUD + permisos | ✅ | ✅ | ✅ | ✅ activate/deactivate/delete | OK | P2 |
 | 11 | permissions | catálogo (solo lectura) | ✅ grouped_catalog | n/a | n/a | n/a | OK | — |
-| 12 | **consultations** | CRUD + finalize | ✅ | ❌ | ❌ | ✅ finalize/delete | **bloqueado: `datetime`** | **F2** |
-| 13 | **vital_signs** | full CRUD | ✅ | ❌ | ❌ | ✅ delete | **bloqueado: `datetime`+`number`** | **F2** |
-| 14 | **appointments** (agenda) | CRUD + confirm/cancel/no-show/reschedule | ✅ | ❌ | ❌ | ✅ acciones | **bloqueado: `number`+`datetime`** | **F2** |
+| 12 | **consultations** | CRUD + finalize | ✅ | ✅ | ✅ | ✅ finalize/delete | **F2 lo arregla (`datetime`)** | **F2 (hecho)** |
+| 13 | **vital_signs** | full CRUD | ✅ | ✅ | ✅ | ✅ delete | **F2 lo arregla (`datetime`+`number`)** | **F2 (hecho)** |
+| 14 | **appointments** (agenda) | CRUD + confirm/cancel/no-show/reschedule | ✅ | ✅ | ✅ | ✅ acciones | **F2 lo arregla (`number`+`datetime`)** | **F2 (hecho)** |
 | 15 | **clinical_documents** | CRUD multipart + download/archive/restore | ✅ | ❌ | ⚠️ (metadata) | ✅ archive/restore/delete | **bloqueado: subida multipart** | **F3** |
 | 16 | **ai_providers** | credenciales API key + OAuth ChatGPT | n/a | ✅ (en `/account`) | n/a (rotación = borrar+crear) | ✅ eliminar | OK (UI dedicada) | — |
 | 17 | **agent_memories** | CRUD de memorias del agente | ❌ | ❌ | ❌ | ❌ | **sin UI** | **F4** |
@@ -78,7 +78,10 @@ Leyenda UI: ✅ existe y funciona · ⚠️ existe pero rota/incompleta · ❌ n
 - **F1 (esta tarea):** `select` + `date` en el form genérico + opcional-vacío→`null`.
   Desbloquea pacientes (P0) y, de paso, doctors, medication_templates,
   consultation_diagnoses, medical_history_versions y patient_clinical_items.
-- **F2:** widgets `datetime`/`number` (y `time`) → consultas, signos vitales, agenda.
+- **F2 (hecho, commit e0c6b91):** widgets `datetime`/`number`/`time` + coerción numérica +
+  prefill de inputs nativos. Además corrigió la regla de vacío de F1 (opcional vacío se OMITE,
+  no `null`, para no romper campos con default no-nullable como `status`). Desbloquea consultas,
+  signos vitales y agenda. (Crear hijos aún exige pegar UUIDs de FK → F5.)
 - **F3:** alta multipart (subida de archivo) → documentos clínicos.
 - **F4:** UI de memorias del agente (agent_memories).
 - **F5:** picker de relación para FK (UX de recursos hijos).
