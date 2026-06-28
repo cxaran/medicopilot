@@ -66,6 +66,19 @@ import {
   type ContextSegment,
   type ContextUsage,
 } from "@/core/agent/context-window";
+import {
+  addUsage,
+  computeCost,
+  emptyUsage,
+  formatCost,
+  formatTokens,
+  resolvePricing,
+  totalTokens,
+  usageFromWire,
+  type CostBreakdown,
+  type ModelCostRate,
+  type NormalizedUsage,
+} from "@/core/agent/usage-cost";
 import { listAgentMemories } from "@/core/agent-memories/agent-memories-client";
 import { getAgentPersona } from "@/core/agent-persona/agent-persona-client";
 import { composeLeadingLayers, type PersonaFields } from "@/core/agent/persona";
@@ -181,6 +194,18 @@ export function CopilotPanel() {
   // Presupuesto del modelo seleccionado (ventana efectiva + input usable), para usarlo dentro
   // de los handlers del turno (closures con deps vacías).
   const budgetRef = useRef<{ window: number; usable: number }>({ window: 0, usable: 0 });
+  // USO/COSTO (P7): acumulado de tokens de la sesión (este médico) y la tarifa del modelo
+  // seleccionado. Refs para usarlos en los handlers del turno (closures con deps vacías).
+  const sessionUsageRef = useRef<NormalizedUsage>(emptyUsage());
+  const pricingRef = useRef<ModelCostRate | null>(null);
+  // Indicador de uso/costo: tokens y costo estimado de ESTE turno + acumulado de la sesión.
+  // ``null`` hasta el primer turno completado. El costo es null cuando el precio es desconocido.
+  const [usageStats, setUsageStats] = useState<{
+    turnTokens: NormalizedUsage;
+    sessionTokens: NormalizedUsage;
+    turnCost: CostBreakdown | null;
+    sessionCost: CostBreakdown | null;
+  } | null>(null);
   // PERSONA (P4): capa configurable del médico (tono/especialidad/idioma/estilo). La capa de
   // SEGURIDAD clínica es fija y la posee el código (persona.ts); no se almacena ni se edita.
   const personaRef = useRef<PersonaFields | null>(null);
@@ -217,13 +242,15 @@ export function CopilotPanel() {
     messagesRef.current = messages;
   }, [messages]);
 
-  // Mantiene el presupuesto de contexto del modelo seleccionado (ventana efectiva + usable).
+  // Mantiene el presupuesto de contexto del modelo seleccionado (ventana efectiva + usable) y
+  // su tarifa de precio (para el costo estimado P7).
   useEffect(() => {
-    const caps = models.find((model) => model.id === selectedModel)?.capabilities;
+    const model = models.find((entry) => entry.id === selectedModel);
     budgetRef.current = {
-      window: effectiveContextWindow(caps),
-      usable: usableInputTokens(caps),
+      window: effectiveContextWindow(model?.capabilities),
+      usable: usableInputTokens(model?.capabilities),
     };
+    pricingRef.current = resolvePricing(model);
   }, [models, selectedModel]);
 
   // Carga el catálogo de recursos (permission-projected) para gatear las tools de escritura
@@ -288,6 +315,17 @@ export function CopilotPanel() {
         if (typeof reportedInput === "number" && budgetRef.current.window > 0) {
           setContextStats(contextUsage(reportedInput, budgetRef.current.window, "reportado"));
         }
+        // USO/COSTO (P7): acumula el uso del turno en la sesión (este médico) y estima el costo
+        // de este turno y del acumulado con la tarifa del modelo. Costo null = precio desconocido.
+        const turnUsage = usageFromWire(next.usage);
+        sessionUsageRef.current = addUsage(sessionUsageRef.current, turnUsage);
+        const pricing = pricingRef.current;
+        setUsageStats({
+          turnTokens: turnUsage,
+          sessionTokens: sessionUsageRef.current,
+          turnCost: computeCost(turnUsage, pricing),
+          sessionCost: computeCost(sessionUsageRef.current, pricing),
+        });
         turnRef.current = initialTurnState();
         setTurn(turnRef.current);
       } else if (event.type === "turn.failed") {
@@ -781,6 +819,8 @@ export function CopilotPanel() {
 
       {contextStats && <ContextUsageBar usage={contextStats} compaction={compaction} />}
 
+      {usageStats && <CostUsageBar stats={usageStats} />}
+
       <ToolCatalogPanel entries={toolCatalog} />
 
       <Card className="flex min-h-[280px] flex-col gap-3">
@@ -933,6 +973,43 @@ function ContextUsageBar({
             : "."}{" "}
           Los datos del expediente no se modificaron.
         </p>
+      )}
+    </div>
+  );
+}
+
+function CostUsageBar({
+  stats,
+}: Readonly<{
+  stats: {
+    turnTokens: NormalizedUsage;
+    sessionTokens: NormalizedUsage;
+    turnCost: CostBreakdown | null;
+    sessionCost: CostBreakdown | null;
+  };
+}>) {
+  const costLabel = (cost: CostBreakdown | null): string =>
+    cost ? formatCost(cost) : "no disponible";
+  return (
+    <div className="flex flex-col gap-1.5 rounded-[12px] border border-[var(--border2)] bg-[var(--panel2)] px-3.5 py-2.5 text-xs text-[var(--tx2)]">
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-semibold uppercase tracking-wide">Uso de IA</span>
+        <span>estimado</span>
+      </div>
+      <div className="flex items-center justify-between gap-2">
+        <span>Este turno</span>
+        <span>
+          {formatTokens(totalTokens(stats.turnTokens))} tokens · {costLabel(stats.turnCost)}
+        </span>
+      </div>
+      <div className="flex items-center justify-between gap-2">
+        <span>Sesión (acumulado)</span>
+        <span>
+          {formatTokens(totalTokens(stats.sessionTokens))} tokens · {costLabel(stats.sessionCost)}
+        </span>
+      </div>
+      {!stats.turnCost && (
+        <p>El costo no está disponible: el modelo seleccionado no informa precios por token.</p>
       )}
     </div>
   );

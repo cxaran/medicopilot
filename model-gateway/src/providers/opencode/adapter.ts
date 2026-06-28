@@ -522,7 +522,8 @@ function mapUsage(usage: OpenAIUsage): TurnUsage {
   return {
     inputTokens: usage.prompt_tokens ?? null,
     outputTokens: usage.completion_tokens ?? null,
-    cachedInputTokens: usage.prompt_tokens_details?.cached_tokens ?? null
+    cachedInputTokens: usage.prompt_tokens_details?.cached_tokens ?? null,
+    cacheWriteTokens: null
   };
 }
 

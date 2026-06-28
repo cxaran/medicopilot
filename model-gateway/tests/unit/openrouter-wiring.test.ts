@@ -330,6 +330,66 @@ describe("OpenRouter: DISCOVERY RICO (consume metadatos reales de /models)", () 
     const adapter = new OpenRouterProviderAdapter({ baseUrl: BASE_URL, fetchImpl });
     await expect(adapter.discoverModels({ leaseId: "l", secret: "k", expiresAt: new Date() })).rejects.toThrow();
   });
+
+  it("mapea el bloque pricing real de /models a ModelPricing (precio por token, USD) (P7)", async () => {
+    const fetchImpl = (async () =>
+      new Response(
+        JSON.stringify({
+          data: [
+            {
+              id: MODEL_ID,
+              context_length: 200000,
+              pricing: {
+                prompt: "0.000003",
+                completion: "0.000015",
+                input_cache_read: "0.0000003",
+                input_cache_write: "0.00000375"
+              }
+            }
+          ]
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )) as unknown as typeof fetch;
+    const adapter = new OpenRouterProviderAdapter({ baseUrl: BASE_URL, fetchImpl });
+    const models = await adapter.discoverModels({ leaseId: "l", secret: "k", expiresAt: new Date() });
+    expect(models[0]!.pricing).toEqual({
+      currency: "USD",
+      promptPerToken: 0.000003,
+      completionPerToken: 0.000015,
+      cacheReadPerToken: 0.0000003,
+      cacheWritePerToken: 0.00000375
+    });
+  });
+
+  it("HONESTO: sin bloque pricing, pricing queda null (precio desconocido)", async () => {
+    const fetchImpl = (async () =>
+      new Response(JSON.stringify({ data: [{ id: MODEL_ID, context_length: 8192 }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      })) as unknown as typeof fetch;
+    const adapter = new OpenRouterProviderAdapter({ baseUrl: BASE_URL, fetchImpl });
+    const models = await adapter.discoverModels({ leaseId: "l", secret: "k", expiresAt: new Date() });
+    expect(models[0]!.pricing).toBeNull();
+  });
+
+  it("pricing parcial: campos ausentes/no numéricos quedan en null (no se inventan)", async () => {
+    const fetchImpl = (async () =>
+      new Response(
+        JSON.stringify({
+          data: [{ id: MODEL_ID, pricing: { prompt: "0.000002", completion: "no-numero" } }]
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )) as unknown as typeof fetch;
+    const adapter = new OpenRouterProviderAdapter({ baseUrl: BASE_URL, fetchImpl });
+    const models = await adapter.discoverModels({ leaseId: "l", secret: "k", expiresAt: new Date() });
+    expect(models[0]!.pricing).toEqual({
+      currency: "USD",
+      promptPerToken: 0.000002,
+      completionPerToken: null,
+      cacheReadPerToken: null,
+      cacheWritePerToken: null
+    });
+  });
 });
 
 describe("OpenRouter: mapeo de reasoning normalizado -> reasoning: { effort }", () => {

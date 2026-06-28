@@ -150,7 +150,9 @@ function mapChatUsage(usage: OACUsage): TurnUsage {
   return {
     inputTokens: usage.prompt_tokens ?? null,
     outputTokens: usage.completion_tokens ?? null,
-    cachedInputTokens: usage.prompt_tokens_details?.cached_tokens ?? null
+    cachedInputTokens: usage.prompt_tokens_details?.cached_tokens ?? null,
+    // La familia OpenAI chat/completions no reporta creación de caché por separado.
+    cacheWriteTokens: null
   };
 }
 

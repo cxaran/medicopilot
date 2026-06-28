@@ -14,6 +14,14 @@ export interface WireModel {
   protocol: ProviderProtocol;
   source: ModelDescriptor["source"];
   deprecated_at: string | null;
+  // Precios por token (P7) si se conocen; null = precio desconocido. snake_case por token.
+  pricing: {
+    currency: string;
+    prompt_per_token: number | null;
+    completion_per_token: number | null;
+    cache_read_per_token: number | null;
+    cache_write_per_token: number | null;
+  } | null;
   capabilities: {
     streaming: string;
     input_modalities: string[];
@@ -44,6 +52,15 @@ export function toWireModel(model: ModelDescriptor): WireModel {
     protocol: model.route.protocol,
     source: model.source,
     deprecated_at: model.deprecatedAt,
+    pricing: model.pricing
+      ? {
+          currency: model.pricing.currency,
+          prompt_per_token: model.pricing.promptPerToken,
+          completion_per_token: model.pricing.completionPerToken,
+          cache_read_per_token: model.pricing.cacheReadPerToken,
+          cache_write_per_token: model.pricing.cacheWritePerToken
+        }
+      : null,
     capabilities: {
       streaming: capabilities.streaming,
       input_modalities: [...capabilities.inputModalities],

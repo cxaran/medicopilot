@@ -535,6 +535,7 @@ function mapResponsesUsage(usage: ResponsesUsage): TurnUsage {
   return {
     inputTokens: usage.input_tokens ?? null,
     outputTokens: usage.output_tokens ?? null,
-    cachedInputTokens: usage.input_tokens_details?.cached_tokens ?? null
+    cachedInputTokens: usage.input_tokens_details?.cached_tokens ?? null,
+    cacheWriteTokens: null
   };
 }

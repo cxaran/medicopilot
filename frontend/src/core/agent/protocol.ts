@@ -33,6 +33,16 @@ export interface WireModelCapabilities {
   };
 }
 
+// Precios por token (P7) que el gateway descubre del proveedor (hoy solo OpenRouter publica
+// pricing en su /models). null = precio desconocido; un campo null = ese precio no se conoce.
+export interface WireModelPricing {
+  currency: string;
+  prompt_per_token: number | null;
+  completion_per_token: number | null;
+  cache_read_per_token: number | null;
+  cache_write_per_token: number | null;
+}
+
 export interface WireModel {
   id: string;
   label: string;
@@ -41,6 +51,7 @@ export interface WireModel {
   protocol: GatewayProtocol;
   source: string;
   deprecated_at: string | null;
+  pricing: WireModelPricing | null;
   capabilities: WireModelCapabilities;
 }
 
@@ -54,6 +65,9 @@ export interface TurnUsage {
   input_tokens: number | null;
   output_tokens: number | null;
   cached_input_tokens: number | null;
+  // Tokens de ESCRITURA de caché (P7). Solo algunos proveedores lo reportan (p.ej. Anthropic
+  // cache_creation_input_tokens); null cuando el proveedor no lo informa.
+  cache_write_tokens: number | null;
 }
 
 // --- Mensajes cliente -> gateway. -------------------------------------------------

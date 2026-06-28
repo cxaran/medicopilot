@@ -87,7 +87,8 @@ export class ResumeTurnAfterTool {
             usage: {
               input_tokens: event.usage.inputTokens,
               output_tokens: event.usage.outputTokens,
-              cached_input_tokens: event.usage.cachedInputTokens
+              cached_input_tokens: event.usage.cachedInputTokens,
+              cache_write_tokens: event.usage.cacheWriteTokens
             }
           });
         }

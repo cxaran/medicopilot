@@ -40,7 +40,7 @@ export class FakeProviderAdapter implements ProviderAdapter {
     yield { type: "text.delta", delta: "una respuesta sin herramientas." };
     yield {
       type: "completed",
-      usage: { inputTokens: 12, outputTokens: 8, cachedInputTokens: 0 }
+      usage: { inputTokens: 12, outputTokens: 8, cachedInputTokens: 0, cacheWriteTokens: 0 }
     };
   }
 
@@ -50,7 +50,7 @@ export class FakeProviderAdapter implements ProviderAdapter {
     yield { type: "text.delta", delta: "Turno finalizado." };
     yield {
       type: "completed",
-      usage: { inputTokens: 24, outputTokens: 12, cachedInputTokens: 0 }
+      usage: { inputTokens: 24, outputTokens: 12, cachedInputTokens: 0, cacheWriteTokens: 0 }
     };
   }
 }

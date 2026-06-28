@@ -478,3 +478,36 @@ describe("Anthropic: discovery y resolución de capacidades", () => {
     await expect(adapter.discoverModels({ leaseId: "l", secret: "k", expiresAt: new Date() })).rejects.toThrow();
   });
 });
+
+describe("Anthropic: mapeo de usage con split cache read/write (P7)", () => {
+  it("reporta cachedInputTokens (read) y cacheWriteTokens (creation) del evento completed", async () => {
+    // message_start trae input_tokens + cache_read + cache_creation; message_delta trae output.
+    const events: Array<Record<string, unknown>> = [
+      {
+        type: "message_start",
+        message: {
+          usage: { input_tokens: 30, cache_read_input_tokens: 12, cache_creation_input_tokens: 7 }
+        }
+      },
+      { type: "content_block_start", index: 0, content_block: { type: "text" } },
+      { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "ok" } },
+      { type: "content_block_stop", index: 0 },
+      { type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 9 } },
+      { type: "message_stop" }
+    ];
+    const { startTurn } = setup([sseResponse(events)]);
+    const sink = createSink();
+    await startTurn.execute(browserSession(), startRequest(), sink);
+
+    const completed = sink.events.find((e) => e.type === "turn.completed");
+    if (!completed || completed.type !== "turn.completed") {
+      throw new Error("esperado turn.completed");
+    }
+    expect(completed.usage).toEqual({
+      input_tokens: 30,
+      output_tokens: 9,
+      cached_input_tokens: 12,
+      cache_write_tokens: 7
+    });
+  });
+});

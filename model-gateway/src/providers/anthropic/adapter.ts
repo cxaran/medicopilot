@@ -137,6 +137,7 @@ interface AnthropicUsage {
   input_tokens?: number;
   output_tokens?: number;
   cache_read_input_tokens?: number;
+  cache_creation_input_tokens?: number;
 }
 
 // Evento SSE de la Messages API: cada `data:` lleva un `type` discriminante.
@@ -606,7 +607,9 @@ function mergeUsage(current: TurnUsage, usage: AnthropicUsage): TurnUsage {
   return {
     inputTokens: usage.input_tokens ?? current.inputTokens,
     outputTokens: usage.output_tokens ?? current.outputTokens,
-    cachedInputTokens: usage.cache_read_input_tokens ?? current.cachedInputTokens
+    cachedInputTokens: usage.cache_read_input_tokens ?? current.cachedInputTokens,
+    // cache WRITE: Anthropic SÍ lo reporta (creación de caché de prompt).
+    cacheWriteTokens: usage.cache_creation_input_tokens ?? current.cacheWriteTokens
   };
 }
 

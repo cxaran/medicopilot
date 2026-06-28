@@ -190,7 +190,7 @@ describe("OpencodeProviderAdapter.startTurn", () => {
     expect(events).toEqual([
       { type: "text.delta", delta: "Hola " },
       { type: "text.delta", delta: "mundo" },
-      { type: "completed", usage: { inputTokens: 10, outputTokens: 5, cachedInputTokens: 2 } }
+      { type: "completed", usage: { inputTokens: 10, outputTokens: 5, cachedInputTokens: 2, cacheWriteTokens: null } }
     ]);
 
     // Request correcta a /chat/completions, stream y Bearer.
@@ -320,7 +320,7 @@ describe("OpencodeProviderAdapter.resumeTurn", () => {
 
     expect(events).toEqual([
       { type: "text.delta", delta: "Listo." },
-      { type: "completed", usage: { inputTokens: 20, outputTokens: 8, cachedInputTokens: null } }
+      { type: "completed", usage: { inputTokens: 20, outputTokens: 8, cachedInputTokens: null, cacheWriteTokens: null } }
     ]);
 
     // El historial reenviado incluye el mensaje tool con el tool_call_id correcto.

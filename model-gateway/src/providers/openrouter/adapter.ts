@@ -8,7 +8,7 @@ import {
   isOpenAICompatChatContinuation
 } from "../openai-compat/chat.js";
 import type { GenerationOptions } from "../../application/capabilities/capability-negotiator.js";
-import type { ModelDescriptor } from "../../domain/model.js";
+import type { ModelDescriptor, ModelPricing } from "../../domain/model.js";
 import type {
   CredentialVerification,
   ProviderAdapter,
@@ -56,6 +56,14 @@ interface OpenRouterModelRow {
     max_completion_tokens?: number | null;
   };
   supported_parameters?: string[];
+  // Precios por token (strings USD) que OpenRouter publica en su /models (P7).
+  pricing?: {
+    prompt?: string;
+    completion?: string;
+    request?: string;
+    input_cache_read?: string;
+    input_cache_write?: string;
+  };
 }
 
 export class OpenRouterProviderAdapter implements ProviderAdapter {
@@ -150,6 +158,31 @@ export class OpenRouterProviderAdapter implements ProviderAdapter {
 }
 
 /**
+ * Mapea el bloque de precios de OpenRouter (strings USD por token) a ModelPricing. Valores
+ * ausentes o no numéricos quedan en null (precio desconocido honesto). Si no hay bloque de
+ * precios, devuelve null.
+ */
+function toPricing(pricing: OpenRouterModelRow["pricing"]): ModelPricing | null {
+  if (!pricing) {
+    return null;
+  }
+  const parse = (value: string | undefined): number | null => {
+    if (value === undefined) {
+      return null;
+    }
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+  };
+  return {
+    currency: "USD",
+    promptPerToken: parse(pricing.prompt),
+    completionPerToken: parse(pricing.completion),
+    cacheReadPerToken: parse(pricing.input_cache_read),
+    cacheWritePerToken: parse(pricing.input_cache_write)
+  };
+}
+
+/**
  * Razonamiento de OpenRouter: parámetro UNIFICADO `reasoning: { effort }` (distinto al
  * `reasoning_effort` plano de OpenAI). Nivel normalizado -> effort nativo; se envía solo si el
  * modelo lo soporta (supported_parameters) y el mapeo da un valor; si no, se OMITE.
@@ -191,6 +224,7 @@ export function createOpenRouterModel(input: {
   const maxOutput = row?.top_provider?.max_completion_tokens ?? null;
 
   return {
+    pricing: toPricing(row?.pricing),
     id: `${OPENROUTER_PROVIDER_ID}/${input.modelId}`,
     label: row?.name ?? input.modelId,
     route: {

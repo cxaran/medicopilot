@@ -102,7 +102,7 @@ test("reducer: acumula el texto del asistente desde delta+snapshot", () => {
   state = reduceTurnEvent(state, {
     type: "turn.completed",
     turn_id: "t1",
-    usage: { input_tokens: 1, output_tokens: 2, cached_input_tokens: null },
+    usage: { input_tokens: 1, output_tokens: 2, cached_input_tokens: null, cache_write_tokens: null },
   });
   assert.equal(state.status, "completed");
   assert.equal(state.assistantText, "Hola mundo");

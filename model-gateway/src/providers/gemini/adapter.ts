@@ -510,7 +510,9 @@ function mapUsage(usage: GeminiUsageMetadata): TurnUsage {
   return {
     inputTokens: usage.promptTokenCount ?? null,
     outputTokens: usage.candidatesTokenCount ?? null,
-    cachedInputTokens: usage.cachedContentTokenCount ?? null
+    cachedInputTokens: usage.cachedContentTokenCount ?? null,
+    // Gemini no separa creación de caché en su usageMetadata.
+    cacheWriteTokens: null
   };
 }
 

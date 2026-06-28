@@ -92,6 +92,17 @@ export interface ModelRoute {
   endpointBaseUrl: string;
 }
 
+// Precio por TOKEN por categoría (P7, tracking de costo). Provider-neutral: cuando el proveedor
+// publica precios (p. ej. OpenRouter en su /models) se mapean aquí; cuando no se conocen, queda
+// null (precio desconocido honesto — jamás un número inventado). La divisa la fija el proveedor.
+export interface ModelPricing {
+  currency: string;
+  promptPerToken: number | null;
+  completionPerToken: number | null;
+  cacheReadPerToken: number | null;
+  cacheWritePerToken: number | null;
+}
+
 export interface ModelDescriptor {
   id: `${ProviderId}/${ModelId}`;
   label: string;
@@ -100,6 +111,8 @@ export interface ModelDescriptor {
   source: "curated" | "discovered" | "manual";
   metadataRevision: string | null;
   deprecatedAt: string | null;
+  // Precios por token si se conocen (P7). Opcional: la mayoría de proveedores no los publican.
+  pricing?: ModelPricing | null;
 }
 
 export function createFakeModel(overrides: Partial<ModelDescriptor> = {}): ModelDescriptor {

@@ -23,7 +23,7 @@ export type TurnEvent =
   | { type: "turn.text.delta"; turn_id: string; delta: string; snapshot: string }
   | { type: "turn.reasoning.summary"; turn_id: string; summary: string }
   | { type: "turn.tool_call.ready"; turn_id: string; call_id: string; tool_name: string; arguments: unknown }
-  | { type: "turn.completed"; turn_id: string; usage: { input_tokens: number | null; output_tokens: number | null; cached_input_tokens: number | null } }
+  | { type: "turn.completed"; turn_id: string; usage: { input_tokens: number | null; output_tokens: number | null; cached_input_tokens: number | null; cache_write_tokens: number | null } }
   | { type: "turn.cancelled"; turn_id: string }
   | { type: "turn.failed"; turn_id?: string; code: string; message: string; details?: unknown };
 
@@ -239,7 +239,8 @@ export class StartTurn {
       usage: {
         input_tokens: usage.inputTokens,
         output_tokens: usage.outputTokens,
-        cached_input_tokens: usage.cachedInputTokens
+        cached_input_tokens: usage.cachedInputTokens,
+        cache_write_tokens: usage.cacheWriteTokens
       }
     });
   }
