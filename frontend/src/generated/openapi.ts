@@ -653,6 +653,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/clinical-documents/{document_id}/transcript": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Clinical Document Transcript
+         * @description Transcripción de un documento de AUDIO (F-MEDIOS fase 2).
+         *
+         *     Mismo RBAC y visibilidad que la lectura (eliminado lógico → 404). Usa el proveedor STT
+         *     configurado; si no hay proveedor, responde ``available=false`` y ``transcript=null``
+         *     (nunca fabrica). El servidor devuelve exactamente lo que el proveedor entrega.
+         */
+        get: operations["get_clinical_document_transcript_api_v1_clinical_documents__document_id__transcript_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/clinical-documents/{document_id}/download": {
         parameters: {
             query?: never;
@@ -2551,11 +2575,44 @@ export interface components {
          */
         ClinicalDocumentStatus: "active" | "archived" | "deleted";
         /**
+         * ClinicalDocumentTranscriptRead
+         * @description Transcripción de un documento de AUDIO para que el agente la use (F-MEDIOS fase 2).
+         *
+         *     La transcripción es un BORRADOR NO CONFIABLE que el médico revisa. ``available`` indica
+         *     si hubo un proveedor STT configurado y respondió; si es ``false``, ``transcript`` es
+         *     ``null`` y ``notes`` explica el motivo (p. ej. "no disponible"). El servidor devuelve
+         *     EXACTAMENTE lo que el proveedor entrega: no inventa ni "mejora" texto. ``provider``
+         *     etiqueta la procedencia (incl. el stub de prueba).
+         */
+        ClinicalDocumentTranscriptRead: {
+            /**
+             * Document Id
+             * Format: uuid
+             */
+            document_id: string;
+            /**
+             * Patient Id
+             * Format: uuid
+             */
+            patient_id: string;
+            document_type: components["schemas"]["ClinicalDocumentType"];
+            /** Mime Type */
+            mime_type: string;
+            /** Available */
+            available: boolean;
+            /** Transcript */
+            transcript?: string | null;
+            /** Provider */
+            provider?: string | null;
+            /** Notes */
+            notes?: string | null;
+        };
+        /**
          * ClinicalDocumentType
          * @description Tipo de archivo clínico asociado al expediente del paciente.
          * @enum {string}
          */
-        ClinicalDocumentType: "laboratory" | "study" | "image" | "pdf" | "external_prescription" | "clinical_photography" | "consent" | "reference" | "other";
+        ClinicalDocumentType: "laboratory" | "study" | "image" | "pdf" | "external_prescription" | "clinical_photography" | "consent" | "reference" | "audio" | "other";
         /**
          * ClinicalDocumentUploadResponse
          * @description Respuesta de la carga (POST multipart). Misma metadata segura que la lectura;
@@ -7747,6 +7804,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ClinicalDocumentContentRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_clinical_document_transcript_api_v1_clinical_documents__document_id__transcript_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClinicalDocumentTranscriptRead"];
                 };
             };
             /** @description Validation Error */

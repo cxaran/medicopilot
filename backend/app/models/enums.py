@@ -133,6 +133,7 @@ class ClinicalDocumentType(str, Enum):
     CLINICAL_PHOTOGRAPHY = "clinical_photography"
     CONSENT = "consent"
     REFERENCE = "reference"
+    AUDIO = "audio"
     OTHER = "other"
 
 

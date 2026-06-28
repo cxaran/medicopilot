@@ -498,6 +498,43 @@ const TOOLS: ToolDefinition[] = [
     },
   },
   {
+    // F-MEDIOS fase 2: transcripción de un documento de AUDIO de consulta. La transcripción
+    // la produce un proveedor STT configurable en el servidor; si no hay proveedor, responde
+    // 'no disponible' y NUNCA se inventa un texto. La transcripción es un BORRADOR NO
+    // CONFIABLE que el médico edita.
+    //
+    // COMPOSICIÓN sugerida para una nota de consulta a partir de audio (nada se guarda solo):
+    //   1) Identifica/sube el audio como documento clínico (document_type 'audio').
+    //   2) clinical.get_audio_transcript(clinical_document_id) -> obtén el texto. Si
+    //      available=false, dilo ('no disponible') y NO inventes una nota.
+    //   3) Propón clinical.create_consultation_draft FUNDAMENTADO en la transcripción (P1):
+    //      el médico revisa y completa el borrador; trátalo como texto no confiable.
+    name: "clinical.get_audio_transcript",
+    description:
+      "Devuelve la transcripción de un documento de AUDIO de consulta: {available, transcript, " +
+      "provider}. Si available=false (sin proveedor configurado o error), transcript es null y " +
+      "debes decir 'no disponible' SIN inventar texto. La transcripción es un borrador NO " +
+      "confiable que el médico edita; úsala para proponer una clinical.create_consultation_draft " +
+      "fundamentada en ella (cada nota es un borrador que el médico aprueba). Solo lectura.",
+    kind: "read",
+    inputSchema: {
+      type: "object",
+      properties: {
+        clinical_document_id: {
+          type: "string",
+          description: "Id (UUID) del documento de audio a transcribir.",
+          format: "uuid",
+        },
+      },
+      required: ["clinical_document_id"],
+      additionalProperties: false,
+    },
+    execute: (args, ctx) => {
+      const id = encodeURIComponent(String(args.clinical_document_id));
+      return ctx.api(`/api/v1/clinical-documents/${id}/transcript`);
+    },
+  },
+  {
     name: "clinical.list_diagnoses",
     description:
       "Lista diagnósticos de consulta (paginado). Se consultan por consulta (consultation_id) y " +

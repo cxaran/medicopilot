@@ -31,11 +31,13 @@ from backend.app.schemas.clinical_document import (
     ClinicalDocumentListItem,
     ClinicalDocumentMetadataUpdate,
     ClinicalDocumentRead,
+    ClinicalDocumentTranscriptRead,
     ClinicalDocumentUploadResponse,
 )
 from backend.app.schemas.pagination import OffsetPage
 from backend.app.security.groups.clinical_documents import ClinicalDocumentPermissions
 from backend.app.services import clinical_documents as service
+from backend.app.services.audio_transcription import transcribe_document
 from backend.app.services.document_content import build_document_content
 
 router = APIRouter(prefix="/clinical-documents", tags=["clinical-documents"])
@@ -91,6 +93,31 @@ def get_clinical_document_content(
         text=content.text,
         text_truncated=content.text_truncated,
         notes=content.notes,
+    )
+
+
+@router.get("/{document_id}/transcript", response_model=ClinicalDocumentTranscriptRead)
+def get_clinical_document_transcript(
+    document_id: UUID,
+    session: SessionDep,
+    _: ClinicalDocumentPermissions.READ.requiere,
+) -> ClinicalDocumentTranscriptRead:
+    """Transcripción de un documento de AUDIO (F-MEDIOS fase 2).
+
+    Mismo RBAC y visibilidad que la lectura (eliminado lógico → 404). Usa el proveedor STT
+    configurado; si no hay proveedor, responde ``available=false`` y ``transcript=null``
+    (nunca fabrica). El servidor devuelve exactamente lo que el proveedor entrega."""
+    document = service.load_visible(session, document_id)
+    result = transcribe_document(document)
+    return ClinicalDocumentTranscriptRead(
+        document_id=document.id,
+        patient_id=document.patient_id,
+        document_type=document.document_type,
+        mime_type=document.mime_type,
+        available=result.available,
+        transcript=result.transcript,
+        provider=result.provider,
+        notes=result.notes,
     )
 
 

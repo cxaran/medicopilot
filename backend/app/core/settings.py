@@ -60,7 +60,9 @@ class Settings(BaseSettings):
         "application/pdf,"
         "image/png,image/jpeg,image/webp,image/tiff,"
         "application/dicom,"
-        "text/plain"
+        "text/plain,"
+        # Audio de consulta para transcripción (F-MEDIOS fase 2).
+        "audio/mpeg,audio/wav,audio/x-wav,audio/mp4,audio/ogg,audio/webm"
     )
 
     @computed_field
@@ -158,6 +160,17 @@ class Settings(BaseSettings):
     ncbi_base_url: str = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
     ncbi_api_key: SecretStr | None = None
     ncbi_timeout_seconds: float = 10.0
+
+    # Proveedor de transcripción de voz a texto (STT) para audio de consulta (F-MEDIOS
+    # fase 2). CONFIGURABLE y SWAPPABLE igual que el proxy de PubMed (B13): si no hay URL
+    # configurada, la transcripción responde "no disponible" (nunca se fabrica un texto).
+    # Contrato: POST con el binario de audio -> JSON {"text": "..."}. Para pruebas/QA se
+    # admite el esquema sentinela ``stub://`` que devuelve un texto fijo de PRUEBA (no es
+    # STT real); un proveedor real se enchufa cambiando SOLO esta URL. La API key (si la
+    # hay) es sensible y nunca se loguea.
+    stt_provider_url: str | None = None
+    stt_api_key: SecretStr | None = None
+    stt_timeout_seconds: float = 60.0
 
     @model_validator(mode="after")
     def _validate_agent_gateway_ticket_ttl(self) -> Self:

@@ -25,6 +25,7 @@ _TYPE_OPTIONS: list[dict[str, Any]] = [
     {"value": "clinical_photography", "label": "Fotografía clínica"},
     {"value": "consent", "label": "Consentimiento"},
     {"value": "reference", "label": "Referencia"},
+    {"value": "audio", "label": "Audio"},
     {"value": "other", "label": "Otro"},
 ]
 _STATUS_OPTIONS: list[dict[str, Any]] = [
@@ -112,6 +113,26 @@ class ClinicalDocumentContentRead(ApiReadSchema):
     download_url: str
     text: Optional[str] = None
     text_truncated: bool = False
+    notes: Optional[str] = None
+
+
+class ClinicalDocumentTranscriptRead(ApiReadSchema):
+    """Transcripción de un documento de AUDIO para que el agente la use (F-MEDIOS fase 2).
+
+    La transcripción es un BORRADOR NO CONFIABLE que el médico revisa. ``available`` indica
+    si hubo un proveedor STT configurado y respondió; si es ``false``, ``transcript`` es
+    ``null`` y ``notes`` explica el motivo (p. ej. "no disponible"). El servidor devuelve
+    EXACTAMENTE lo que el proveedor entrega: no inventa ni "mejora" texto. ``provider``
+    etiqueta la procedencia (incl. el stub de prueba).
+    """
+
+    document_id: uuid.UUID
+    patient_id: uuid.UUID
+    document_type: ClinicalDocumentType
+    mime_type: str
+    available: bool
+    transcript: Optional[str] = None
+    provider: Optional[str] = None
     notes: Optional[str] = None
 
 
