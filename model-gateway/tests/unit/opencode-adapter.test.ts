@@ -400,3 +400,144 @@ describe("OpenCode Go (mismo adaptador, provider id distinto)", () => {
     expect(models[0]!.route.protocol).toBe(OPENCODE_GO_PROVIDER_ID);
   });
 });
+
+// Pin de la FORMA EXACTA del request a /chat/completions (MP-CTRL-0077). Estos tests fijan, byte
+// a byte, el body que enviamos a opencode, para que cualquier diferencia con lo que el proveedor
+// acepta sea visible y no regrese en silencio. Si una QA con key real demuestra que opencode Go
+// rechaza un campo, el fix se ancla aquí.
+describe("opencode: forma exacta del request a /chat/completions (pin)", () => {
+  function bodyOf(calls: Captured[]): Record<string, unknown> {
+    return JSON.parse(String(calls[0]!.init.body)) as Record<string, unknown>;
+  }
+
+  it("turno simple (sin tools): body canónico, sin tool_choice/reasoning_effort/response_format", async () => {
+    const { adapter, calls } = adapterWith([
+      sseResponse([JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })])
+    ]);
+    await collect(
+      adapter.startTurn({
+        turnId: "t1",
+        model,
+        credential: lease,
+        messages: userMessage,
+        tools: [],
+        options: { maxOutputTokens: 512, temperature: 0.2 },
+        signal: new AbortController().signal
+      })
+    );
+    expect(bodyOf(calls)).toEqual({
+      model: "test-model",
+      messages: [{ role: "user", content: "Hola" }],
+      stream: true,
+      max_tokens: 512,
+      temperature: 0.2,
+      stream_options: { include_usage: true }
+    });
+  });
+
+  it("turno con tools: agrega tools (type function) y tool_choice 'auto'", async () => {
+    const { adapter, calls } = adapterWith([
+      sseResponse([JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })])
+    ]);
+    const tools: ModelToolDefinition[] = [
+      { name: "clinical.search", description: "busca", inputSchema: { type: "object" }, strict: false }
+    ];
+    await collect(
+      adapter.startTurn({
+        turnId: "t1",
+        model,
+        credential: lease,
+        messages: userMessage,
+        tools,
+        options: { maxOutputTokens: 512 },
+        signal: new AbortController().signal
+      })
+    );
+    const body = bodyOf(calls);
+    expect(body.tool_choice).toBe("auto");
+    expect(body.tools).toEqual([
+      { type: "function", function: { name: "clinical.search", description: "busca", parameters: { type: "object" } } }
+    ]);
+  });
+
+  it("omite reasoning_effort en modelos sin soporte, y lo incluye (high) cuando el modelo lo soporta", async () => {
+    // Modelo sin reasoning (default): se OMITE aunque se pida.
+    const plain = adapterWith([
+      sseResponse([JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })])
+    ]);
+    await collect(
+      plain.adapter.startTurn({
+        turnId: "t1",
+        model,
+        credential: lease,
+        messages: userMessage,
+        tools: [],
+        options: { maxOutputTokens: 512, reasoningEffort: "high" },
+        signal: new AbortController().signal
+      })
+    );
+    expect("reasoning_effort" in bodyOf(plain.calls)).toBe(false);
+
+    // Modelo con reasoning: se envía el nativo (max -> high).
+    const reasoningModel = createOpencodeModel({
+      baseUrl: BASE_URL,
+      modelId: "modelo-r",
+      row: { id: "modelo-r", supports_reasoning: true }
+    });
+    const reason = adapterWith([
+      sseResponse([JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })])
+    ]);
+    await collect(
+      reason.adapter.startTurn({
+        turnId: "t1",
+        model: reasoningModel,
+        credential: lease,
+        messages: userMessage,
+        tools: [],
+        options: { maxOutputTokens: 512, reasoningEffort: "max" },
+        signal: new AbortController().signal
+      })
+    );
+    expect(bodyOf(reason.calls).reasoning_effort).toBe("high");
+  });
+
+  it("DIAGNÓSTICO: ante un error del proveedor, surface el status y el cuerpo de error", async () => {
+    const { adapter } = adapterWith([
+      jsonResponse(
+        {
+          error: {
+            message: "Unsupported parameter: stream_options",
+            type: "invalid_request_error",
+            param: "stream_options",
+            code: "unsupported_parameter"
+          }
+        },
+        400
+      )
+    ]);
+    let caught: unknown;
+    try {
+      await collect(
+        adapter.startTurn({
+          turnId: "t1",
+          model,
+          credential: lease,
+          messages: userMessage,
+          tools: [],
+          options,
+          signal: new AbortController().signal
+        })
+      );
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(GatewayError);
+    const gatewayError = caught as GatewayError;
+    expect(gatewayError.code).toBe("PROVIDER_REQUEST_FAILED");
+    const details = gatewayError.details as { providerStatus?: number; providerError?: string };
+    expect(details.providerStatus).toBe(400);
+    expect(details.providerError).toContain("stream_options");
+    // El mensaje del error también lleva la pista upstream (para QA).
+    expect(gatewayError.message).toContain("stream_options");
+  });
+});

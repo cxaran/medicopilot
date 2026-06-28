@@ -280,9 +280,16 @@ export class OpencodeProviderAdapter implements ProviderAdapter {
     });
 
     if (!response.ok) {
+      // DIAGNÓSTICO: capturamos el error del proveedor (p. ej. el 400 de opencode que indica
+      // qué campo del body rechaza) en los detalles del error. Antes se descartaba y las QA
+      // nunca revelaban la causa. No contiene secretos ni PHI (describe la forma de la
+      // petición) y va a los detalles del error (visibles en QA), nunca a los logs de telemetría.
+      const providerError = await readProviderError(response);
       throw new GatewayError(
         "PROVIDER_REQUEST_FAILED",
-        `Opencode chat completion failed with status ${response.status}`
+        `Opencode chat completion failed with status ${response.status}` +
+          (providerError ? `: ${providerError}` : ""),
+        { providerStatus: response.status, providerError }
       );
     }
     if (!response.body) {
@@ -525,6 +532,41 @@ function mapUsage(usage: OpenAIUsage): TurnUsage {
     cachedInputTokens: usage.prompt_tokens_details?.cached_tokens ?? null,
     cacheWriteTokens: null
   };
+}
+
+/**
+ * Lee y acota el cuerpo de error del proveedor para DIAGNÓSTICO. Prefiere los campos
+ * estructurados del error OpenAI-compatible (``error.message/type/param/code``) y cae al texto
+ * crudo; en ambos casos colapsa espacios y trunca a 300 caracteres. Devuelve ``null`` si no hay
+ * cuerpo o no se puede leer. La descripción del error es sobre la FORMA de la petición, no datos
+ * clínicos; aun así se acota para minimizar cualquier eco accidental del request.
+ */
+async function readProviderError(response: Response): Promise<string | null> {
+  let raw: string;
+  try {
+    raw = await response.text();
+  } catch {
+    return null;
+  }
+  if (!raw) {
+    return null;
+  }
+  const clamp = (value: string): string => value.replace(/\s+/g, " ").trim().slice(0, 300);
+  try {
+    const parsed = JSON.parse(raw) as { error?: { message?: unknown; type?: unknown; param?: unknown; code?: unknown } };
+    const error = parsed?.error;
+    if (error && typeof error === "object") {
+      const fields = [error.message, error.code, error.param, error.type]
+        .filter((value): value is string | number => typeof value === "string" || typeof value === "number")
+        .map(String);
+      if (fields.length > 0) {
+        return clamp(fields.join(" · "));
+      }
+    }
+  } catch {
+    // No es JSON: cae al texto crudo acotado.
+  }
+  return clamp(raw) || null;
 }
 
 function safeParseJson(raw: string): unknown {
