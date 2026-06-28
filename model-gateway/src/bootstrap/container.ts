@@ -18,6 +18,7 @@ import {
 } from "../providers/openai/adapter.js";
 import { AnthropicProviderAdapter, createAnthropicModel } from "../providers/anthropic/adapter.js";
 import { GeminiProviderAdapter, createGeminiModel } from "../providers/gemini/adapter.js";
+import { OpenRouterProviderAdapter, createOpenRouterModel } from "../providers/openrouter/adapter.js";
 import { ProviderRegistry } from "../providers/registry.js";
 import { createFakeModel } from "../domain/model.js";
 import { InMemoryBrowserSessionStore } from "../application/browser-sessions/session-store.js";
@@ -116,6 +117,19 @@ export function createContainer(settings = loadSettings()): GatewayContainer {
     });
     adapters.push(geminiAdapter);
     catalogModels.push(geminiModel);
+  }
+
+  // OpenRouter (opt-in). OpenAI-compatible con DISCOVERY RICO: el modelo por defecto se registra
+  // curado (caps unknown hasta el discovery) y el discovery de /models trae los reales con
+  // metadatos de capacidad. La key llega por arriendo (B3/B4).
+  if (settings.openrouterEnabled && settings.openrouterBaseUrl) {
+    const openrouterAdapter = new OpenRouterProviderAdapter({ baseUrl: settings.openrouterBaseUrl });
+    const openrouterModel = createOpenRouterModel({
+      baseUrl: settings.openrouterBaseUrl,
+      modelId: settings.openrouterDefaultModel ?? "openai/gpt-4o-mini"
+    });
+    adapters.push(openrouterAdapter);
+    catalogModels.push(openrouterModel);
   }
 
   const modelCatalog = new InMemoryModelCatalog(catalogModels);

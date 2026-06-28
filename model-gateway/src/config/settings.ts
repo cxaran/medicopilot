@@ -52,6 +52,12 @@ export interface GatewaySettings {
   geminiEnabled?: boolean | undefined;
   geminiBaseUrl?: string | undefined;
   geminiDefaultModel?: string | undefined;
+  // OpenRouter (opt-in): OpenAI-compatible con DISCOVERY RICO (su /models trae metadatos reales
+  // de capacidad). La API key NO se configura aquí (llega por arriendo de B4/B3). Solo se
+  // registra el proveedor openrouter si está habilitado. Opcionales para los tests.
+  openrouterEnabled?: boolean | undefined;
+  openrouterBaseUrl?: string | undefined;
+  openrouterDefaultModel?: string | undefined;
 }
 
 function numberFromEnv(name: string, fallback: number): number {
@@ -125,6 +131,11 @@ export function loadSettings(): GatewaySettings {
     // fila curada y el discovery añade los reales de /v1beta/models (con sus límites de tokens).
     geminiEnabled: process.env.GATEWAY_GEMINI_ENABLED === "true",
     geminiBaseUrl: process.env.GATEWAY_GEMINI_BASE_URL ?? "https://generativelanguage.googleapis.com/v1beta",
-    geminiDefaultModel: process.env.GATEWAY_GEMINI_DEFAULT_MODEL ?? "gemini-2.5-flash"
+    geminiDefaultModel: process.env.GATEWAY_GEMINI_DEFAULT_MODEL ?? "gemini-2.5-flash",
+    // OpenRouter (opt-in). La key llega por arriendo; el modelo por defecto se registra como
+    // fila curada (capacidades unknown hasta el discovery, que SÍ trae metadatos reales).
+    openrouterEnabled: process.env.GATEWAY_OPENROUTER_ENABLED === "true",
+    openrouterBaseUrl: process.env.GATEWAY_OPENROUTER_BASE_URL ?? "https://openrouter.ai/api/v1",
+    openrouterDefaultModel: process.env.GATEWAY_OPENROUTER_DEFAULT_MODEL ?? "openai/gpt-4o-mini"
   };
 }
