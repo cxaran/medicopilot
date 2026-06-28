@@ -53,7 +53,7 @@ Leyenda UI: ✅ existe y funciona · ⚠️ existe pero rota/incompleta · ❌ n
 | 12 | **consultations** | CRUD + finalize | ✅ | ✅ | ✅ | ✅ finalize/delete | **F2 lo arregla (`datetime`)** | **F2 (hecho)** |
 | 13 | **vital_signs** | full CRUD | ✅ | ✅ | ✅ | ✅ delete | **F2 lo arregla (`datetime`+`number`)** | **F2 (hecho)** |
 | 14 | **appointments** (agenda) | CRUD + confirm/cancel/no-show/reschedule | ✅ | ✅ | ✅ | ✅ acciones | **F2 lo arregla (`number`+`datetime`)** | **F2 (hecho)** |
-| 15 | **clinical_documents** | CRUD multipart + download/archive/restore | ✅ | ❌ | ⚠️ (metadata) | ✅ archive/restore/delete | **bloqueado: subida multipart** | **F3** |
+| 15 | **clinical_documents** | CRUD multipart + download/archive/restore | ✅ | ✅ (multipart) | ⚠️ (metadata) | ✅ archive/restore/delete | **F3 lo arregla (subida multipart)** | **F3 (hecho)** |
 | 16 | **ai_providers** | credenciales API key + OAuth ChatGPT | n/a | ✅ (en `/account`) | n/a (rotación = borrar+crear) | ✅ eliminar | OK (UI dedicada) | — |
 | 17 | **agent_memories** | CRUD de memorias del agente | ❌ | ❌ | ❌ | ❌ | **sin UI** | **F4** |
 
@@ -82,6 +82,8 @@ Leyenda UI: ✅ existe y funciona · ⚠️ existe pero rota/incompleta · ❌ n
   prefill de inputs nativos. Además corrigió la regla de vacío de F1 (opcional vacío se OMITE,
   no `null`, para no romper campos con default no-nullable como `status`). Desbloquea consultas,
   signos vitales y agenda. (Crear hijos aún exige pegar UUIDs de FK → F5.)
-- **F3:** alta multipart (subida de archivo) → documentos clínicos.
+- **F3 (hecho, commit 9357703):** alta multipart (subida de archivo) guiada por capability
+  (transport + file_field) en el flujo de creación genérico → documentos clínicos. Validación
+  de archivo requerido/tamaño en cliente; descarga ya existente verificada.
 - **F4:** UI de memorias del agente (agent_memories).
 - **F5:** picker de relación para FK (UX de recursos hijos).
