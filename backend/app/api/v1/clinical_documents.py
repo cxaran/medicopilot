@@ -27,6 +27,7 @@ from backend.app.models.enums import ClinicalDocumentType
 from backend.app.models.patient import Patient
 from backend.app.resources.registry import CLINICAL_DOCUMENTS
 from backend.app.schemas.clinical_document import (
+    ClinicalDocumentContentRead,
     ClinicalDocumentListItem,
     ClinicalDocumentMetadataUpdate,
     ClinicalDocumentRead,
@@ -35,6 +36,7 @@ from backend.app.schemas.clinical_document import (
 from backend.app.schemas.pagination import OffsetPage
 from backend.app.security.groups.clinical_documents import ClinicalDocumentPermissions
 from backend.app.services import clinical_documents as service
+from backend.app.services.document_content import build_document_content
 
 router = APIRouter(prefix="/clinical-documents", tags=["clinical-documents"])
 
@@ -63,6 +65,33 @@ def get_clinical_document(
 ) -> ClinicalDocumentRead:
     document = service.load_visible(session, document_id)
     return serialize(ClinicalDocumentRead, document)
+
+
+@router.get("/{document_id}/content", response_model=ClinicalDocumentContentRead)
+def get_clinical_document_content(
+    document_id: UUID,
+    session: SessionDep,
+    _: ClinicalDocumentPermissions.READ.requiere,
+) -> ClinicalDocumentContentRead:
+    """Contenido EXTRAÍBLE del documento para que el agente lo interprete (F-MEDIOS fase 1).
+
+    Mismo RBAC y visibilidad que la lectura del documento (eliminado lógico → 404). Para
+    imágenes devuelve la referencia de visión (``download_url``); para PDFs, el texto. El
+    servidor NO interpreta valores clínicos: solo superficie el contenido."""
+    document = service.load_visible(session, document_id)
+    content = build_document_content(document)
+    return ClinicalDocumentContentRead(
+        document_id=document.id,
+        patient_id=document.patient_id,
+        consultation_id=document.consultation_id,
+        document_type=document.document_type,
+        mime_type=document.mime_type,
+        content_kind=content.content_kind,
+        download_url=content.download_url,
+        text=content.text,
+        text_truncated=content.text_truncated,
+        notes=content.notes,
+    )
 
 
 @router.post(

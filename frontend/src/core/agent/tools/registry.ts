@@ -455,6 +455,49 @@ const TOOLS: ToolDefinition[] = [
     },
   },
   {
+    // F-MEDIOS fase 1: leer el CONTENIDO de un documento clínico ya cargado (p. ej. un
+    // reporte de laboratorio) para proponer resultados estructurados EN BORRADOR. El
+    // servidor solo superficie el contenido; la interpretación es del agente.
+    //
+    // COMPOSICIÓN sugerida para extraer un reporte de laboratorio (cada resultado es un
+    // BORRADOR que el médico aprueba, protocolo P1; nada se guarda solo):
+    //   1) clinical.read_document_content(clinical_document_id) -> obtén el texto (PDF) o
+    //      la referencia de visión (imagen, vía download_url) y el patient_id.
+    //   2) Por cada analito que LEAS con claridad, busca su código LOINC con
+    //      clinical.search_codes(system="loinc", query=<nombre del analito>).
+    //   3) Propón clinical.create_lab_result_draft con analyte_name + value_numeric/value_text
+    //      + unit + rango de referencia (si aparece) + measured_at + el LOINC en analyte_code
+    //      + clinical_document_id = este documento (como fuente).
+    // Si un valor es ilegible o ambiguo, DILO y NO lo adivines: no propongas ese resultado.
+    name: "clinical.read_document_content",
+    description:
+      "Devuelve el CONTENIDO extraíble de un documento clínico ya cargado para interpretarlo: " +
+      "{document_type, patient_id, content_kind, download_url, text}. Para PDF con texto, " +
+      "content_kind='text' y 'text' trae el texto; para imágenes, content_kind='image' e " +
+      "interpretas por visión usando download_url; un PDF escaneado sin texto trae text=null " +
+      "(no inventes valores). Úsalo para proponer resultados de laboratorio EN BORRADOR: lee " +
+      "el documento, mapea cada analito a su LOINC con clinical.search_codes y propón un " +
+      "clinical.create_lab_result_draft por analito con clinical_document_id como fuente. Cada " +
+      "resultado es un borrador que el médico aprueba (P1). Solo lectura.",
+    kind: "read",
+    inputSchema: {
+      type: "object",
+      properties: {
+        clinical_document_id: {
+          type: "string",
+          description: "Id (UUID) del documento clínico a leer.",
+          format: "uuid",
+        },
+      },
+      required: ["clinical_document_id"],
+      additionalProperties: false,
+    },
+    execute: (args, ctx) => {
+      const id = encodeURIComponent(String(args.clinical_document_id));
+      return ctx.api(`/api/v1/clinical-documents/${id}/content`);
+    },
+  },
+  {
     name: "clinical.list_diagnoses",
     description:
       "Lista diagnósticos de consulta (paginado). Se consultan por consulta (consultation_id) y " +
@@ -1170,13 +1213,16 @@ const TOOLS: ToolDefinition[] = [
       "Registra un resultado de laboratorio/observación ESTRUCTURADO para un paciente (valor " +
       "numérico o cualitativo, unidad, rango de referencia, marca de anormalidad, fecha). " +
       "Acción de escritura: requiere confirmación explícita del médico antes de guardarse. El " +
-      "médico revisa y aprueba el dato exacto; nada se guarda de forma autónoma.",
+      "médico revisa y aprueba el dato exacto; nada se guarda de forma autónoma. Al extraer un " +
+      "reporte (ver clinical.read_document_content), incluye analyte_code con el LOINC que " +
+      "encontraste (clinical.search_codes) y clinical_document_id como documento de origen.",
     kind: "write",
     inputSchema: {
       type: "object",
       properties: {
         patient_id: { type: "string", description: "Id (UUID) del paciente.", format: "uuid" },
         analyte_name: { type: "string", description: "Nombre del analito o prueba (p. ej. 'HbA1c')." },
+        analyte_code: { type: "string", description: "Código LOINC del analito (opcional; de clinical.search_codes)." },
         value_numeric: { type: "number", description: "Valor numérico del resultado (si es cuantitativo)." },
         value_text: { type: "string", description: "Valor cualitativo (p. ej. 'positivo'), si aplica." },
         unit: { type: "string", description: "Unidad de medida (opcional)." },

@@ -32,3 +32,8 @@ cryptography==49.0.0
 
 # Mantener solo mientras existan hashes bcrypt heredados:
 passlib[bcrypt]==1.7.4
+
+# Extracción de TEXTO de PDFs de documentos clínicos (F-MEDIOS fase 1). Pura-python, sin
+# OCR ni SDKs de nube: solo lee la capa de texto del PDF para que el AGENTE interprete los
+# analitos. Los PDFs escaneados (sin capa de texto) quedan para fase 2 (OCR).
+pypdf==6.14.2

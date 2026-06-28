@@ -8,7 +8,7 @@ endpoint dedicado de descarga, con cabeceras controladas por backend.
 
 import uuid
 from datetime import date, datetime
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import Field
 
@@ -92,6 +92,27 @@ class ClinicalDocumentUploadResponse(ClinicalDocumentRead):
     """Respuesta de la carga (POST multipart). Misma metadata segura que la lectura;
     nombre distinto para dejar explícito en el contrato que es el resultado de un
     upload (nunca devuelve el binario)."""
+
+
+class ClinicalDocumentContentRead(ApiReadSchema):
+    """Contenido EXTRAÍBLE de un documento para que el agente lo interprete (F-MEDIOS fase 1).
+
+    No incluye el binario crudo ni interpreta valores clínicos. ``content_kind`` indica cómo
+    consumirlo: ``image`` (interpretar por visión vía ``download_url``), ``text`` (texto del
+    PDF en ``text``; ``null`` si el PDF no tiene capa de texto extraíble) o ``unsupported``.
+    ``notes`` guía al agente (incl. no inventar valores ilegibles).
+    """
+
+    document_id: uuid.UUID
+    patient_id: uuid.UUID
+    consultation_id: Optional[uuid.UUID] = None
+    document_type: ClinicalDocumentType
+    mime_type: str
+    content_kind: Literal["image", "text", "unsupported"]
+    download_url: str
+    text: Optional[str] = None
+    text_truncated: bool = False
+    notes: Optional[str] = None
 
 
 class ClinicalDocumentListItem(ApiReadSchema):

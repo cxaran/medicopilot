@@ -629,6 +629,30 @@ export interface paths {
         patch: operations["update_clinical_document_api_v1_clinical_documents__document_id__patch"];
         trace?: never;
     };
+    "/api/v1/clinical-documents/{document_id}/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Clinical Document Content
+         * @description Contenido EXTRAÍBLE del documento para que el agente lo interprete (F-MEDIOS fase 1).
+         *
+         *     Mismo RBAC y visibilidad que la lectura del documento (eliminado lógico → 404). Para
+         *     imágenes devuelve la referencia de visión (``download_url``); para PDFs, el texto. El
+         *     servidor NO interpreta valores clínicos: solo superficie el contenido.
+         */
+        get: operations["get_clinical_document_content_api_v1_clinical_documents__document_id__content_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/clinical-documents/{document_id}/download": {
         parameters: {
             query?: never;
@@ -2375,6 +2399,48 @@ export interface components {
             display_term?: string | null;
             /** Código padre */
             parent_code?: string | null;
+        };
+        /**
+         * ClinicalDocumentContentRead
+         * @description Contenido EXTRAÍBLE de un documento para que el agente lo interprete (F-MEDIOS fase 1).
+         *
+         *     No incluye el binario crudo ni interpreta valores clínicos. ``content_kind`` indica cómo
+         *     consumirlo: ``image`` (interpretar por visión vía ``download_url``), ``text`` (texto del
+         *     PDF en ``text``; ``null`` si el PDF no tiene capa de texto extraíble) o ``unsupported``.
+         *     ``notes`` guía al agente (incl. no inventar valores ilegibles).
+         */
+        ClinicalDocumentContentRead: {
+            /**
+             * Document Id
+             * Format: uuid
+             */
+            document_id: string;
+            /**
+             * Patient Id
+             * Format: uuid
+             */
+            patient_id: string;
+            /** Consultation Id */
+            consultation_id?: string | null;
+            document_type: components["schemas"]["ClinicalDocumentType"];
+            /** Mime Type */
+            mime_type: string;
+            /**
+             * Content Kind
+             * @enum {string}
+             */
+            content_kind: "image" | "text" | "unsupported";
+            /** Download Url */
+            download_url: string;
+            /** Text */
+            text?: string | null;
+            /**
+             * Text Truncated
+             * @default false
+             */
+            text_truncated: boolean;
+            /** Notes */
+            notes?: string | null;
         };
         /**
          * ClinicalDocumentListItem
@@ -7648,6 +7714,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ClinicalDocumentRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_clinical_document_content_api_v1_clinical_documents__document_id__content_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClinicalDocumentContentRead"];
                 };
             };
             /** @description Validation Error */
