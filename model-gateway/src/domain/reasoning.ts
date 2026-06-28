@@ -65,6 +65,9 @@ export function nativeReasoningEffort(
     case "opencode_go":
     case "openai_responses":
     case "openai_chat_completions":
+    // Runtime local OpenAI-compatible (Ollama/vLLM): si un modelo local soporta reasoning,
+    // usa el parámetro estilo OpenAI (reasoning_effort). Por defecto el local no lo reporta.
+    case "ollama_chat":
       return level === "max" ? "high" : level;
     default:
       return null;

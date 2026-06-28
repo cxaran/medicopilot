@@ -19,6 +19,7 @@ import {
 import { AnthropicProviderAdapter, createAnthropicModel } from "../providers/anthropic/adapter.js";
 import { GeminiProviderAdapter, createGeminiModel } from "../providers/gemini/adapter.js";
 import { OpenRouterProviderAdapter, createOpenRouterModel } from "../providers/openrouter/adapter.js";
+import { LocalProviderAdapter, createLocalModel } from "../providers/local/adapter.js";
 import { ProviderRegistry } from "../providers/registry.js";
 import { createFakeModel } from "../domain/model.js";
 import { InMemoryBrowserSessionStore } from "../application/browser-sessions/session-store.js";
@@ -130,6 +131,20 @@ export function createContainer(settings = loadSettings()): GatewayContainer {
     });
     adapters.push(openrouterAdapter);
     catalogModels.push(openrouterModel);
+  }
+
+  // Runtime LOCAL / on-prem (Ollama / vLLM), opt-in. Inferencia en la clínica: la PHI nunca
+  // sale a la nube. OpenAI-compatible (reusa el núcleo); suele no requerir API key. El modelo
+  // por defecto se registra curado (caps honestas unknown) y el discovery añade lo que el
+  // endpoint local exponga.
+  if (settings.localEnabled && settings.localBaseUrl) {
+    const localAdapter = new LocalProviderAdapter({ baseUrl: settings.localBaseUrl });
+    const localModel = createLocalModel({
+      baseUrl: settings.localBaseUrl,
+      modelId: settings.localDefaultModel ?? "llama3.1:8b"
+    });
+    adapters.push(localAdapter);
+    catalogModels.push(localModel);
   }
 
   const modelCatalog = new InMemoryModelCatalog(catalogModels);

@@ -58,6 +58,12 @@ export interface GatewaySettings {
   openrouterEnabled?: boolean | undefined;
   openrouterBaseUrl?: string | undefined;
   openrouterDefaultModel?: string | undefined;
+  // Runtime LOCAL / on-prem (Ollama / vLLM), opt-in: inferencia en la clínica, sin nube. Base
+  // URL OpenAI-compatible configurable; suele NO requerir API key (el arriendo puede venir
+  // vacío). Opcionales para los tests.
+  localEnabled?: boolean | undefined;
+  localBaseUrl?: string | undefined;
+  localDefaultModel?: string | undefined;
 }
 
 function numberFromEnv(name: string, fallback: number): number {
@@ -136,6 +142,11 @@ export function loadSettings(): GatewaySettings {
     // fila curada (capacidades unknown hasta el discovery, que SÍ trae metadatos reales).
     openrouterEnabled: process.env.GATEWAY_OPENROUTER_ENABLED === "true",
     openrouterBaseUrl: process.env.GATEWAY_OPENROUTER_BASE_URL ?? "https://openrouter.ai/api/v1",
-    openrouterDefaultModel: process.env.GATEWAY_OPENROUTER_DEFAULT_MODEL ?? "openai/gpt-4o-mini"
+    openrouterDefaultModel: process.env.GATEWAY_OPENROUTER_DEFAULT_MODEL ?? "openai/gpt-4o-mini",
+    // Runtime local (opt-in). Default: el endpoint OpenAI-compatible de Ollama. vLLM funciona
+    // apuntando GATEWAY_LOCAL_BASE_URL a su /v1. La key suele no requerirse (puede venir vacía).
+    localEnabled: process.env.GATEWAY_LOCAL_ENABLED === "true",
+    localBaseUrl: process.env.GATEWAY_LOCAL_BASE_URL ?? "http://localhost:11434/v1",
+    localDefaultModel: process.env.GATEWAY_LOCAL_DEFAULT_MODEL ?? "llama3.1:8b"
   };
 }
