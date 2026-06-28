@@ -65,9 +65,11 @@ Leyenda UI: ✅ existe y funciona · ⚠️ existe pero rota/incompleta · ❌ n
   documentos clínicos declara `create_transport=MULTIPART` con `create_file_field`. → **F3**.
 - **Selección de relaciones (FK):** los recursos "hijos" (vital_signs→consultation_id,
   prescriptions→consultation_id, patient_clinical_items→patient_id, appointments→patient_id/
-  doctor_id…) exponen esas FK como `text` que esperan un UUID escrito a mano. Falta un
-  *picker* de relación (buscar/elegir el padre). → **F5** (mejora de UX, no bloquea el alta
-  si se pega el UUID).
+  doctor_id…) exponían esas FK como `text` que esperaban un UUID escrito a mano. → **F5
+  (hecho)** añade un *picker* de relación genérico (buscar/elegir el padre por su etiqueta).
+  FK cubiertas: `patient_id`, `doctor_id`/`attending_doctor_id`, `consultation_id`. Las FK
+  restantes (`appointment_id`, `related_diagnosis_id`, `prescription_id`, `user_id`…) siguen
+  con texto manual hasta ampliar el mapa de `relation-picker.ts`.
 - **Página de detalle de solo lectura:** hoy se usa la edición precargada. Aceptable; un
   detalle dedicado sería mejora futura, no bloqueo. → backlog.
 - **agent_memories:** el endpoint existe (cliente generado) pero ningún componente lo
@@ -90,4 +92,14 @@ Leyenda UI: ✅ existe y funciona · ⚠️ existe pero rota/incompleta · ❌ n
   los endpoints son owner-only (no RBAC) y el contenido vuelve descifrado al dueño. Cliente
   tipado (`core/agent-memories/agent-memories-client.ts`) + helpers de vista + tests
   (client/view). Alta/lista (contenido en claro)/edición inline/borrado con confirmación.
-- **F5:** picker de relación para FK (UX de recursos hijos).
+- **F5 (hecho):** selector de relación genérico para FK (resolución campo→recurso destino).
+  El usuario busca el padre por etiqueta (nombre del paciente/médico, motivo de consulta) y se
+  guarda su UUID; precarga la etiqueta en edición; conserva "Ingresar ID manualmente" como
+  respaldo. Resolución por NOMBRE de campo (`relation-picker.ts`) porque el contrato no declara
+  el recurso destino de un campo de formulario; búsqueda reusa la capability del destino
+  (api_path + búsqueda) y su endpoint de lista (`relation-search-client.ts`). Cubre las FK
+  clínicas comunes; el resto queda como follow-up (ampliar el mapa).
+
+Con F5 se cierra la cobertura núcleo del frontend: todos los recursos de la tabla tienen UI
+completa (lista/alta/edición/acciones) y los formularios soportan todos los widgets +
+multipart + selector de relación.
