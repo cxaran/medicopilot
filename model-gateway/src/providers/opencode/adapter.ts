@@ -2,6 +2,7 @@ import { GatewayError } from "../../kernel/errors.js";
 import { createId } from "../../kernel/ids.js";
 import { emptyTurnUsage } from "../../domain/usage.js";
 import { nativeReasoningEffort } from "../../domain/reasoning.js";
+import { opencodeCuratedFor, type OpencodeCuratedEntry } from "./catalog.js";
 import type { GenerationOptions } from "../../application/capabilities/capability-negotiator.js";
 import type { CanonicalMessage } from "../../domain/message.js";
 import type { ModelDescriptor } from "../../domain/model.js";
@@ -418,25 +419,43 @@ export function createOpencodeModel(input: {
   modelId: string;
   row?: OpenAIModelRow;
   providerId?: OpencodeProviderId;
+  // Override del mapa curado (sólo para tests del mecanismo de precedencia); por defecto se
+  // consulta el mapa curado real por id.
+  curated?: OpencodeCuratedEntry;
 }): ModelDescriptor {
   const row = input.row;
   const providerId = input.providerId ?? OPENCODE_PROVIDER_ID;
   const baseUrl = input.baseUrl.replace(/\/+$/, "");
-  const supportsTools = row?.supports_tools ?? true;
-  const supportsReasoning = row?.supports_reasoning ?? false;
-  // Si /models trae `modalities`, ese metadato manda; si no (caso opencode, que devuelve filas
-  // bare), se cura la visión por id con `opencodeSupportsVision`.
+  // Mapa curado (rellena huecos donde opencode no reporta nada). PRECEDENCIA estricta: el dato
+  // REAL del proveedor (row) gana SIEMPRE; el curado sólo rellena; lo desconocido-y-no-curado
+  // queda en su default honesto. El curado JAMÁS sobrescribe un valor real.
+  const curated = input.curated ?? opencodeCuratedFor(input.modelId);
+  const supportsTools = row?.supports_tools ?? curated?.supportsTools ?? true;
+  const supportsReasoning = row?.supports_reasoning ?? curated?.supportsReasoning ?? false;
+  // Si /models trae `modalities`, ese metadato manda; si no, cae al curado y, por último, a
+  // `opencodeSupportsVision` (curación por id existente).
   const hasVision = row?.modalities
     ? row.modalities.includes("image")
-    : opencodeSupportsVision(input.modelId);
+    : (curated?.vision ?? opencodeSupportsVision(input.modelId));
   const inputModalities = new Set<"text" | "image" | "audio" | "video" | "file">(["text"]);
   if (hasVision) {
     inputModalities.add("image");
   }
-  const contextWindow = row?.context_length ?? row?.context_window ?? 128000;
-  const maxOutput = row?.max_output_tokens ?? row?.max_tokens ?? null;
+  const contextWindow =
+    row?.context_length ?? row?.context_window ?? curated?.contextWindowTokens ?? 128000;
+  const maxOutput = row?.max_output_tokens ?? row?.max_tokens ?? curated?.maxOutputTokens ?? null;
+  // opencode NO publica precios en /models -> el precio sólo puede venir del mapa curado (o null).
+  const pricing = curated?.pricing ?? null;
+  // Provenance: capacidades del proveedor si hay row (mixed si además hubo curado); pricing siempre
+  // curado o ninguno (el proveedor no lo reporta).
+  const enrichment: ModelDescriptor["enrichment"] = {
+    capabilities: row ? (curated ? "mixed" : "provider") : curated ? "curated" : "none",
+    pricing: pricing ? "curated" : "none",
+  };
 
   return {
+    pricing,
+    enrichment,
     id: `${providerId}/${input.modelId}`,
     label: row?.name ?? input.modelId,
     route: {

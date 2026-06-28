@@ -103,6 +103,17 @@ export interface ModelPricing {
   cacheWritePerToken: number | null;
 }
 
+// Provenance del enriquecimiento de un descriptor cuando se combina el discovery del proveedor
+// con un mapa CURADO (opencode /models trae filas mínimas; ver providers/opencode/catalog). Deja
+// trazable qué valores son del proveedor vs curados, para que la historia de honestidad (y el
+// indicador de costo P7) sea inspeccionable. "provider" = lo reportó el proveedor; "curated" =
+// relleno del mapa curado; "mixed" = proveedor + relleno curado; "none" = ni uno ni otro
+// (defaults/desconocido).
+export interface ModelEnrichment {
+  capabilities: "provider" | "curated" | "mixed" | "none";
+  pricing: "provider" | "curated" | "none";
+}
+
 export interface ModelDescriptor {
   id: `${ProviderId}/${ModelId}`;
   label: string;
@@ -113,6 +124,9 @@ export interface ModelDescriptor {
   deprecatedAt: string | null;
   // Precios por token si se conocen (P7). Opcional: la mayoría de proveedores no los publican.
   pricing?: ModelPricing | null;
+  // Provenance del enriquecimiento (discovery vs curado). Opcional: sólo lo fijan los adaptadores
+  // que combinan ambas fuentes (hoy opencode).
+  enrichment?: ModelEnrichment;
 }
 
 export function createFakeModel(overrides: Partial<ModelDescriptor> = {}): ModelDescriptor {
