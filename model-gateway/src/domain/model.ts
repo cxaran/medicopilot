@@ -9,6 +9,9 @@ export type ProviderProtocol =
   | "ollama_chat"
   // B5: opencode zen es OpenAI-compatible (chat completions + /models, Bearer auth).
   | "opencode_zen"
+  // OpenCode Go: misma API OpenAI-compatible que Zen pero otro base URL y catalogo
+  // (suscripcion); se enruta con su propio provider id para arrendar la credencial correcta.
+  | "opencode_go"
   | "fake";
 
 // Formato de "thinking"/razonamiento que entiende el proveedor en el cable (patrón

@@ -6,7 +6,11 @@ import { InMemoryTurnStore } from "../infrastructure/turn-store/in-memory-turn-s
 import { NoopRateLimiter } from "../infrastructure/rate-limit/noop-rate-limiter.js";
 import { PinoTelemetry } from "../infrastructure/observability/pino-telemetry.js";
 import { FakeProviderAdapter } from "../providers/fake/adapter.js";
-import { OpencodeProviderAdapter, createOpencodeModel } from "../providers/opencode/adapter.js";
+import {
+  OpencodeProviderAdapter,
+  createOpencodeModel,
+  OPENCODE_GO_PROVIDER_ID
+} from "../providers/opencode/adapter.js";
 import { ProviderRegistry } from "../providers/registry.js";
 import { createFakeModel } from "../domain/model.js";
 import { InMemoryBrowserSessionStore } from "../application/browser-sessions/session-store.js";
@@ -32,17 +36,6 @@ export interface GatewayContainer {
 export function createContainer(settings = loadSettings()): GatewayContainer {
   const browserSessions = new InMemoryBrowserSessionStore();
 
-  // B4: si hay config del backend interno, se usa el control-plane real que arrienda
-  // credenciales contra FastAPI; si no, el fake (dev/tests).
-  const controlPlane: ControlPlanePort =
-    settings.backendInternalUrl && settings.backendInternalSecret
-      ? new HttpControlPlaneClient({
-          backendInternalUrl: settings.backendInternalUrl,
-          backendInternalSecret: settings.backendInternalSecret,
-          browserSessions
-        })
-      : new FakeControlPlaneClient();
-
   // B5: primer proveedor real. El catálogo combina el fake (dev) + un modelo curado de
   // opencode; el registry expone ambos protocolos.
   const opencodeAdapter = new OpencodeProviderAdapter({ baseUrl: settings.opencodeBaseUrl });
@@ -51,11 +44,45 @@ export function createContainer(settings = loadSettings()): GatewayContainer {
     modelId: settings.opencodeDefaultModel
   });
 
+  // OpenCode Go (opt-in): mismo adaptador OpenAI-compatible, otro base URL y provider id
+  // (opencode_go) para que el arriendo busque la credencial Go correcta. La misma key
+  // opencode sirve, pero contra el endpoint Go.
+  const adapters = [new FakeProviderAdapter(), opencodeAdapter];
+  const catalogModels = [createFakeModel(), opencodeModel];
+  if (settings.opencodeGoEnabled && settings.opencodeGoBaseUrl) {
+    const opencodeGoAdapter = new OpencodeProviderAdapter({
+      baseUrl: settings.opencodeGoBaseUrl,
+      providerId: OPENCODE_GO_PROVIDER_ID
+    });
+    const opencodeGoModel = createOpencodeModel({
+      baseUrl: settings.opencodeGoBaseUrl,
+      modelId: settings.opencodeGoDefaultModel ?? "qwen3.7-plus",
+      providerId: OPENCODE_GO_PROVIDER_ID
+    });
+    adapters.push(opencodeGoAdapter);
+    catalogModels.push(opencodeGoModel);
+  }
+
+  const modelCatalog = new InMemoryModelCatalog(catalogModels);
+
+  // B4: si hay config del backend interno, se usa el control-plane real que arrienda
+  // credenciales contra FastAPI; si no, el fake (dev/tests). El catálogo permite
+  // resolver el profileId al proveedor/modelo reales para el arriendo.
+  const controlPlane: ControlPlanePort =
+    settings.backendInternalUrl && settings.backendInternalSecret
+      ? new HttpControlPlaneClient({
+          backendInternalUrl: settings.backendInternalUrl,
+          backendInternalSecret: settings.backendInternalSecret,
+          browserSessions,
+          modelCatalog
+        })
+      : new FakeControlPlaneClient();
+
   return {
     settings,
     controlPlane,
-    modelCatalog: new InMemoryModelCatalog([createFakeModel(), opencodeModel]),
-    providerRegistry: new ProviderRegistry([new FakeProviderAdapter(), opencodeAdapter]),
+    modelCatalog,
+    providerRegistry: new ProviderRegistry(adapters),
     turnStore: new InMemoryTurnStore(),
     limiter: new NoopRateLimiter(),
     telemetry: new PinoTelemetry(),

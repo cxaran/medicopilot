@@ -15,11 +15,16 @@ import type {
   ProviderTurnInput
 } from "../../ports/provider-adapter.port.js";
 
-/** Identificador de proveedor para opencode zen (alineado con AiProvider del backend). */
-export const OPENCODE_PROVIDER_ID = "opencode_zen";
+/** Identificadores de proveedor opencode (alineados con AiProvider del backend). */
+export type OpencodeProviderId = "opencode_zen" | "opencode_go";
+export const OPENCODE_PROVIDER_ID: OpencodeProviderId = "opencode_zen";
+export const OPENCODE_GO_PROVIDER_ID: OpencodeProviderId = "opencode_go";
 
 export interface OpencodeProviderOptions {
   baseUrl: string;
+  // Distingue Zen de Go: misma forma de cable (OpenAI-compatible) pero distinto
+  // provider id (para arrendar la credencial correcta) y base URL. Default: zen.
+  providerId?: OpencodeProviderId;
   fetchImpl?: typeof fetch;
 }
 
@@ -85,10 +90,19 @@ interface OpenAIModelRow {
 // Estado de continuación específico de opencode: el historial OpenAI (incl. el mensaje
 // assistant con tool_calls) más las tools y opciones para reanudar /chat/completions.
 interface OpencodeContinuationState {
-  protocol: typeof OPENCODE_PROVIDER_ID;
+  protocol: OpencodeProviderId;
   messages: OpenAIMessage[];
   tools: OpenAITool[];
   options: GenerationOptions;
+}
+
+function isOpencodeContinuationState(state: unknown): state is OpencodeContinuationState {
+  const candidate = state as OpencodeContinuationState | null;
+  return Boolean(
+    candidate &&
+      (candidate.protocol === OPENCODE_PROVIDER_ID || candidate.protocol === OPENCODE_GO_PROVIDER_ID) &&
+      Array.isArray(candidate.messages)
+  );
 }
 
 /**
@@ -99,11 +113,14 @@ interface OpencodeContinuationState {
  * (provisional; se afina en B13 con la key real). Todo el HTTP se prueba mockeado.
  */
 export class OpencodeProviderAdapter implements ProviderAdapter {
-  readonly protocol = OPENCODE_PROVIDER_ID;
+  readonly protocol: OpencodeProviderId;
+  private readonly providerId: OpencodeProviderId;
   private readonly baseUrl: string;
   private readonly fetchImpl: typeof fetch;
 
   constructor(options: OpencodeProviderOptions) {
+    this.providerId = options.providerId ?? OPENCODE_PROVIDER_ID;
+    this.protocol = this.providerId;
     this.baseUrl = options.baseUrl.replace(/\/+$/, "");
     this.fetchImpl = options.fetchImpl ?? fetch;
   }
@@ -160,8 +177,8 @@ export class OpencodeProviderAdapter implements ProviderAdapter {
 
   async *resumeTurn(input: ProviderResumeInput): AsyncIterable<ProviderEvent> {
     input.signal.throwIfAborted();
-    const state = input.continuationState as OpencodeContinuationState | null;
-    if (!state || state.protocol !== OPENCODE_PROVIDER_ID || !Array.isArray(state.messages)) {
+    const state = input.continuationState;
+    if (!isOpencodeContinuationState(state)) {
       throw new GatewayError(
         "INVALID_CONTINUATION_STATE",
         "Missing or invalid opencode continuation state"
@@ -319,7 +336,7 @@ export class OpencodeProviderAdapter implements ProviderAdapter {
       };
 
       const continuationState: OpencodeContinuationState = {
-        protocol: OPENCODE_PROVIDER_ID,
+        protocol: this.providerId,
         messages: [...params.messages, assistantMessage],
         tools: params.tools,
         options: params.options
@@ -342,7 +359,12 @@ export class OpencodeProviderAdapter implements ProviderAdapter {
   }
 
   private toDescriptor(row: OpenAIModelRow): ModelDescriptor {
-    return createOpencodeModel({ baseUrl: this.baseUrl, modelId: row.id, row });
+    return createOpencodeModel({
+      baseUrl: this.baseUrl,
+      modelId: row.id,
+      row,
+      providerId: this.providerId
+    });
   }
 }
 
@@ -354,8 +376,10 @@ export function createOpencodeModel(input: {
   baseUrl: string;
   modelId: string;
   row?: OpenAIModelRow;
+  providerId?: OpencodeProviderId;
 }): ModelDescriptor {
   const row = input.row;
+  const providerId = input.providerId ?? OPENCODE_PROVIDER_ID;
   const baseUrl = input.baseUrl.replace(/\/+$/, "");
   const supportsTools = row?.supports_tools ?? true;
   const supportsReasoning = row?.supports_reasoning ?? false;
@@ -368,12 +392,12 @@ export function createOpencodeModel(input: {
   const maxOutput = row?.max_output_tokens ?? row?.max_tokens ?? null;
 
   return {
-    id: `${OPENCODE_PROVIDER_ID}/${input.modelId}`,
+    id: `${providerId}/${input.modelId}`,
     label: row?.name ?? input.modelId,
     route: {
-      providerId: OPENCODE_PROVIDER_ID,
+      providerId,
       providerModelId: input.modelId,
-      protocol: OPENCODE_PROVIDER_ID,
+      protocol: providerId,
       endpointBaseUrl: baseUrl
     },
     capabilities: {

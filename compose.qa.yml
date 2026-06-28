@@ -128,8 +128,15 @@ services:
       GATEWAY_AGENT_TICKET_SECRET: qa-agent-ticket-secret-shared-dummy
       GATEWAY_BACKEND_INTERNAL_URL: http://backend:8000
       GATEWAY_BACKEND_INTERNAL_SECRET: qa-internal-lease-secret-shared-dummy
-      # Base de opencode (provisional; no se usa sin credencial real, eso es B14b).
+      # Base de opencode zen (OpenAI-compatible). La key de prueba es de OpenCode Go
+      # (suscripcion), no de Zen: Zen la rechaza. El e2e usa el proveedor opencode_go.
       GATEWAY_OPENCODE_BASE_URL: https://opencode.ai/zen/v1
+      GATEWAY_OPENCODE_DEFAULT_MODEL: claude-haiku-4-5
+      # OpenCode Go habilitado: la MISMA key opencode arrendada se usa contra el endpoint
+      # Go con provider id opencode_go. qwen3.7-plus pertenece al bundle Go y soporta tools.
+      GATEWAY_OPENCODE_GO_ENABLED: "true"
+      GATEWAY_OPENCODE_GO_BASE_URL: https://opencode.ai/zen/go/v1
+      GATEWAY_OPENCODE_GO_DEFAULT_MODEL: qwen3.7-plus
     expose:
       - "8081"
     depends_on:

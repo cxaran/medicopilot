@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   OpencodeProviderAdapter,
   createOpencodeModel,
-  OPENCODE_PROVIDER_ID
+  OPENCODE_PROVIDER_ID,
+  OPENCODE_GO_PROVIDER_ID
 } from "../../src/providers/opencode/adapter.js";
 import { GatewayError } from "../../src/kernel/errors.js";
 import type { GenerationOptions } from "../../src/application/capabilities/capability-negotiator.js";
@@ -309,5 +310,59 @@ describe("OpencodeProviderAdapter.resumeTurn", () => {
         })
       )
     ).rejects.toBeInstanceOf(GatewayError);
+  });
+});
+
+describe("OpenCode Go (mismo adaptador, provider id distinto)", () => {
+  const GO_BASE_URL = "https://opencode.ai/zen/go/v1";
+
+  it("createOpencodeModel modela el id, route y protocol como opencode_go", () => {
+    const goModel = createOpencodeModel({
+      baseUrl: GO_BASE_URL,
+      modelId: "qwen3.7-plus",
+      providerId: OPENCODE_GO_PROVIDER_ID
+    });
+    expect(goModel.id).toBe(`${OPENCODE_GO_PROVIDER_ID}/qwen3.7-plus`);
+    expect(goModel.route.providerId).toBe(OPENCODE_GO_PROVIDER_ID);
+    expect(goModel.route.protocol).toBe(OPENCODE_GO_PROVIDER_ID);
+    expect(goModel.route.endpointBaseUrl).toBe(GO_BASE_URL);
+  });
+
+  it("el adaptador Go expone protocol opencode_go y enruta al base URL de Go con Bearer", async () => {
+    const calls: Captured[] = [];
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(input), init: init ?? {} });
+      return jsonResponse({ data: [] });
+    }) as unknown as typeof fetch;
+
+    const goAdapter = new OpencodeProviderAdapter({
+      baseUrl: GO_BASE_URL,
+      providerId: OPENCODE_GO_PROVIDER_ID,
+      fetchImpl
+    });
+
+    expect(goAdapter.protocol).toBe(OPENCODE_GO_PROVIDER_ID);
+    await goAdapter.verifyCredential(lease);
+    expect(calls[0]!.url).toBe(`${GO_BASE_URL}/models`);
+    const headers = calls[0]!.init.headers as Record<string, string>;
+    expect(headers.authorization).toBe(`Bearer ${SECRET}`);
+  });
+
+  it("discoverModels del adaptador Go prefija los ids con opencode_go", async () => {
+    const calls: Captured[] = [];
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(input), init: init ?? {} });
+      return jsonResponse({ data: [{ id: "minimax-m3" }] });
+    }) as unknown as typeof fetch;
+
+    const goAdapter = new OpencodeProviderAdapter({
+      baseUrl: GO_BASE_URL,
+      providerId: OPENCODE_GO_PROVIDER_ID,
+      fetchImpl
+    });
+
+    const models = await goAdapter.discoverModels(lease);
+    expect(models[0]!.id).toBe(`${OPENCODE_GO_PROVIDER_ID}/minimax-m3`);
+    expect(models[0]!.route.protocol).toBe(OPENCODE_GO_PROVIDER_ID);
   });
 });

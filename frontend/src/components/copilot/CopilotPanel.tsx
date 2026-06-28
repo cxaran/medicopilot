@@ -80,8 +80,6 @@ const STATUS_TONE: Record<ConnectionStatus, BadgeTone> = {
   unavailable: "danger",
 };
 
-const PROFILE_ID = "profile_clinical_assistant";
-
 export function CopilotPanel() {
   const [status, setStatus] = useState<ConnectionStatus>("idle");
   const [models, setModels] = useState<WireModel[]>([]);
@@ -265,7 +263,9 @@ export function CopilotPanel() {
     setTurn(turnRef.current);
 
     clientRef.current?.startTurn({
-      profileId: PROFILE_ID,
+      // El profileId es el id del modelo seleccionado (providerId/providerModelId); el
+      // gateway lo resuelve contra su catálogo para arrendar la credencial correcta.
+      profileId: selectedModel,
       messages: wireMessages,
       // Declara al modelo las tools que el navegador puede ejecutar.
       tools: toWireToolDefinitions(),

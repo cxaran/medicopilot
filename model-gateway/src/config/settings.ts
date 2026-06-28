@@ -26,6 +26,12 @@ export interface GatewaySettings {
   // en B13 con la key real.
   opencodeBaseUrl: string;
   opencodeDefaultModel: string;
+  // OpenCode Go: misma API OpenAI-compatible que Zen pero base URL y catalogo propios
+  // (suscripcion). Opt-in: solo se registra el proveedor opencode_go si está habilitado.
+  // Opcionales para no obligar a los tests a declararlos (default: deshabilitado).
+  opencodeGoEnabled?: boolean | undefined;
+  opencodeGoBaseUrl?: string | undefined;
+  opencodeGoDefaultModel?: string | undefined;
 }
 
 function numberFromEnv(name: string, fallback: number): number {
@@ -70,6 +76,14 @@ export function loadSettings(): GatewaySettings {
     backendInternalUrl: process.env.GATEWAY_BACKEND_INTERNAL_URL || undefined,
     backendInternalSecret: process.env.GATEWAY_BACKEND_INTERNAL_SECRET || undefined,
     opencodeBaseUrl: process.env.GATEWAY_OPENCODE_BASE_URL ?? "https://opencode.ai/zen/v1",
-    opencodeDefaultModel: process.env.GATEWAY_OPENCODE_DEFAULT_MODEL ?? "gpt-4o-mini"
+    // Modelo curado por defecto: debe existir en el catálogo REAL de opencode zen
+    // (su /models no expone "gpt-4o-mini"). claude-haiku-4-5 es real, rápido y con
+    // soporte de tools; se puede sobreescribir con GATEWAY_OPENCODE_DEFAULT_MODEL.
+    opencodeDefaultModel: process.env.GATEWAY_OPENCODE_DEFAULT_MODEL ?? "claude-haiku-4-5",
+    // OpenCode Go (suscripcion): la MISMA key opencode arrendada sirve, pero contra el
+    // endpoint Go y con provider id opencode_go. Modelo por defecto del bundle Go.
+    opencodeGoEnabled: process.env.GATEWAY_OPENCODE_GO_ENABLED === "true",
+    opencodeGoBaseUrl: process.env.GATEWAY_OPENCODE_GO_BASE_URL ?? "https://opencode.ai/zen/go/v1",
+    opencodeGoDefaultModel: process.env.GATEWAY_OPENCODE_GO_DEFAULT_MODEL ?? "qwen3.7-plus"
   };
 }
