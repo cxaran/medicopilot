@@ -43,6 +43,19 @@ export function initialTurnState(): TurnState {
  * reconexión) y cae a concatenar el `delta` si no hay snapshot. B7 NO ejecuta tools:
  * un tool_call.ready se registra como pendiente para mostrarlo (B8 lo ejecutará).
  */
+/**
+ * Falla LIMPIAMENTE un turno en vuelo cuando se cae la conexión con el copiloto: evita el spinner
+ * colgado. Sólo afecta a un turno activo (``running``/``waiting_for_tool``); cualquier otro estado
+ * (idle/completed/failed/cancelled) se devuelve intacto. No toca el expediente ni reenvía nada: la
+ * recuperación del canal NO recupera intenciones en vuelo (el médico re-inicia).
+ */
+export function failInFlightTurn(state: TurnState, message: string): TurnState {
+  if (state.status !== "running" && state.status !== "waiting_for_tool") {
+    return state;
+  }
+  return { ...state, status: "failed", error: { code: "CONNECTION_LOST", message } };
+}
+
 export function reduceTurnEvent(state: TurnState, event: ServerEvent): TurnState {
   switch (event.type) {
     case "turn.started":

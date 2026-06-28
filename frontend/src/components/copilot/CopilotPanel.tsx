@@ -13,10 +13,17 @@ import {
   type ConnectionStatus,
 } from "@/core/agent/agent-client";
 import {
+  failInFlightTurn,
   initialTurnState,
   reduceTurnEvent,
   type TurnState,
 } from "@/core/agent/turn-reducer";
+import {
+  initialReconnectState,
+  reduceReconnect,
+  type ReconnectEvent,
+  type ReconnectState,
+} from "@/core/agent/reconnect-machine";
 import type {
   GatewayProtocol,
   NormalizedReasoningEffort,
@@ -160,8 +167,43 @@ const STATUS_TONE: Record<ConnectionStatus, BadgeTone> = {
   unavailable: "danger",
 };
 
+// Aviso al fallar un turno en vuelo por caída de conexión: el médico re-inicia (nunca se reenvía).
+const CONNECTION_INTERRUPTED_NOTICE =
+  "Se interrumpió la conexión con el copiloto; el turno en curso se detuvo. Vuelve a enviar tu " +
+  "consulta cuando se restablezca la conexión.";
+// Cuánto se muestra el aviso transitorio "Reconectado" tras una reconexión exitosa.
+const RECONNECTED_NOTICE_MS = 5000;
+
+/**
+ * Etiqueta/tono visibles del estado de reconexión, derivados de la máquina pura (+ aviso
+ * transitorio "Reconectado"). Todo en español; visible pero no intrusivo.
+ */
+function reconnectBadge(
+  state: ReconnectState,
+  reconnected: boolean,
+): { label: string; tone: BadgeTone } {
+  switch (state.phase) {
+    case "connecting":
+      return { label: state.attempts > 0 ? "Reintentando…" : "Conectando…", tone: "info" };
+    case "connected":
+      return reconnected
+        ? { label: "Reconectado", tone: "ok" }
+        : { label: "Conectado", tone: "ok" };
+    case "reconnecting":
+      return { label: "Reintentando…", tone: "danger" };
+    case "failed":
+      return { label: "Sin conexión", tone: "danger" };
+    default:
+      return { label: "Inactivo", tone: "neutral" };
+  }
+}
+
 export function CopilotPanel() {
   const [status, setStatus] = useState<ConnectionStatus>("idle");
+  // Estado de la máquina de reconexión (resiliencia del WS). Se refleja en la UI; el ref es la
+  // fuente de verdad para los callbacks/temporizadores (closures con deps vacías).
+  const [reconnect, setReconnect] = useState<ReconnectState>(initialReconnectState);
+  const [reconnected, setReconnected] = useState(false);
   const [models, setModels] = useState<WireModel[]>([]);
   const [providers, setProviders] = useState<WireProviderStatus[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>("");
@@ -235,6 +277,12 @@ export function CopilotPanel() {
   const personaRef = useRef<PersonaFields | null>(null);
 
   const clientRef = useRef<AgentClient | null>(null);
+  // Reconexión: estado de la máquina (fuente de verdad para callbacks), temporizadores del
+  // backoff y del aviso "Reconectado", y un dispatch estable para el botón "Reconectar".
+  const reconnectRef = useRef<ReconnectState>(initialReconnectState());
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectDispatchRef = useRef<((event: ReconnectEvent) => void) | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const turnRef = useRef<TurnState>(initialTurnState());
   const idRef = useRef(0);
@@ -522,21 +570,101 @@ export function CopilotPanel() {
       applyTurnEvent(event);
     };
 
+    const gatewayUrl = getAgentGatewayUrl();
+
+    const clearReconnectTimer = (): void => {
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
+    };
+
+    // Falla LIMPIAMENTE el turno en vuelo al caerse la conexión (sin spinner colgado). No reenvía
+    // nada ni toca el expediente: la recuperación del canal NO recupera intenciones en vuelo.
+    const failInFlightOnDrop = (): void => {
+      const current = turnRef.current;
+      const failed = failInFlightTurn(current, CONNECTION_INTERRUPTED_NOTICE);
+      if (failed !== current) {
+        turnRef.current = failed;
+        setTurn(failed);
+        setMessages((prev) => [
+          ...prev,
+          { id: nextId(), role: "assistant", text: CONNECTION_INTERRUPTED_NOTICE, isError: true },
+        ]);
+      }
+    };
+
+    // Maneja la máquina de reconexión PURA y ejecuta sus efectos (conectar / programar backoff /
+    // aviso "Reconectado"). El WebSocket real lo gestiona el AgentClient; aquí sólo se orquesta.
+    const dispatchReconnect = (event: ReconnectEvent): void => {
+      const prev = reconnectRef.current;
+      const nextState = reduceReconnect(prev, event);
+      reconnectRef.current = nextState;
+      setReconnect(nextState);
+
+      if (nextState.phase === "connecting") {
+        // Intento inicial, reintento automático o manual: re-ejecuta el handshake completo.
+        clearReconnectTimer();
+        void clientRef.current?.connect();
+      } else if (nextState.phase === "reconnecting" && nextState.nextDelayMs != null) {
+        // Espera el backoff y reintenta (auto).
+        clearReconnectTimer();
+        reconnectTimerRef.current = setTimeout(() => {
+          dispatchReconnect({ type: "retry" });
+        }, nextState.nextDelayMs);
+      } else if (nextState.phase === "connected") {
+        clearReconnectTimer();
+        // Si veníamos de un ciclo de reconexión, muestra el aviso transitorio "Reconectado".
+        if (prev.attempts > 0) {
+          setReconnected(true);
+          if (reconnectedTimerRef.current) {
+            clearTimeout(reconnectedTimerRef.current);
+          }
+          reconnectedTimerRef.current = setTimeout(() => setReconnected(false), RECONNECTED_NOTICE_MS);
+        }
+      } else if (nextState.phase === "failed") {
+        clearReconnectTimer();
+      }
+    };
+    reconnectDispatchRef.current = dispatchReconnect;
+
     const client = new AgentClient({
-      gatewayUrl: getAgentGatewayUrl(),
+      gatewayUrl,
       onEvent,
       onStatusChange: (next) => {
         setStatus(next);
         if (next === "connected") {
+          dispatchReconnect({ type: "connected" });
           client.listModels();
           client.providerStatus();
+        } else if (next === "unavailable" && gatewayUrl) {
+          // Caída INESPERADA (un cierre intencional deja status "idle", no "unavailable"): falla el
+          // turno en vuelo y arranca el ciclo de reconexión. Sin gateway configurado no se reintenta.
+          failInFlightOnDrop();
+          dispatchReconnect({ type: "dropped" });
         }
       },
     });
     clientRef.current = client;
-    void client.connect();
 
-    return () => client.disconnect();
+    if (gatewayUrl) {
+      // Arranca el handshake a través de la máquina (connect_start -> connecting -> connect()).
+      dispatchReconnect({ type: "connect_start" });
+    } else {
+      // Sin gateway configurado: intento único; la UI legacy explica que no está disponible.
+      void client.connect();
+    }
+
+    return () => {
+      clearReconnectTimer();
+      if (reconnectedTimerRef.current) {
+        clearTimeout(reconnectedTimerRef.current);
+      }
+      // Cierre INTENCIONAL: marca la máquina como dispuesta (terminal) y cierra el socket. Ningún
+      // "unavailable" tardío disparará reconexión.
+      dispatchReconnect({ type: "dispose" });
+      client.disconnect();
+    };
   }, []);
 
   const isBusy = turn.status === "running" || turn.status === "waiting_for_tool";
@@ -774,6 +902,13 @@ export function CopilotPanel() {
     clientRef.current?.sendToolResult(pending.turnId, callId, outcome.result);
   };
 
+  // Con gateway configurado, el badge refleja la máquina de reconexión (más rico que el status
+  // de transporte); sin gateway, se conserva el badge legacy.
+  const gatewayConfigured = getAgentGatewayUrl() !== null;
+  const badge = gatewayConfigured
+    ? reconnectBadge(reconnect, reconnected)
+    : { label: STATUS_LABEL[status], tone: STATUS_TONE[status] };
+
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-5">
       <header className="flex flex-wrap items-center justify-between gap-3">
@@ -783,7 +918,7 @@ export function CopilotPanel() {
             Asistente de IA conectado al gateway de modelos.
           </p>
         </div>
-        <Badge tone={STATUS_TONE[status]}>{STATUS_LABEL[status]}</Badge>
+        <Badge tone={badge.tone}>{badge.label}</Badge>
       </header>
 
       <div
@@ -794,12 +929,40 @@ export function CopilotPanel() {
         El copiloto nunca diagnostica, receta ni guarda información final de forma autónoma.
       </div>
 
-      {status === "unavailable" && (
+      {/* Sin gateway configurado: aviso legacy (no se reintenta). */}
+      {!gatewayConfigured && status === "unavailable" && (
         <Card className="border-[var(--danger)]">
           <p className="text-sm text-[var(--tx)]">
             No se pudo conectar con el gateway de modelos. Puedes seguir usando el expediente con
             normalidad; el copiloto estará disponible cuando el gateway esté configurado.
           </p>
+        </Card>
+      )}
+
+      {/* Con gateway: aviso de reconexión en curso (no intrusivo). */}
+      {gatewayConfigured && reconnect.phase === "reconnecting" && (
+        <Card className="border-[var(--danger)]">
+          <p className="text-sm text-[var(--tx)]" role="status" aria-live="polite">
+            Conexión con el copiloto perdida. Reintentando…
+          </p>
+        </Card>
+      )}
+
+      {/* Con gateway: se agotaron los reintentos automáticos -> reintento MANUAL. */}
+      {gatewayConfigured && reconnect.phase === "failed" && (
+        <Card className="border-[var(--danger)]">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-[var(--tx)]" role="status" aria-live="polite">
+              No se pudo reconectar con el copiloto. Tu trabajo en el expediente sigue a salvo.
+            </p>
+            <button
+              type="button"
+              onClick={() => reconnectDispatchRef.current?.({ type: "manual_retry" })}
+              className="rounded-[10px] border border-[var(--border2)] bg-[var(--surface)] px-3 py-1.5 text-sm font-medium text-[var(--tx)] transition hover:bg-[var(--surface2)]"
+            >
+              Reconectar
+            </button>
+          </div>
         </Card>
       )}
 
