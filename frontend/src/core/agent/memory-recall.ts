@@ -78,6 +78,49 @@ export function selectRelevantMemories(
     .map((entry) => entry.memory);
 }
 
+/**
+ * Mezcla DETERMINISTA de recall cuando hay paciente activo (follow-up MP-CTRL-0076). Antes, con
+ * paciente activo, sólo se inyectaban SUS memorias y se perdían los hechos/preferencias
+ * GENERALES del médico (owner-level), que suelen ser relevantes ("siempre confirma alergias").
+ * Ahora: TRAMO 1 = memorias del paciente activo (máxima prioridad; consulta activa antes que el
+ * resto y, dentro, recencia); TRAMO 2 = se rellena el cupo restante con memorias OWNER-LEVEL (no
+ * ligadas a ningún paciente: ``patient_id`` null) por recencia. Respeta el cupo (no lo excede),
+ * DEDUPLICA por id (el set owner-level incluye también las del paciente, que ya van en el tramo
+ * 1) y NO incluye memorias de OTROS pacientes. Pura y determinista (sin red).
+ */
+export function blendRecallMemories(
+  patientMemories: readonly AgentMemoryRead[],
+  ownerMemories: readonly AgentMemoryRead[],
+  scope: RecallScope,
+): AgentMemoryRead[] {
+  const limit = Math.max(0, scope.limit ?? DEFAULT_RECALL_LIMIT);
+  const patientId = scope.patientId ?? null;
+  // Tramo 1: paciente activo, ordenado por afinidad (consulta) y recencia. Defensivo: nos
+  // quedamos sólo con las del paciente activo aunque el fetch ya venga acotado server-side.
+  const tier1 = selectRelevantMemories(patientMemories, { ...scope, limit: patientMemories.length }).filter(
+    (memory) => patientId !== null && memory.patient_id === patientId,
+  );
+  const seen = new Set(tier1.map((memory) => memory.id));
+  // Tramo 2: owner-level (sin paciente) por recencia, excluyendo lo ya incluido.
+  const tier2 = [...ownerMemories]
+    .filter((memory) => memory.patient_id == null && !seen.has(memory.id))
+    .sort((a, b) => (Date.parse(b.created_at) || 0) - (Date.parse(a.created_at) || 0));
+
+  const blended: AgentMemoryRead[] = [];
+  const used = new Set<string>();
+  for (const memory of [...tier1, ...tier2]) {
+    if (blended.length >= limit) {
+      break;
+    }
+    if (used.has(memory.id)) {
+      continue;
+    }
+    used.add(memory.id);
+    blended.push(memory);
+  }
+  return blended;
+}
+
 /** Quita delimitadores del contenido para que una memoria no pueda romper el bloque. */
 function sanitizeLine(value: string): string {
   return value
@@ -125,19 +168,31 @@ export function buildRecallMessage(memories: readonly AgentMemoryRead[]): WireMe
 }
 
 /**
- * Recupera y arma el bloque de recall acotado por ámbito. Recibe el fetcher de memorias por
- * inyección (el panel pasa ``listAgentMemories``) para mantener esta función pura y testeable:
- * cuando el ámbito trae paciente, el fetch se acota a ese paciente (server-side) y sólo sus
- * memorias se inyectan; sin paciente, el fetcher se llama SIN filtro (comportamiento actual,
- * owner-scoped por recencia). Devuelve el mensaje a inyectar (o null) y cuántas se eligieron.
+ * Recupera y arma el bloque de recall según el ámbito. Recibe el fetcher de memorias por
+ * inyección (el panel pasa ``listAgentMemories``) para mantener esta función pura y testeable.
+ *
+ *  - SIN paciente activo: un solo fetch owner-scoped y selección por recencia (sin cambios).
+ *  - CON paciente activo: se traen DOS sets —el del paciente (``?patient_id=``) y el owner-level
+ *    completo— y se MEZCLAN deterministamente (ver ``blendRecallMemories``): primero las del
+ *    paciente, luego se rellena el cupo con los hechos/preferencias generales del médico. Así no
+ *    se pierden las memorias generales relevantes al fijar un paciente.
+ *
+ * Devuelve el mensaje a inyectar (o null) y cuántas se eligieron.
  */
 export async function fetchRecall(
   listMemories: (patientId?: string) => Promise<readonly AgentMemoryRead[]>,
   scope: RecallScope = {},
 ): Promise<{ message: WireMessage | null; count: number }> {
-  const patientId = scope.patientId ?? undefined;
-  const memories = await listMemories(patientId);
-  const selected = selectRelevantMemories(memories, scope);
+  if (!scope.patientId) {
+    const memories = await listMemories();
+    const selected = selectRelevantMemories(memories, scope);
+    return { message: buildRecallMessage(selected), count: selected.length };
+  }
+  const [patientMemories, ownerMemories] = await Promise.all([
+    listMemories(scope.patientId),
+    listMemories(),
+  ]);
+  const selected = blendRecallMemories(patientMemories, ownerMemories, scope);
   return { message: buildRecallMessage(selected), count: selected.length };
 }
 

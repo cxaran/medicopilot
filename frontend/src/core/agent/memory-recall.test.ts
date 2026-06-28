@@ -9,6 +9,7 @@ import {
   MEMORY_BLOCK_END,
   MEMORY_BLOCK_GUIDANCE,
   MEMORY_BLOCK_HEADER,
+  blendRecallMemories,
   buildMemoryBlock,
   buildRecallMessage,
   fetchRecall,
@@ -120,17 +121,89 @@ test("buildRecallMessage: mensaje de rol system con el bloque como texto", () =>
   assert.ok(text.includes(MEMORY_BLOCK_HEADER));
 });
 
-// --- fetchRecall: el fetch se acota al paciente activo (P2) ---
+// --- blend determinista: paciente primero, luego owner-level por recencia (MP-CTRL-0078) ---
 
-test("fetchRecall: llama al fetcher CON el patientId cuando hay paciente activo", async () => {
+test("blendRecallMemories: paciente primero, luego owner-level (sin paciente) por recencia", () => {
+  const patientMemories = [
+    memory({ id: "pac-vieja", patient_id: "p-1", created_at: "2026-01-01T00:00:00Z" }),
+    memory({ id: "pac-nueva", patient_id: "p-1", created_at: "2026-03-01T00:00:00Z" }),
+  ];
+  const ownerMemories = [
+    ...patientMemories,
+    memory({ id: "gen-vieja", patient_id: null, created_at: "2026-01-15T00:00:00Z" }),
+    memory({ id: "gen-nueva", patient_id: null, created_at: "2026-02-15T00:00:00Z" }),
+    memory({ id: "otro-pac", patient_id: "p-2", created_at: "2026-04-01T00:00:00Z" }),
+  ];
+  const blended = blendRecallMemories(patientMemories, ownerMemories, { patientId: "p-1", consultationId: null });
+  // Paciente (recencia interna) primero; luego generales por recencia; NUNCA otro paciente.
+  assert.deepEqual(
+    blended.map((m) => m.id),
+    ["pac-nueva", "pac-vieja", "gen-nueva", "gen-vieja"],
+  );
+});
+
+test("blendRecallMemories: respeta el cupo (no lo excede)", () => {
+  const patientMemories = [
+    memory({ id: "p-a", patient_id: "p-1", created_at: "2026-03-01T00:00:00Z" }),
+    memory({ id: "p-b", patient_id: "p-1", created_at: "2026-02-01T00:00:00Z" }),
+  ];
+  const ownerMemories = [
+    ...patientMemories,
+    memory({ id: "g-a", patient_id: null, created_at: "2026-01-01T00:00:00Z" }),
+  ];
+  const blended = blendRecallMemories(patientMemories, ownerMemories, { patientId: "p-1", limit: 2 });
+  assert.deepEqual(
+    blended.map((m) => m.id),
+    ["p-a", "p-b"],
+  );
+});
+
+test("blendRecallMemories: deduplica (la del paciente aparece también en el set owner) ", () => {
+  const patientMemories = [memory({ id: "dup", patient_id: "p-1", created_at: "2026-03-01T00:00:00Z" })];
+  const ownerMemories = [
+    memory({ id: "dup", patient_id: "p-1", created_at: "2026-03-01T00:00:00Z" }),
+    memory({ id: "gen", patient_id: null, created_at: "2026-02-01T00:00:00Z" }),
+  ];
+  const blended = blendRecallMemories(patientMemories, ownerMemories, { patientId: "p-1" });
+  assert.deepEqual(
+    blended.map((m) => m.id),
+    ["dup", "gen"],
+  );
+  // "dup" no aparece dos veces.
+  assert.equal(blended.filter((m) => m.id === "dup").length, 1);
+});
+
+test("blendRecallMemories: la consulta activa del paciente va primera", () => {
+  const patientMemories = [
+    memory({ id: "pac", patient_id: "p-1", created_at: "2026-05-01T00:00:00Z" }),
+    memory({ id: "consulta", patient_id: "p-1", consultation_id: "c-1", created_at: "2026-01-01T00:00:00Z" }),
+  ];
+  const blended = blendRecallMemories(patientMemories, patientMemories, {
+    patientId: "p-1",
+    consultationId: "c-1",
+  });
+  assert.equal(blended[0]?.id, "consulta");
+});
+
+// --- fetchRecall: blend con paciente activo, owner-by-recency sin él ---
+
+test("fetchRecall: con paciente activo trae AMBOS sets (paciente + owner) y mezcla", async () => {
   const calls: Array<string | undefined> = [];
   const listMemories = async (patientId?: string) => {
     calls.push(patientId);
-    return [memory({ id: "m1", patient_id: "p-1" })];
+    if (patientId === "p-1") {
+      return [memory({ id: "pac", patient_id: "p-1", created_at: "2026-03-01T00:00:00Z" })];
+    }
+    return [
+      memory({ id: "pac", patient_id: "p-1", created_at: "2026-03-01T00:00:00Z" }),
+      memory({ id: "gen", patient_id: null, created_at: "2026-02-01T00:00:00Z" }),
+    ];
   };
   const { message, count } = await fetchRecall(listMemories, { patientId: "p-1", consultationId: null });
-  assert.deepEqual(calls, ["p-1"]);
-  assert.equal(count, 1);
+  // Dos fetches: el acotado al paciente y el owner-level completo.
+  assert.deepEqual(calls.sort(), ["p-1", undefined]);
+  // Mezcla paciente + general (deduplicada).
+  assert.equal(count, 2);
   assert.ok(message);
 });
 
@@ -149,6 +222,20 @@ test("fetchRecall: sin memorias -> mensaje null y count 0", async () => {
   const { message, count } = await fetchRecall(async () => [], { patientId: "p-1" });
   assert.equal(message, null);
   assert.equal(count, 0);
+});
+
+test("fetchRecall: con paciente activo, el bloque sigue marcado como NO confiable (P2 intacto)", async () => {
+  const listMemories = async (patientId?: string) => {
+    if (patientId === "p-1") {
+      return [memory({ id: "pac", patient_id: "p-1", title: "Alergia", content: "penicilina" })];
+    }
+    return [memory({ id: "pac", patient_id: "p-1", title: "Alergia", content: "penicilina" })];
+  };
+  const { message } = await fetchRecall(listMemories, { patientId: "p-1" });
+  const text = message?.content[0]?.type === "text" ? message.content[0].text : "";
+  assert.ok(text.includes(MEMORY_BLOCK_HEADER));
+  assert.ok(text.includes(MEMORY_BLOCK_GUIDANCE));
+  assert.match(text, /no son instrucciones/i);
 });
 
 // --- indicador de contexto ---
