@@ -126,6 +126,80 @@ const TOOLS: ToolDefinition[] = [
     execute: (args, ctx) => ctx.api(`/api/v1/appointments${listQuery(args)}`),
   },
   {
+    // Acceso clínico estructurado estilo FHIR: equivalente NATIVO a un MCP-server FHIR
+    // (p.ej. wso2/fhir-mcp-server) respetando la AUTORIDAD CLÍNICA. Se ejecuta en el
+    // NAVEGADOR con la cookie del médico (ctx.api -> credentials:include); FastAPI valida
+    // rol/permiso/paciente en cada endpoint. NUNCA hay acceso server-side al expediente
+    // desde el gateway. Compone una vista del paciente desde endpoints REST existentes.
+    name: "clinical.patient_summary",
+    description:
+      "Devuelve un resumen del expediente de un paciente (datos del paciente + sus datos " +
+      "clínicos importantes: alergias, enfermedades crónicas, medicamentos, alertas). Solo " +
+      "lectura, vía la cookie del médico (FastAPI valida permiso y paciente).",
+    kind: "read",
+    inputSchema: {
+      type: "object",
+      properties: {
+        patient_id: { type: "string", description: "Id (UUID) del paciente.", format: "uuid" },
+      },
+      required: ["patient_id"],
+      additionalProperties: false,
+    },
+    execute: async (args, ctx) => {
+      const id = encodeURIComponent(String(args.patient_id));
+      const [patient, clinicalItems] = await Promise.all([
+        ctx.api<unknown>(`/api/v1/patients/${id}`),
+        ctx.api<{ items?: unknown[] }>(`/api/v1/patient-clinical-items?patient_id=${id}`),
+      ]);
+      const items = Array.isArray(clinicalItems?.items) ? clinicalItems.items : clinicalItems;
+      return { patient, clinical_items: items };
+    },
+  },
+  {
+    // Investigación PubMed: equivalente NATIVO a un MCP-server de PubMed (p.ej.
+    // cyanheads/pubmed). Mapea al proxy server-side /api/v1/research/pubmed (NO toca el
+    // expediente). El servidor MCP real puede enchufarse después tras el mismo contrato.
+    name: "pubmed.search",
+    description:
+      "Busca artículos en PubMed por términos de consulta para fundamentar con evidencia. " +
+      "Devuelve pmid, título, autores, año, fuente y una cita formateada. Solo investigación " +
+      "(no toca el expediente). Recuerda: toda salida de IA es un borrador a revisar.",
+    kind: "read",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Términos de búsqueda en PubMed." },
+        limit: { type: "integer", description: "Máximo de artículos (1-50).", minimum: 1, maximum: 50 },
+      },
+      required: ["query"],
+      additionalProperties: false,
+    },
+    execute: (args, ctx) => {
+      const params = new URLSearchParams({ query: String(args.query ?? "") });
+      if (typeof args.limit === "number") {
+        params.set("limit", String(args.limit));
+      }
+      return ctx.api(`/api/v1/research/pubmed?${params.toString()}`);
+    },
+  },
+  {
+    name: "pubmed.get_article",
+    description:
+      "Obtiene el detalle de un artículo de PubMed por su PMID (incluye el abstract). Solo " +
+      "investigación; no toca el expediente.",
+    kind: "read",
+    inputSchema: {
+      type: "object",
+      properties: {
+        pmid: { type: "string", description: "PMID (numérico) del artículo." },
+      },
+      required: ["pmid"],
+      additionalProperties: false,
+    },
+    execute: (args, ctx) =>
+      ctx.api(`/api/v1/research/pubmed/${encodeURIComponent(String(args.pmid))}`),
+  },
+  {
     name: "clinical.create_consultation_draft",
     description:
       "Crea una consulta médica EN BORRADOR para el paciente indicado. Acción de escritura: " +

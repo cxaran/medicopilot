@@ -29,10 +29,11 @@
     "test:agent-tools": "node --no-warnings --import ./scripts/test-register.mjs --test src/core/agent/tools/tool-runner.test.ts",
     "test:agent-sandbox": "node --no-warnings --import ./scripts/test-register.mjs --test src/core/agent/tools/sandbox.test.ts",
     "test:agent-ui": "node --no-warnings --import ./scripts/test-register.mjs --test src/core/agent/tools/ui-spec.test.ts",
+    "test:agent-research": "node --no-warnings --import ./scripts/test-register.mjs --test src/core/agent/tools/research-clinical-tools.test.ts",
     "test:ai-providers-client": "node --no-warnings --import ./scripts/test-register.mjs --test src/core/ai-providers/ai-providers-client.test.ts",
     "test:ai-providers-view": "node --no-warnings --import ./scripts/test-register.mjs --test src/core/ai-providers/ai-providers-view.test.ts",
     "test:e2e:bootstrap": "node scripts/run-e2e-bootstrap.mjs",
-    "check:canonical": "npm run check:api && npm run lint && npm run typecheck && npm run test:bootstrap && npm run test:actions && npm run test:public-auth && npm run test:filters && npm run test:forms && npm run test:api-error && npm run test:list-query && npm run test:request && npm run test:action-client && npm run test:public-auth-client && npm run test:bootstrap-client && npm run test:account-client && npm run test:mutation-client && npm run test:agent-client && npm run test:agent-tools && npm run test:agent-sandbox && npm run test:agent-ui && npm run test:ai-providers-client && npm run test:ai-providers-view && npm run build",
+    "check:canonical": "npm run check:api && npm run lint && npm run typecheck && npm run test:bootstrap && npm run test:actions && npm run test:public-auth && npm run test:filters && npm run test:forms && npm run test:api-error && npm run test:list-query && npm run test:request && npm run test:action-client && npm run test:public-auth-client && npm run test:bootstrap-client && npm run test:account-client && npm run test:mutation-client && npm run test:agent-client && npm run test:agent-tools && npm run test:agent-sandbox && npm run test:agent-ui && npm run test:agent-research && npm run test:ai-providers-client && npm run test:ai-providers-view && npm run build",
     "generate:api": "node scripts/generate-openapi.mjs",
     "check:api": "node scripts/generate-openapi.mjs --check"
   },

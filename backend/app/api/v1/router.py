@@ -29,6 +29,7 @@ from backend.app.api.v1.patients import router as patients_router
 from backend.app.api.v1.permissions import router as permissions_router
 from backend.app.api.v1.prescription_items import router as prescription_items_router
 from backend.app.api.v1.prescriptions import router as prescriptions_router
+from backend.app.api.v1.research import router as research_router
 from backend.app.api.v1.resources import router as resources_router
 from backend.app.api.v1.roles import router as roles_router
 from backend.app.api.v1.users import router as users_router
@@ -56,6 +57,7 @@ router.include_router(patients_router)
 router.include_router(permissions_router)
 router.include_router(prescription_items_router)
 router.include_router(prescriptions_router)
+router.include_router(research_router)
 router.include_router(resources_router)
 router.include_router(roles_router)
 router.include_router(users_router)

@@ -152,6 +152,13 @@ class Settings(BaseSettings):
     # proactiva en el arriendo, de modo que el Gateway nunca reciba un token al límite.
     openai_oauth_refresh_skew_seconds: int = 60
 
+    # Investigación PubMed (B13): proxy server-side a las E-utilities de NCBI. NO toca el
+    # expediente clínico. La API key de NCBI es opcional (sube el límite de tasa); es
+    # sensible y nunca se loguea. base_url y timeout configurables por ambiente.
+    ncbi_base_url: str = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
+    ncbi_api_key: SecretStr | None = None
+    ncbi_timeout_seconds: float = 10.0
+
     @model_validator(mode="after")
     def _validate_agent_gateway_ticket_ttl(self) -> Self:
         if not (60 <= self.agent_gateway_ticket_ttl_seconds <= 120):

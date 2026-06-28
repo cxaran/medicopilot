@@ -1043,6 +1043,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/research/pubmed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Search Pubmed */
+        get: operations["search_pubmed_api_v1_research_pubmed_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/research/pubmed/{pmid}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Pubmed Article */
+        get: operations["get_pubmed_article_api_v1_research_pubmed__pmid__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/resources": {
         parameters: {
             query?: never;
@@ -3672,6 +3706,47 @@ export interface components {
         PrescriptionVoid: {
             /** Motivo de anulación */
             void_reason: string;
+        };
+        /**
+         * PubMedArticle
+         * @description Artículo de PubMed normalizado desde las E-utilities de NCBI.
+         *
+         *     Es material de INVESTIGACIÓN/evidencia, no datos del expediente. El ``abstract``
+         *     puede venir vacío en los listados (solo se trae en el detalle por ``efetch``).
+         */
+        PubMedArticle: {
+            /** Pmid */
+            pmid: string;
+            /** Title */
+            title: string;
+            /**
+             * Authors
+             * @default []
+             */
+            authors: string[];
+            /** Year */
+            year?: string | null;
+            /** Source */
+            source?: string | null;
+            /** Abstract */
+            abstract?: string | null;
+            /** Citation */
+            citation: string;
+        };
+        /**
+         * PubMedSearchResponse
+         * @description Resultado de búsqueda en PubMed: la consulta, el conteo y los artículos.
+         */
+        PubMedSearchResponse: {
+            /** Query */
+            query: string;
+            /** Count */
+            count: number;
+            /**
+             * Articles
+             * @default []
+             */
+            articles: components["schemas"]["PubMedArticle"][];
         };
         /** ReadinessRead */
         ReadinessRead: {
@@ -7797,6 +7872,75 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PrescriptionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    search_pubmed_api_v1_research_pubmed_get: {
+        parameters: {
+            query: {
+                /** @description Términos de búsqueda. */
+                query: string;
+                /** @description Máximo de artículos (1-50). */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PubMedSearchResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_pubmed_article_api_v1_research_pubmed__pmid__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pmid: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PubMedArticle"];
                 };
             };
             /** @description Validation Error */
