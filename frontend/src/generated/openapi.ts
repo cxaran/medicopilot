@@ -1064,6 +1064,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/population/cohort": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Query Cohort */
+        post: operations["query_cohort_api_v1_population_cohort_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/prescription-items": {
         parameters: {
             query?: never;
@@ -1579,6 +1596,18 @@ export interface components {
          */
         ActiveInactiveStatus: "active" | "inactive";
         /**
+         * AgeRangeCriterion
+         * @description Rango de edad (años cumplidos) calculado desde la fecha de nacimiento.
+         *
+         *     Requiere al menos uno de ``min_age``/``max_age``. Ambos límites son inclusivos.
+         */
+        AgeRangeCriterion: {
+            /** Min Age */
+            min_age?: number | null;
+            /** Max Age */
+            max_age?: number | null;
+        };
+        /**
          * AgentMemoryCreate
          * @description Alta de una memoria del agente del usuario autenticado.
          *
@@ -1861,6 +1890,19 @@ export interface components {
          * @description Cuerpo del marcado de inasistencia: vacío por diseño.
          */
         AppointmentNoShow: Record<string, never>;
+        /**
+         * AppointmentNoShowCriterion
+         * @description Tuvo una cita marcada como inasistencia (``no_show``).
+         *
+         *     La ventana de fechas, opcional, se aplica sobre ``scheduled_at`` de forma
+         *     inclusiva.
+         */
+        AppointmentNoShowCriterion: {
+            /** Date From */
+            date_from?: string | null;
+            /** Date To */
+            date_to?: string | null;
+        };
         /**
          * AppointmentRead
          * @description Representación completa de una cita médica.
@@ -2538,6 +2580,62 @@ export interface components {
             status?: components["schemas"]["ClinicalTaskStatus"] | null;
         };
         /**
+         * CohortCriteria
+         * @description Criterios componibles (AND) de la consulta de cohorte.
+         *
+         *     Sin criterios, la cohorte abarca a todos los pacientes vigentes (no eliminados).
+         *     ``limit``/``offset`` paginan únicamente la muestra; ``count`` siempre es el total.
+         */
+        CohortCriteria: {
+            has_diagnosis?: components["schemas"]["HasDiagnosisCriterion"] | null;
+            lab_abnormal?: components["schemas"]["LabAbnormalCriterion"] | null;
+            vital_threshold?: components["schemas"]["VitalThresholdCriterion"] | null;
+            pregnancy_status?: components["schemas"]["PregnancyStatus"] | null;
+            age_range?: components["schemas"]["AgeRangeCriterion"] | null;
+            appointment_no_show?: components["schemas"]["AppointmentNoShowCriterion"] | null;
+            /**
+             * Limit
+             * @description Tamaño de la muestra.
+             * @default 20
+             */
+            limit: number;
+            /**
+             * Offset
+             * @description Desplazamiento de la muestra.
+             * @default 0
+             */
+            offset: number;
+        };
+        /**
+         * CohortPatient
+         * @description Paciente de la muestra: mínimo identificable, sin PHI adicional.
+         */
+        CohortPatient: {
+            /**
+             * Patient Id
+             * Format: uuid
+             */
+            patient_id: string;
+            /** Full Name */
+            full_name: string;
+        };
+        /**
+         * CohortResult
+         * @description Resultado agregado: conteo total más una muestra paginada para revisión médica.
+         */
+        CohortResult: {
+            /** Count */
+            count: number;
+            /** Sample */
+            sample: components["schemas"]["CohortPatient"][];
+        };
+        /**
+         * Comparator
+         * @description Comparador numérico para un umbral de signo vital.
+         * @enum {string}
+         */
+        Comparator: "gte" | "lte" | "gt" | "lt" | "eq";
+        /**
          * ConnectionTicketRead
          * @description Ticket de conexión al Agent Gateway emitido a un usuario con sesión válida.
          *
@@ -3143,6 +3241,20 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /**
+         * HasDiagnosisCriterion
+         * @description Coincidencia por código o por texto sobre los diagnósticos de consulta.
+         *
+         *     Requiere al menos uno de los dos. Si se indican ambos, se exigen ambos (AND).
+         *     El código se compara de forma exacta sin distinguir mayúsculas; el texto se
+         *     compara como subcadena (ILIKE).
+         */
+        HasDiagnosisCriterion: {
+            /** Code */
+            code?: string | null;
+            /** Text */
+            text?: string | null;
+        };
         /** HealthRead */
         HealthRead: {
             /**
@@ -3170,6 +3282,21 @@ export interface components {
             /** Placeholder */
             placeholder: string;
             type: components["schemas"]["FieldValueType"];
+        };
+        /**
+         * LabAbnormalCriterion
+         * @description Resultado de laboratorio anormal (low/high/critical) para un analito.
+         *
+         *     El analito se compara contra el nombre (subcadena) o el código (exacto). La
+         *     ventana de fechas, opcional, se aplica sobre ``measured_at`` de forma inclusiva.
+         */
+        LabAbnormalCriterion: {
+            /** Analyte */
+            analyte: string;
+            /** Date From */
+            date_from?: string | null;
+            /** Date To */
+            date_to?: string | null;
         };
         /**
          * LabResultAbnormalFlag
@@ -5289,6 +5416,12 @@ export interface components {
             ctx?: Record<string, never>;
         };
         /**
+         * VitalMetric
+         * @description Signo vital comparable en un criterio de umbral (columna de ``vital_signs``).
+         * @enum {string}
+         */
+        VitalMetric: "systolic_bp" | "diastolic_bp" | "heart_rate_bpm" | "respiratory_rate_rpm" | "oxygen_saturation" | "temperature_c" | "weight_kg" | "height_cm" | "capillary_glucose" | "pain_scale";
+        /**
          * VitalSignCreate
          * @description Registro de una medición de signos vitales en una consulta.
          *
@@ -5461,6 +5594,16 @@ export interface components {
             pain_scale?: number | null;
             /** Observaciones */
             observations?: string | null;
+        };
+        /**
+         * VitalThresholdCriterion
+         * @description Umbral sobre un signo vital: métrica, comparador y valor de referencia.
+         */
+        VitalThresholdCriterion: {
+            vital: components["schemas"]["VitalMetric"];
+            comparator: components["schemas"]["Comparator"];
+            /** Value */
+            value: number;
         };
         /**
          * WidgetType
@@ -8960,6 +9103,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PermissionGroupRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    query_cohort_api_v1_population_cohort_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CohortCriteria"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CohortResult"];
                 };
             };
             /** @description Validation Error */

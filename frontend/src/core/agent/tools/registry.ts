@@ -197,6 +197,32 @@ function clinicalListQuery(
   return qs ? `?${qs}` : "";
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+// Arma el body de la cohorte tomando SOLO los criterios reconocidos (los criterios anidados se
+// pasan tal cual; el backend valida cada uno con 422 si están mal formados). Evita reenviar
+// claves arbitrarias que el modelo pudiera inventar.
+function buildCohortBody(args: Record<string, unknown>): Record<string, unknown> {
+  const body: Record<string, unknown> = {};
+  for (const key of ["has_diagnosis", "lab_abnormal", "vital_threshold", "age_range", "appointment_no_show"]) {
+    if (isPlainObject(args[key])) {
+      body[key] = args[key];
+    }
+  }
+  if (typeof args.pregnancy_status === "string" && args.pregnancy_status !== "") {
+    body.pregnancy_status = args.pregnancy_status;
+  }
+  if (typeof args.limit === "number") {
+    body.limit = args.limit;
+  }
+  if (typeof args.offset === "number") {
+    body.offset = args.offset;
+  }
+  return body;
+}
+
 // Todas las tools mapean a la API REST EXISTENTE de FastAPI usando la cookie del médico.
 // FastAPI valida cookie+rol+permiso+paciente en cada llamada; el gateway nunca toca el
 // expediente. Las de escritura crean BORRADORES y van siempre gated por confirmación.
@@ -629,6 +655,97 @@ const TOOLS: ToolDefinition[] = [
           dateField: "due_at",
         })}`,
       ),
+  },
+  {
+    // Cohorte/población (G5 fase 1): CONTEO agregado + muestra de pacientes que cumplen
+    // criterios estructurados combinados con AND. Es un POST con criterios anidados (por eso
+    // inputSchema permisivo + wireSchema rico). Solo lectura; FastAPI exige population:read y
+    // nunca incluye pacientes eliminados. El resultado es un CONTEO para revisión del médico,
+    // NO una lista para contactar pacientes ni una acción que se ejecute automáticamente.
+    name: "clinical.query_cohort",
+    description:
+      "Cuenta cuántos pacientes cumplen criterios clínicos combinados (AND) y devuelve " +
+      "{ count, sample } (muestra mínima: patient_id + full_name) para revisión del médico. " +
+      "Criterios: has_diagnosis (code o text), lab_abnormal (analyte + ventana de fechas), " +
+      "vital_threshold (vital + comparator + value), pregnancy_status, age_range (min_age/" +
+      "max_age) y appointment_no_show (ventana de fechas). Útil para '¿cuántos de mis " +
+      "pacientes con X?'. Es un CONTEO para revisión, no una lista para contactar ni una " +
+      "acción automática. Solo lectura.",
+    kind: "read",
+    inputSchema: PASSTHROUGH_SCHEMA,
+    wireSchema: {
+      type: "object",
+      properties: {
+        has_diagnosis: {
+          type: "object",
+          description: "Coincidencia por código o texto sobre diagnósticos de consulta. Indique al menos uno.",
+          properties: {
+            code: { type: "string", description: "Código exacto (sin distinguir mayúsculas)." },
+            text: { type: "string", description: "Subcadena del texto del diagnóstico." },
+          },
+        },
+        lab_abnormal: {
+          type: "object",
+          description: "Resultado de laboratorio anormal (low/high/critical) para un analito.",
+          properties: {
+            analyte: { type: "string", description: "Nombre o código del analito." },
+            date_from: { type: "string", description: "Inicio de la ventana (YYYY-MM-DD), inclusivo." },
+            date_to: { type: "string", description: "Fin de la ventana (YYYY-MM-DD), inclusivo." },
+          },
+          required: ["analyte"],
+        },
+        vital_threshold: {
+          type: "object",
+          description: "Umbral sobre un signo vital.",
+          properties: {
+            vital: {
+              type: "string",
+              enum: [
+                "systolic_bp",
+                "diastolic_bp",
+                "heart_rate_bpm",
+                "respiratory_rate_rpm",
+                "oxygen_saturation",
+                "temperature_c",
+                "weight_kg",
+                "height_cm",
+                "capillary_glucose",
+                "pain_scale",
+              ],
+            },
+            comparator: { type: "string", enum: ["gte", "lte", "gt", "lt", "eq"] },
+            value: { type: "number" },
+          },
+          required: ["vital", "comparator", "value"],
+        },
+        pregnancy_status: {
+          type: "string",
+          description: "Estado de embarazo/lactancia del paciente.",
+          enum: ["none", "pregnant", "postpartum", "lactating"],
+        },
+        age_range: {
+          type: "object",
+          description: "Rango de edad en años cumplidos. Indique min_age y/o max_age (inclusivos).",
+          properties: {
+            min_age: { type: "integer", minimum: 0, maximum: 150 },
+            max_age: { type: "integer", minimum: 0, maximum: 150 },
+          },
+        },
+        appointment_no_show: {
+          type: "object",
+          description: "Tuvo una cita con inasistencia (no_show) en una ventana opcional de fechas.",
+          properties: {
+            date_from: { type: "string", description: "Inicio de la ventana (YYYY-MM-DD), inclusivo." },
+            date_to: { type: "string", description: "Fin de la ventana (YYYY-MM-DD), inclusivo." },
+          },
+        },
+        limit: { type: "integer", description: "Tamaño de la muestra (1-100).", minimum: 1, maximum: 100 },
+        offset: { type: "integer", description: "Desplazamiento de la muestra.", minimum: 0 },
+      },
+      required: [],
+    },
+    execute: (args, ctx) =>
+      ctx.api(`/api/v1/population/cohort`, { method: "POST", body: buildCohortBody(args) }),
   },
   {
     // Acceso clínico estructurado estilo FHIR: equivalente NATIVO a un MCP-server FHIR

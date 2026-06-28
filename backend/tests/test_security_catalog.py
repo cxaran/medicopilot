@@ -59,6 +59,9 @@ from backend.app.security.groups.patient_clinical_items import (  # noqa: E402
 )
 from backend.app.security.groups.patients import PatientPermissions  # noqa: E402
 from backend.app.security.groups.permissions import PermissionPermissions  # noqa: E402
+from backend.app.security.groups.population import (  # noqa: E402
+    PopulationPermissions,
+)
 from backend.app.security.groups.prescriptions import (  # noqa: E402
     PrescriptionPermissions,
 )
@@ -93,6 +96,7 @@ class SecurityCatalogTest(unittest.TestCase):
                 PrescriptionPermissions,
                 AppointmentPermissions,
                 ClinicalDocumentPermissions,
+                PopulationPermissions,
                 PermissionPermissions,
             ],
         )
@@ -181,6 +185,7 @@ class SecurityCatalogTest(unittest.TestCase):
                 "clinical_documents:restore",
                 "clinical_documents:delete",
                 "clinical_documents:download",
+                "population:read",
                 "permissions:read",
             ],
         )
