@@ -31,7 +31,7 @@ export function AccountMenu() {
     <div className="flex items-center gap-3">
       <Link
         href="/account"
-        className="text-sm font-medium text-slate-700 underline-offset-2 hover:text-slate-900 hover:underline"
+        className="text-sm font-medium text-[var(--tx2)] underline-offset-2 hover:text-[var(--tx)] hover:underline"
       >
         Mi cuenta
       </Link>
@@ -39,7 +39,7 @@ export function AccountMenu() {
         type="button"
         onClick={onLogout}
         disabled={pending}
-        className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+        className="rounded-[10px] border border-[var(--border)] px-3 py-1.5 text-sm font-medium text-[var(--tx2)] transition hover:bg-[var(--panel2)] hover:text-[var(--tx)] disabled:cursor-not-allowed disabled:opacity-60"
       >
         {pending ? "Cerrando..." : "Cerrar sesión"}
       </button>

@@ -16,9 +16,16 @@ export const metadata: Metadata = {
   description: "Shell base reutilizable para productos MedicoPilot",
 };
 
+// Aplica el tema persistido (localStorage "mp-theme") antes del primer paint para
+// evitar parpadeo claro->oscuro. El default SSR sigue siendo light (R1).
+const themeInitScript = `(function(){try{var t=localStorage.getItem("mp-theme");if(t==="dark"||t==="light"){document.documentElement.setAttribute("data-theme",t);}}catch(e){}})();`;
+
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="es" data-theme="light" className={geist.variable}>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+      </head>
       <body>{children}</body>
     </html>
   );
