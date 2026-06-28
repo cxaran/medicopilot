@@ -75,6 +75,8 @@ export function ResourceFormFields({
                   name={field.name}
                   defaultChecked={Boolean(initialValues[field.name])}
                   className="h-4 w-4 rounded border-slate-300 text-slate-950"
+                  aria-required={field.required || undefined}
+                  aria-invalid={errors.length > 0 || undefined}
                   aria-describedby={errorId}
                 />
                 {field.label}
@@ -105,6 +107,8 @@ export function ResourceFormFields({
                 name={field.name}
                 required={field.required}
                 defaultValue={initialValue}
+                aria-required={field.required || undefined}
+                aria-invalid={errors.length > 0 || undefined}
                 aria-describedby={errorId}
                 className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-slate-500 focus:outline-none"
               >
@@ -139,6 +143,8 @@ export function ResourceFormFields({
                 name={field.name}
                 required={field.required}
                 defaultValue={initialText(field)}
+                aria-required={field.required || undefined}
+                aria-invalid={errors.length > 0 || undefined}
                 aria-describedby={errorId}
                 className="mt-1 min-h-28 w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-slate-500 focus:outline-none"
               />
@@ -151,6 +157,8 @@ export function ResourceFormFields({
                 defaultValue={initialText(field)}
                 // ``step="any"`` permite decimales (p. ej. peso/temperatura) en campos numéricos.
                 step={field.widget === "number" ? "any" : undefined}
+                aria-required={field.required || undefined}
+                aria-invalid={errors.length > 0 || undefined}
                 aria-describedby={errorId}
                 className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-slate-500 focus:outline-none"
               />

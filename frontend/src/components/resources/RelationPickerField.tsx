@@ -172,6 +172,8 @@ export function RelationPickerField({
             value={manualValue}
             onChange={(event) => setManualValue(event.target.value)}
             placeholder="Pega el identificador (UUID)"
+            aria-required={field.required || undefined}
+            aria-invalid={errors.length > 0 || undefined}
             aria-describedby={errorId}
             className={inputClass}
           />

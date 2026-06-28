@@ -34,6 +34,12 @@ import type {
   WireProviderStatus,
 } from "@/core/agent/protocol";
 import { turnFailureMessage } from "@/core/agent/turn-error";
+import {
+  APPROVAL_APPROVE_LABEL,
+  APPROVAL_REJECT_LABEL,
+  COPILOT_TRANSCRIPT_LABEL,
+  approvalRegionProps,
+} from "@/components/copilot/a11y";
 import { executeTool, resolveToolCall } from "@/core/agent/tools/tool-runner";
 import {
   listTools,
@@ -918,7 +924,11 @@ export function CopilotPanel() {
             Asistente de IA conectado al gateway de modelos.
           </p>
         </div>
-        <Badge tone={badge.tone}>{badge.label}</Badge>
+        {/* role=status + aria-live: anuncia con cortesía los cambios de conexión
+            (Conectado/Reintentando…/Reconectado/Sin conexión) sin robar el foco. */}
+        <Badge tone={badge.tone} role="status" aria-live="polite">
+          {badge.label}
+        </Badge>
       </header>
 
       <div
@@ -1064,7 +1074,7 @@ export function CopilotPanel() {
       <ToolCatalogPanel entries={toolCatalog} />
 
       <Card className="flex min-h-[280px] flex-col gap-3">
-        <div className="flex-1 space-y-3" aria-live="polite">
+        <div className="flex-1 space-y-3" role="log" aria-label={COPILOT_TRANSCRIPT_LABEL} aria-live="polite">
           {messages.length === 0 && !isBusy && (
             <p className="text-sm text-[var(--tx2)]">
               Escribe un mensaje para empezar. El asistente responderá en borrador.
@@ -1384,8 +1394,24 @@ function ToolCallCard({
       ? call.resultContent
       : null;
 
+  // Cuando la tarjeta pasa a requerir aprobación, se le mueve el FOCO para que un usuario de
+  // teclado/lector la note y pueda actuar. Es una región agrupada y etiquetada (no un diálogo
+  // modal: no atrapa el foco, conserva el comportamiento inline existente).
+  const awaitingApproval = call.status === "awaiting_approval";
+  const cardRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (awaitingApproval) {
+      cardRef.current?.focus();
+    }
+  }, [awaitingApproval]);
+  const regionProps = awaitingApproval ? approvalRegionProps(call.plan) : {};
+
   return (
-    <div className="rounded-[12px] border border-[var(--border2)] bg-[var(--bg2)] px-3.5 py-2.5">
+    <div
+      ref={cardRef}
+      {...regionProps}
+      className="rounded-[12px] border border-[var(--border2)] bg-[var(--bg2)] px-3.5 py-2.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+    >
       <div className="flex flex-wrap items-center gap-2">
         <Badge tone={call.kind === "write" ? "warn" : "accent"}>
           {call.kind === "write" ? "Escritura" : "Lectura"}
@@ -1426,12 +1452,13 @@ function ToolCallCard({
             anterior. Revisa el resumen y los datos antes de aprobar.
           </p>
           <div className="flex gap-2">
-            <Button type="button" onClick={onApprove} className="shrink-0">
+            <Button type="button" onClick={onApprove} className="shrink-0" aria-label={APPROVAL_APPROVE_LABEL}>
               Aprobar
             </Button>
             <button
               type="button"
               onClick={onReject}
+              aria-label={APPROVAL_REJECT_LABEL}
               className="shrink-0 rounded-[11px] border border-[var(--border2)] px-[18px] py-2.5 text-sm font-semibold text-[var(--tx)] transition hover:bg-[var(--panel2)]"
             >
               Rechazar
