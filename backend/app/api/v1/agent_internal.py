@@ -9,17 +9,25 @@ El secreto descifrado y el secreto interno NUNCA se loguean.
 
 import secrets as secrets_lib
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Header, Request, status
 from sqlmodel import select
 
 from backend.app.agent.crypto import decrypt_secret
+from backend.app.agent.oauth import (
+    OAuthError,
+    decode_oauth_profile,
+    encode_oauth_profile,
+    ensure_fresh_access_token,
+    profile_expires_at,
+)
 from backend.app.api.resource_actions import api_error
 from backend.app.core.database import SessionDep
 from backend.app.core.settings import settings
 from backend.app.models.ai_provider_credential import AiProviderCredential
 from backend.app.models.audit_event import AuditEvent
+from backend.app.models.enums import AiCredentialType
 from backend.app.schemas.agent import CredentialLeaseRequest, CredentialLeaseResponse
 from backend.app.security.rate_limit import limit_internal_lease
 from backend.app.utils.utc_now import utc_now
@@ -69,9 +77,38 @@ def lease_credential(
             "No hay credencial activa para ese usuario y proveedor.",
         )
 
-    secret = decrypt_secret(credential.secret_encrypted)
     lease_id = uuid.uuid4()
-    expires_at = utc_now() + timedelta(seconds=settings.agent_gateway_lease_ttl_seconds)
+    ttl_expires_at = utc_now() + timedelta(seconds=settings.agent_gateway_lease_ttl_seconds)
+
+    if credential.credential_type == AiCredentialType.OAUTH:
+        # Credencial OAuth (ChatGPT Plus/Codex): el "secreto" arrendado es el ACCESS
+        # token vigente; se refresca si venció o está por vencer y se reguarda cifrado.
+        try:
+            profile = decode_oauth_profile(credential.secret_encrypted)
+            fresh_profile, refreshed = ensure_fresh_access_token(profile)
+        except OAuthError as exc:
+            api_error(status.HTTP_502_BAD_GATEWAY, exc.code, exc.message)
+        if refreshed:
+            credential.secret_encrypted = encode_oauth_profile(fresh_profile)
+            credential.updated_at = utc_now()
+        access = fresh_profile.get("access")
+        if not isinstance(access, str) or not access:
+            api_error(
+                status.HTTP_502_BAD_GATEWAY,
+                "oauth_no_access_token",
+                "La conexión OAuth no tiene un access token disponible.",
+            )
+        secret = access
+        # El arriendo no debe sobrevivir al access token: se toma el menor vencimiento.
+        token_expires_at = profile_expires_at(fresh_profile)
+        expires_at = (
+            min(ttl_expires_at, token_expires_at)
+            if isinstance(token_expires_at, datetime)
+            else ttl_expires_at
+        )
+    else:
+        secret = decrypt_secret(credential.secret_encrypted)
+        expires_at = ttl_expires_at
 
     # Auditoría del arriendo: registra el evento SIN el secreto.
     session.add(

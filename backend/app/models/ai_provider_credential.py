@@ -16,7 +16,7 @@ from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.app.models.base import Base
-from backend.app.models.enums import AiProvider, enum_values
+from backend.app.models.enums import AiCredentialType, AiProvider, enum_values
 
 
 class AiProviderCredential(Base):
@@ -48,6 +48,20 @@ class AiProviderCredential(Base):
         ),
         nullable=False,
         comment="Proveedor de IA de la credencial.",
+    )
+    credential_type: Mapped[AiCredentialType] = mapped_column(
+        SAEnum(
+            AiCredentialType,
+            name="ai_credential_type",
+            native_enum=False,
+            create_constraint=True,
+            validate_strings=True,
+            values_callable=enum_values,
+        ),
+        nullable=False,
+        default=AiCredentialType.API_KEY,
+        server_default=AiCredentialType.API_KEY.value,
+        comment="Tipo de credencial: api_key (secreto estático) u oauth (perfil cifrado).",
     )
     label: Mapped[str] = mapped_column(
         String(120),

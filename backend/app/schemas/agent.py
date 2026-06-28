@@ -2,6 +2,8 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
+from pydantic import Field
+
 from backend.app.models.enums import AiProvider
 from backend.app.schemas.base import ApiSchema, ApiWriteSchema
 
@@ -35,3 +37,29 @@ class CredentialLeaseResponse(ApiSchema):
     secret: str
     expires_at: datetime
     default_model: Optional[str] = None
+
+
+class OAuthStartResponse(ApiSchema):
+    """Inicio del flujo OAuth: URL de autorización y ``state`` anti-CSRF.
+
+    El navegador redirige a ``authorize_url``; al volver con el ``code`` debe enviar
+    el mismo ``state`` a ``/complete``. No incluye el ``code_verifier`` (server-side).
+    """
+
+    authorize_url: str
+    state: str
+
+
+class OAuthCompleteRequest(ApiWriteSchema):
+    """Callback del flujo OAuth: ``code`` y ``state`` recibidos del proveedor."""
+
+    code: str = Field(min_length=1, title="Código de autorización")
+    state: str = Field(min_length=1, title="State")
+
+
+class OAuthStatusResponse(ApiSchema):
+    """Estado de la conexión OAuth del usuario. NUNCA incluye tokens."""
+
+    connected: bool
+    account_id: Optional[str] = None
+    expires_at: Optional[datetime] = None

@@ -138,6 +138,20 @@ class Settings(BaseSettings):
     # TTL corto del arriendo (segundos): el secreto descifrado vive poco en el Gateway.
     agent_gateway_lease_ttl_seconds: int = 120
 
+    # Flujo OAuth browser-callback PKCE para conectar la cuenta ChatGPT Plus/Codex del
+    # médico (B10). FastAPI guarda el perfil OAuth CIFRADO y, en el arriendo interno,
+    # devuelve el access token vigente (refrescándolo si vence). No es device-code.
+    # ``client_id`` y ``redirect_uri`` deben configurarse para habilitar el flujo; si
+    # faltan, los endpoints responden 503. URLs por defecto apuntan a auth.openai.com.
+    openai_oauth_client_id: str | None = None
+    openai_oauth_authorize_url: str = "https://auth.openai.com/oauth/authorize"
+    openai_oauth_token_url: str = "https://auth.openai.com/oauth/token"
+    openai_oauth_redirect_uri: str | None = None
+    openai_oauth_scope: str = "openid profile email offline_access"
+    # Margen (segundos) antes del vencimiento para refrescar el access token de forma
+    # proactiva en el arriendo, de modo que el Gateway nunca reciba un token al límite.
+    openai_oauth_refresh_skew_seconds: int = 60
+
     @model_validator(mode="after")
     def _validate_agent_gateway_ticket_ttl(self) -> Self:
         if not (60 <= self.agent_gateway_ticket_ttl_seconds <= 120):

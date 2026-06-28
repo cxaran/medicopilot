@@ -79,6 +79,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/users/me/ai-providers/oauth/openai/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start Oauth */
+        post: operations["start_oauth_api_v1_users_me_ai_providers_oauth_openai_start_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/users/me/ai-providers/oauth/openai/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Complete Oauth */
+        post: operations["complete_oauth_api_v1_users_me_ai_providers_oauth_openai_complete_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/users/me/ai-providers/oauth/openai/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Oauth Status */
+        get: operations["oauth_status_api_v1_users_me_ai_providers_oauth_openai_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/users/me/ai-providers/oauth/openai": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Disconnect Oauth */
+        delete: operations["disconnect_oauth_api_v1_users_me_ai_providers_oauth_openai_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/users/me/ai-providers": {
         parameters: {
             query?: never;
@@ -1275,6 +1343,16 @@ export interface components {
          */
         ActiveInactiveStatus: "active" | "inactive";
         /**
+         * AiCredentialType
+         * @description Tipo de credencial de proveedor de IA almacenada por el usuario.
+         *
+         *     ``api_key`` guarda un secreto estático (API key). ``oauth`` guarda un perfil
+         *     OAuth cifrado {access, refresh, expires, account_id} obtenido por el flujo
+         *     browser-callback PKCE (p. ej. ChatGPT Plus/Codex).
+         * @enum {string}
+         */
+        AiCredentialType: "api_key" | "oauth";
+        /**
          * AiProvider
          * @description Proveedor de IA de una credencial registrada por el usuario.
          * @enum {string}
@@ -1311,6 +1389,7 @@ export interface components {
              */
             id: string;
             provider: components["schemas"]["AiProvider"];
+            credential_type: components["schemas"]["AiCredentialType"];
             /** Label */
             label: string;
             /** Is Active */
@@ -2756,6 +2835,41 @@ export interface components {
         MessageResponse: {
             /** Message */
             message: string;
+        };
+        /**
+         * OAuthCompleteRequest
+         * @description Callback del flujo OAuth: ``code`` y ``state`` recibidos del proveedor.
+         */
+        OAuthCompleteRequest: {
+            /** Código de autorización */
+            code: string;
+            /** State */
+            state: string;
+        };
+        /**
+         * OAuthStartResponse
+         * @description Inicio del flujo OAuth: URL de autorización y ``state`` anti-CSRF.
+         *
+         *     El navegador redirige a ``authorize_url``; al volver con el ``code`` debe enviar
+         *     el mismo ``state`` a ``/complete``. No incluye el ``code_verifier`` (server-side).
+         */
+        OAuthStartResponse: {
+            /** Authorize Url */
+            authorize_url: string;
+            /** State */
+            state: string;
+        };
+        /**
+         * OAuthStatusResponse
+         * @description Estado de la conexión OAuth del usuario. NUNCA incluye tokens.
+         */
+        OAuthStatusResponse: {
+            /** Connected */
+            connected: boolean;
+            /** Account Id */
+            account_id?: string | null;
+            /** Expires At */
+            expires_at?: string | null;
         };
         /** OffsetPage[AppointmentListItem] */
         OffsetPage_AppointmentListItem_: {
@@ -4369,6 +4483,134 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CredentialLeaseResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_oauth_api_v1_users_me_ai_providers_oauth_openai_start_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OAuthStartResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    complete_oauth_api_v1_users_me_ai_providers_oauth_openai_complete_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OAuthCompleteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OAuthStatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    oauth_status_api_v1_users_me_ai_providers_oauth_openai_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OAuthStatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    disconnect_oauth_api_v1_users_me_ai_providers_oauth_openai_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MessageResponse"];
                 };
             };
             /** @description Validation Error */

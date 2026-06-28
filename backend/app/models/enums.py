@@ -156,5 +156,16 @@ class AiProvider(str, Enum):
     OLLAMA = "ollama"
 
 
+class AiCredentialType(str, Enum):
+    """Tipo de credencial de proveedor de IA almacenada por el usuario.
+
+    ``api_key`` guarda un secreto estático (API key). ``oauth`` guarda un perfil
+    OAuth cifrado {access, refresh, expires, account_id} obtenido por el flujo
+    browser-callback PKCE (p. ej. ChatGPT Plus/Codex)."""
+
+    API_KEY = "api_key"
+    OAUTH = "oauth"
+
+
 def enum_values(enum_class: type[Enum]) -> list[str]:
     return [str(member.value) for member in enum_class]

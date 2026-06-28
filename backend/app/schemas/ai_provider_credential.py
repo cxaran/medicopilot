@@ -4,7 +4,7 @@ from typing import Optional
 
 from pydantic import Field
 
-from backend.app.models.enums import AiProvider
+from backend.app.models.enums import AiCredentialType, AiProvider
 from backend.app.schemas.base import ApiPatchSchema, ApiReadSchema, ApiWriteSchema
 
 
@@ -39,6 +39,7 @@ class AiProviderCredentialRead(ApiReadSchema):
 
     id: uuid.UUID
     provider: AiProvider
+    credential_type: AiCredentialType
     label: str
     is_active: bool
     default_model: Optional[str] = None
