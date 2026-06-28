@@ -45,6 +45,7 @@ BACKEND_CANONICAL_TEST_MODULES = (
     "backend.tests.test_forgot_password",
     "backend.tests.test_agent_ticket",
     "backend.tests.test_ai_providers_routes",
+    "backend.tests.test_agent_internal_lease",
 )
 
 

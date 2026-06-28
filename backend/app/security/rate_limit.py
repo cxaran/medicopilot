@@ -165,6 +165,7 @@ def _policies() -> dict[str, BucketPolicy]:
         "reset_ip": parse_policy(settings.rate_limit_reset_ip),
         "reset_token": parse_policy(settings.rate_limit_reset_token),
         "bootstrap_ip": parse_policy(settings.rate_limit_bootstrap_ip),
+        "internal_lease_ip": parse_policy(settings.rate_limit_internal_lease_ip),
     }
 
 
@@ -273,3 +274,7 @@ def limit_reset_password(request: Request, token: str) -> None:
 
 def limit_bootstrap_initialize(request: Request) -> None:
     enforce(request, ("bootstrap_ip", client_ip(request)))
+
+
+def limit_internal_lease(request: Request) -> None:
+    enforce(request, ("internal_lease_ip", client_ip(request)))

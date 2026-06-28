@@ -1,6 +1,9 @@
+import uuid
 from datetime import datetime
+from typing import Optional
 
-from backend.app.schemas.base import ApiSchema
+from backend.app.models.enums import AiProvider
+from backend.app.schemas.base import ApiSchema, ApiWriteSchema
 
 
 class ConnectionTicketRead(ApiSchema):
@@ -12,3 +15,23 @@ class ConnectionTicketRead(ApiSchema):
 
     ticket: str
     expires_at: datetime
+
+
+class CredentialLeaseRequest(ApiWriteSchema):
+    """Solicitud server-to-server de arriendo de credencial (endpoint interno)."""
+
+    user_id: uuid.UUID
+    provider: AiProvider
+
+
+class CredentialLeaseResponse(ApiSchema):
+    """Arriendo de credencial: el ``secret`` es la API key DESCIFRADA, de vida corta.
+
+    Solo lo consume el Agent Gateway por el puente interno; nunca el navegador. El
+    secreto nunca se loguea.
+    """
+
+    lease_id: uuid.UUID
+    secret: str
+    expires_at: datetime
+    default_model: Optional[str] = None

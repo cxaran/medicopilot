@@ -105,6 +105,8 @@ class Settings(BaseSettings):
     rate_limit_reset_ip: str = "10/900"
     rate_limit_reset_token: str = "5/900"
     rate_limit_bootstrap_ip: str = "5/900"
+    # Arriendo interno de credencial (server-to-server): límite por IP del llamador.
+    rate_limit_internal_lease_ip: str = "60/60"
 
     # Política pública de auth. MedicoPilot no asume signup público: el registro
     # está deshabilitado por defecto y debe habilitarse explícitamente por ambiente.
@@ -126,6 +128,15 @@ class Settings(BaseSettings):
     # secretos de credenciales de proveedor de IA. Sensible: nunca se loguea. Generar:
     #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     ai_credential_key: SecretStr | None = None
+
+    # Puente INTERNO server-to-server de arriendo de credencial (B4). Secreto compartido
+    # con el Agent Gateway (DISTINTO del ticket): el Gateway lo envía en X-Internal-Auth
+    # al endpoint /api/v1/internal/agent/credential-lease, que devuelve el secreto
+    # DESCIFRADO de vida corta. Endpoint interno: en despliegue va detrás de red interna,
+    # nunca expuesto al navegador. Sensible: nunca se loguea.
+    agent_gateway_internal_secret: SecretStr | None = None
+    # TTL corto del arriendo (segundos): el secreto descifrado vive poco en el Gateway.
+    agent_gateway_lease_ttl_seconds: int = 120
 
     @model_validator(mode="after")
     def _validate_agent_gateway_ticket_ttl(self) -> Self:

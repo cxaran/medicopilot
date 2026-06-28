@@ -16,6 +16,11 @@ export interface GatewaySettings {
   // MG-002: secreto HS256 compartido con FastAPI (AGENT_GATEWAY_TICKET_SECRET) para
   // verificar el JWT de connection-ticket. Si está vacío, solo opera el dev-ticket.
   agentTicketSecret: string;
+  // B4: puente interno de arriendo de credencial. URL base del backend FastAPI y
+  // secreto compartido (= AGENT_GATEWAY_INTERNAL_SECRET). Si faltan, se usa el
+  // control-plane fake (dev/tests); si están, se usa el HttpControlPlaneClient real.
+  backendInternalUrl?: string | undefined;
+  backendInternalSecret?: string | undefined;
 }
 
 function numberFromEnv(name: string, fallback: number): number {
@@ -56,6 +61,8 @@ export function loadSettings(): GatewaySettings {
     maxToolResultBytes: numberFromEnv("GATEWAY_MAX_TOOL_RESULT_BYTES", 64 * 1024),
     toolResultTimeoutMs: numberFromEnv("GATEWAY_TOOL_RESULT_TIMEOUT_MS", 30_000),
     devTicket: process.env.GATEWAY_DEV_TICKET ?? "dev-ticket",
-    agentTicketSecret: process.env.GATEWAY_AGENT_TICKET_SECRET ?? ""
+    agentTicketSecret: process.env.GATEWAY_AGENT_TICKET_SECRET ?? "",
+    backendInternalUrl: process.env.GATEWAY_BACKEND_INTERNAL_URL || undefined,
+    backendInternalSecret: process.env.GATEWAY_BACKEND_INTERNAL_SECRET || undefined
   };
 }

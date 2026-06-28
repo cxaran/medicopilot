@@ -62,6 +62,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/internal/agent/credential-lease": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Lease Credential */
+        post: operations["lease_credential_api_v1_internal_agent_credential_lease_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/users/me/ai-providers": {
         parameters: {
             query?: never;
@@ -2134,6 +2151,41 @@ export interface components {
             next_appointment_at?: string | null;
             /** Observaciones */
             observations?: string | null;
+        };
+        /**
+         * CredentialLeaseRequest
+         * @description Solicitud server-to-server de arriendo de credencial (endpoint interno).
+         */
+        CredentialLeaseRequest: {
+            /**
+             * User Id
+             * Format: uuid
+             */
+            user_id: string;
+            provider: components["schemas"]["AiProvider"];
+        };
+        /**
+         * CredentialLeaseResponse
+         * @description Arriendo de credencial: el ``secret`` es la API key DESCIFRADA, de vida corta.
+         *
+         *     Solo lo consume el Agent Gateway por el puente interno; nunca el navegador. El
+         *     secreto nunca se loguea.
+         */
+        CredentialLeaseResponse: {
+            /**
+             * Lease Id
+             * Format: uuid
+             */
+            lease_id: string;
+            /** Secret */
+            secret: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Default Model */
+            default_model?: string | null;
         };
         /**
          * DoctorCreate
@@ -4282,6 +4334,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConnectionTicketRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    lease_credential_api_v1_internal_agent_credential_lease_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Internal-Auth"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CredentialLeaseRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CredentialLeaseResponse"];
                 };
             };
             /** @description Validation Error */

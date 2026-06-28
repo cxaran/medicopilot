@@ -1,5 +1,6 @@
 import { loadSettings } from "../config/settings.js";
 import { FakeControlPlaneClient } from "../infrastructure/control-plane/fake-control-plane.client.js";
+import { HttpControlPlaneClient } from "../infrastructure/control-plane/http-control-plane.client.js";
 import { InMemoryModelCatalog } from "../infrastructure/catalog/in-memory-model-catalog.js";
 import { InMemoryTurnStore } from "../infrastructure/turn-store/in-memory-turn-store.js";
 import { NoopRateLimiter } from "../infrastructure/rate-limit/noop-rate-limiter.js";
@@ -27,14 +28,27 @@ export interface GatewayContainer {
 }
 
 export function createContainer(settings = loadSettings()): GatewayContainer {
+  const browserSessions = new InMemoryBrowserSessionStore();
+
+  // B4: si hay config del backend interno, se usa el control-plane real que arrienda
+  // credenciales contra FastAPI; si no, el fake (dev/tests).
+  const controlPlane: ControlPlanePort =
+    settings.backendInternalUrl && settings.backendInternalSecret
+      ? new HttpControlPlaneClient({
+          backendInternalUrl: settings.backendInternalUrl,
+          backendInternalSecret: settings.backendInternalSecret,
+          browserSessions
+        })
+      : new FakeControlPlaneClient();
+
   return {
     settings,
-    controlPlane: new FakeControlPlaneClient(),
+    controlPlane,
     modelCatalog: new InMemoryModelCatalog(),
     providerRegistry: new ProviderRegistry([new FakeProviderAdapter()]),
     turnStore: new InMemoryTurnStore(),
     limiter: new NoopRateLimiter(),
     telemetry: new PinoTelemetry(),
-    browserSessions: new InMemoryBrowserSessionStore()
+    browserSessions
   };
 }

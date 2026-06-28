@@ -21,6 +21,17 @@ This service is not an agent. It does not keep clinical memory, execute clinical
 
 An invalid signature, wrong audience, or expired ticket yields `401 INVALID_TICKET`. The ticket and the shared secret are never logged. The propagated `userId` is not yet used to authorize any clinical action — FastAPI remains the clinical authority via the browser cookie.
 
+## Credential lease bridge (MG-002, B4)
+
+FastAPI owns AI provider credentials, encrypted at rest. The gateway does **not** store them: it leases a decrypted secret short-lived, only for the duration of a turn.
+
+- When both `GATEWAY_BACKEND_INTERNAL_URL` and `GATEWAY_BACKEND_INTERNAL_SECRET` are set, the container wires `HttpControlPlaneClient`. Its `leaseCredential` does a server-to-server `POST {GATEWAY_BACKEND_INTERNAL_URL}/api/v1/internal/agent/credential-lease` with header `X-Internal-Auth: {GATEWAY_BACKEND_INTERNAL_SECRET}` (must match the backend's `AGENT_GATEWAY_INTERNAL_SECRET`) and body `{ user_id, provider }`. The `user_id` comes from the browser-session identity propagated by the connection ticket; the `provider` from the turn authorization.
+- The backend returns `{ lease_id, secret, expires_at, default_model? }` where `secret` is the decrypted API key (short TTL via `AGENT_GATEWAY_LEASE_TTL_SECONDS`). The client maps it to a `ProviderCredentialLease` and never logs the secret. Errors expose only the HTTP status (`404` no active credential, `401` bad internal auth), never the response body or the internal secret.
+- When the backend config is absent, the fake control-plane (`fake-secret`) is used so dev and tests keep working.
+- The backend endpoint is internal-only (server-to-server secret, not cookie auth); deployments must keep it off the public network.
+
+MG-002 is still in progress: `authorizeTurn` resolves the real `userId` from the session but the provider/model/capability negotiation remains scaffolded for a later slice.
+
 ## Routing
 
 - The canonical public prefix is configured by `GATEWAY_PUBLIC_PATH_PREFIX`, defaulting to `/model-gateway`.
