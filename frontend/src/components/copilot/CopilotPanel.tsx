@@ -24,12 +24,14 @@ import type {
   WireModel,
   WireProviderStatus,
 } from "@/core/agent/protocol";
-import {
-  executeTool,
-  rejectedByUserResult,
-  resolveToolCall,
-} from "@/core/agent/tools/tool-runner";
+import { executeTool, resolveToolCall } from "@/core/agent/tools/tool-runner";
 import { toWireToolDefinitions, type ToolDefinition } from "@/core/agent/tools/registry";
+import {
+  ApprovalStore,
+  applyApprovalDecision,
+  buildClinicalActionPlan,
+  type ClinicalActionPlan,
+} from "@/core/agent/approval-protocol";
 import { isUiSpec, type UiSpec } from "@/core/agent/tools/ui-spec";
 import { GeneratedUi } from "@/components/copilot/GeneratedUi";
 
@@ -58,6 +60,8 @@ interface ToolCallView {
   kind: "read" | "write";
   argsText: string;
   status: ToolCallStatus;
+  // Solo escrituras: plan canónico aprobado/rechazado por el médico (P1).
+  plan?: ClinicalActionPlan;
   resultText?: string;
   resultContent?: unknown;
   errorText?: string;
@@ -111,10 +115,12 @@ export function CopilotPanel() {
   const turnRef = useRef<TurnState>(initialTurnState());
   const idRef = useRef(0);
   const messagesRef = useRef<ChatMessage[]>([]);
-  // Escrituras pendientes de aprobación: callId -> tool+args+turn (no se ejecutan
-  // hasta que el médico confirme).
+  // Protocolo de aprobación clínica (P1): store de solicitudes pendientes (plan inmutable)
+  // + el mapeo callId -> requestId/tool para ejecutar EXACTAMENTE lo aprobado. Vive en el
+  // navegador del médico; el plan con el payload clínico nunca viaja al gateway.
+  const approvalStoreRef = useRef<ApprovalStore>(new ApprovalStore());
   const pendingWritesRef = useRef<
-    Map<string, { tool: ToolDefinition; args: Record<string, unknown>; turnId: string }>
+    Map<string, { requestId: string; tool: ToolDefinition; turnId: string }>
   >(new Map());
 
   const nextId = (): string => {
@@ -211,8 +217,19 @@ export function CopilotPanel() {
         return;
       }
 
-      // Escritura: gated por confirmación explícita del médico (Aprobar / Rechazar).
-      pendingWritesRef.current.set(callId, { tool, args: validArgs, turnId });
+      // Escritura: protocolo de aprobación (P1). Se construye el plan canónico INMUTABLE y
+      // se crea una solicitud; la tool NO se ejecuta hasta que el médico apruebe exactamente
+      // lo mostrado (resumen + payload).
+      const plan = buildClinicalActionPlan(tool, validArgs);
+      const requestId = `appr_${callId}`;
+      approvalStoreRef.current.request({
+        id: requestId,
+        turnId,
+        callId,
+        toolName: tool.name,
+        plan,
+      });
+      pendingWritesRef.current.set(callId, { requestId, tool, turnId });
       upsertToolCall({
         callId,
         turnId,
@@ -220,6 +237,7 @@ export function CopilotPanel() {
         kind: "write",
         argsText,
         status: "awaiting_approval",
+        plan,
       });
     };
 
@@ -376,9 +394,15 @@ export function CopilotPanel() {
     if (!pending) {
       return;
     }
+    const outcome = applyApprovalDecision(approvalStoreRef.current, pending.requestId, "approved");
+    if (outcome.kind !== "execute") {
+      return;
+    }
     pendingWritesRef.current.delete(callId);
     patchToolCall(callId, { status: "running" });
-    void executeTool(pending.tool, pending.args).then((result) => {
+    // Se ejecuta EXACTAMENTE el payload aprobado (plan inmutable), no los args originales.
+    const payload = { ...outcome.request.plan.exactPayload };
+    void executeTool(pending.tool, payload).then((result) => {
       patchToolCall(
         callId,
         result.status === "success"
@@ -394,10 +418,14 @@ export function CopilotPanel() {
     if (!pending) {
       return;
     }
+    const outcome = applyApprovalDecision(approvalStoreRef.current, pending.requestId, "rejected");
+    if (outcome.kind !== "discard") {
+      return;
+    }
     pendingWritesRef.current.delete(callId);
-    const result = rejectedByUserResult();
-    patchToolCall(callId, { status: "rejected", errorText: result.message });
-    clientRef.current?.sendToolResult(pending.turnId, callId, result);
+    // Rechazo: no se escribe nada; se reanuda el turno con el resultado de rechazo.
+    patchToolCall(callId, { status: "rejected", errorText: outcome.result.message });
+    clientRef.current?.sendToolResult(pending.turnId, callId, outcome.result);
   };
 
   return (
@@ -646,17 +674,36 @@ function ToolCallCard({
         <Badge tone={meta.tone}>{meta.label}</Badge>
       </div>
 
-      {!uiSpec && (
+      {/* Para una escritura con plan se muestra el plan canónico (resumen + payload exacto),
+          no el volcado crudo de args. El resto de tools conserva el preview de args. */}
+      {!uiSpec && !call.plan && (
         <pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-words text-xs text-[var(--tx2)]">
           {call.argsText}
         </pre>
       )}
 
+      {call.plan && (
+        <div className="mt-2 space-y-2">
+          <div className="rounded-[8px] bg-[var(--panel2)] p-3">
+            <p className="text-xs font-semibold text-[var(--tx2)]">
+              Acción propuesta · {call.plan.actionType} → {call.plan.targetResource}
+            </p>
+            <p className="mt-1 text-sm text-[var(--tx)]">{call.plan.humanReadableSummary}</p>
+          </div>
+          <div>
+            <p className="text-xs font-semibold text-[var(--tx2)]">Datos exactos que se enviarán</p>
+            <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-[8px] bg-[var(--panel2)] p-2 text-xs text-[var(--tx)]">
+              {previewContent(call.plan.exactPayload)}
+            </pre>
+          </div>
+        </div>
+      )}
+
       {call.status === "awaiting_approval" && (
         <div className="mt-2">
           <p className="mb-2 text-xs text-[var(--tx2)]">
-            El modelo propone una acción de escritura (crea un borrador). Requiere tu confirmación
-            explícita.
+            Toda salida de IA es un borrador: nada se guarda hasta que apruebes exactamente lo
+            anterior. Revisa el resumen y los datos antes de aprobar.
           </p>
           <div className="flex gap-2">
             <Button type="button" onClick={onApprove} className="shrink-0">

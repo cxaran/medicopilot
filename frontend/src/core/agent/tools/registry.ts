@@ -29,6 +29,18 @@ export interface ToolExecutionContext {
   sandbox: SandboxRunner;
 }
 
+// Metadata de aprobación de una tool de ESCRITURA: alimenta el plan canónico que el
+// médico aprueba (P1). Genérica: cualquier tool de escritura puede declararla para dar un
+// resumen en español; sin ella, el protocolo cae a un resumen genérico.
+export interface ToolApprovalMeta {
+  // Tipo de acción para el plan (p. ej. ``create_consultation_draft``).
+  actionType: string;
+  // Recurso destino afectado (p. ej. ``consultations``).
+  targetResource: string;
+  // Resumen legible en español de lo que ocurriría si se aprueba.
+  summarize: (args: Record<string, unknown>) => string;
+}
+
 export interface ToolDefinition {
   name: string;
   description: string;
@@ -38,6 +50,8 @@ export interface ToolDefinition {
   // Esquema rico (JSON Schema) que se declara al modelo cuando inputSchema es permisivo
   // (p.ej. specs de UI con estructuras anidadas que el validador local no cubre).
   wireSchema?: Record<string, unknown>;
+  // Solo tools de escritura: metadata para el protocolo de aprobación clínica.
+  approval?: ToolApprovalMeta;
   execute: (args: Record<string, unknown>, ctx: ToolExecutionContext) => Promise<unknown>;
 }
 
@@ -221,6 +235,14 @@ const TOOLS: ToolDefinition[] = [
       },
       required: ["patient_id", "attending_doctor_id", "reason_for_visit"],
       additionalProperties: false,
+    },
+    approval: {
+      actionType: "create_consultation_draft",
+      targetResource: "consultations",
+      summarize: (args) =>
+        `Crear una consulta médica EN BORRADOR para el paciente ${String(args.patient_id ?? "—")} ` +
+        `(médico tratante ${String(args.attending_doctor_id ?? "—")}). Motivo: ` +
+        `${String(args.reason_for_visit ?? "—")}.`,
     },
     execute: (args, ctx) =>
       ctx.api(`/api/v1/consultations`, { method: "POST", body: args as Record<string, unknown> }),
