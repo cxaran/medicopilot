@@ -44,10 +44,16 @@ def build_current_user(
     return base_user
 
 
-def get_current_user(
+def get_current_user_orm(
     session: SessionDep,
     token: str | None = Depends(get_token),
-) -> SessionUser:
+) -> User:
+    """Resuelve y valida el usuario ORM de la sesión actual (cookie o bearer).
+
+    Misma validación que ``get_current_user`` (sesión presente, usuario activo y
+    versión de sesión vigente), pero devuelve la instancia ORM ``User`` para los
+    consumidores que necesitan campos no expuestos en ``SessionUser`` (p. ej. el
+    versionado de sesión ``User.token``)."""
     if not token:
         raise _unauthorized_error()
 
@@ -60,7 +66,15 @@ def get_current_user(
     if not user or not user.is_active or user.token != data.jti:
         raise _unauthorized_error()
 
+    return user
+
+
+def get_current_user(
+    session: SessionDep,
+    user: User = Depends(get_current_user_orm),
+) -> SessionUser:
     return build_current_user(session, user)
 
 
 CurrentUser = Annotated[SessionUser, Depends(get_current_user)]
+CurrentUserOrm = Annotated[User, Depends(get_current_user_orm)]

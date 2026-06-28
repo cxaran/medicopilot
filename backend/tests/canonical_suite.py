@@ -43,6 +43,7 @@ BACKEND_CANONICAL_TEST_MODULES = (
     "backend.tests.test_platform_setup",
     "backend.tests.test_bootstrap",
     "backend.tests.test_forgot_password",
+    "backend.tests.test_agent_ticket",
 )
 
 

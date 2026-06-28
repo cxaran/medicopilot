@@ -113,6 +113,36 @@ class Settings(BaseSettings):
     registration_enabled: bool = False
     password_reset_enabled: bool = True
 
+    # Ticket de conexión al Agent Gateway (puente firmado y efímero FastAPI<->Gateway).
+    # FastAPI es la autoridad clínica y NO almacena credenciales de proveedor de IA; el
+    # ticket solo prueba que un usuario con sesión válida autorizó abrir la conexión.
+    # Secreto DEDICADO (dominio separado del secret_key de sesión), recomendado en
+    # producción. Si no se configura se deriva del secret_key (con prefijo de dominio)
+    # para no acoplar dev/test a una variable extra. TTL corto, en rango 60-120s.
+    agent_gateway_ticket_secret: SecretStr | None = None
+    agent_gateway_ticket_ttl_seconds: int = 90
+
+    @model_validator(mode="after")
+    def _validate_agent_gateway_ticket_ttl(self) -> Self:
+        if not (60 <= self.agent_gateway_ticket_ttl_seconds <= 120):
+            raise ValueError(
+                "agent_gateway_ticket_ttl_seconds debe estar entre 60 y 120 segundos."
+            )
+        return self
+
+    @property
+    def agent_gateway_ticket_signing_secret(self) -> SecretStr:
+        """Secreto efectivo para firmar/verificar el ticket de conexión.
+
+        Usa el secreto dedicado si está configurado; en no-producción cae a una
+        derivación del ``secret_key`` (con prefijo de dominio para no reutilizar el
+        mismo material que la sesión). En producción el dedicado es obligatorio.
+        """
+        secret = self.agent_gateway_ticket_secret
+        if secret is not None and secret.get_secret_value().strip():
+            return secret
+        return SecretStr("agent-gateway-ticket:" + self.secret_key.get_secret_value())
+
     postgres_user: str
     postgres_password: str
     postgres_server: str
