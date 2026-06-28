@@ -22,6 +22,7 @@ from backend.app.models.enums import (
     ConsultationAiOutputType,
     ConsultationDiagnosisKind,
     ConsultationStatus,
+    LabResultAbnormalFlag,
     MedicalHistoryVersionStatus,
     PatientClinicalItemType,
     PatientStatus,
@@ -29,6 +30,7 @@ from backend.app.models.enums import (
     RecordStatus,
     Sex,
 )
+from backend.app.models.lab_result import LabResult
 from backend.app.models.medical_history import MedicalHistoryVersion
 from backend.app.models.medication_template import MedicationTemplate
 from backend.app.models.patient import Patient
@@ -62,6 +64,8 @@ __all__ = [
     "ConsultationDiagnosisKind",
     "ConsultationStatus",
     "Doctor",
+    "LabResult",
+    "LabResultAbnormalFlag",
     "MedicalHistoryVersion",
     "MedicalHistoryVersionStatus",
     "MedicationTemplate",

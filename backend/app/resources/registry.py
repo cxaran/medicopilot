@@ -19,6 +19,7 @@ from backend.app.models.clinical_document import ClinicalDocument
 from backend.app.models.consultation import Consultation
 from backend.app.models.consultation_diagnosis import ConsultationDiagnosis
 from backend.app.models.doctor import Doctor
+from backend.app.models.lab_result import LabResult
 from backend.app.models.medical_history import MedicalHistoryVersion
 from backend.app.models.medication_template import MedicationTemplate
 from backend.app.models.patient import Patient
@@ -80,6 +81,11 @@ from backend.app.schemas.consultation_diagnosis import (
     ConsultationDiagnosisUpdate,
 )
 from backend.app.schemas.doctor import DoctorCreate, DoctorListItem, DoctorUpdate
+from backend.app.schemas.lab_result import (
+    LabResultCreate,
+    LabResultListItem,
+    LabResultUpdate,
+)
 from backend.app.schemas.medical_history_version import (
     MedicalHistoryVersionCreate,
     MedicalHistoryVersionListItem,
@@ -130,6 +136,7 @@ from backend.app.security.groups.medication_templates import (
 )
 from backend.app.security.groups.prescriptions import PrescriptionPermissions
 from backend.app.security.groups.doctors import DoctorPermissions
+from backend.app.security.groups.lab_results import LabResultPermissions
 from backend.app.security.groups.patient_clinical_items import (
     PatientClinicalItemPermissions,
 )
@@ -310,6 +317,29 @@ VITAL_SIGNS = ResourceQuery(
         sort_fields=("measured_at", "created_at", "updated_at"),
         in_fields=("id",),
         field_operators={"measured_at": _CREATED_AT_OPERATORS},
+        default_sort="-measured_at",
+    ),
+)
+
+LAB_RESULTS = ResourceQuery(
+    name="LabResultQuery",
+    model=LabResult,
+    schema=LabResultListItem,
+    options=QueryOptions(
+        # ``patient_id``/``consultation_id`` (UUID) y ``abnormal_flag`` (enum) por
+        # igualdad. ``analyte_name`` admite búsqueda libre (q) y coincidencia parcial
+        # (contains) para tolerar variantes de nombre. ``measured_at`` admite rango de
+        # calendario. ``abnormal_flag`` se añade a ``in_fields`` para el filtro
+        # "solo anormales" (abnormal_flag_in=low,high,critical). Los listados excluyen
+        # resultados eliminados (``deleted_at``) vía stmt base en el router.
+        filter_fields=("patient_id", "consultation_id", "analyte_name", "abnormal_flag"),
+        sort_fields=("measured_at", "created_at", "updated_at", "analyte_name"),
+        search_fields=("analyte_name", "analyte_code"),
+        in_fields=("id", "abnormal_flag"),
+        field_operators={
+            "analyte_name": _TEXT_FILTER_OPERATORS,
+            "measured_at": _CREATED_AT_OPERATORS,
+        },
         default_sort="-measured_at",
     ),
 )
@@ -1017,6 +1047,37 @@ RESOURCE_REGISTRY: tuple[ResourceDefinition, ...] = (
                 confirmation=ConfirmationDef(
                     title="Eliminar signos vitales",
                     message="La medición se dará de baja lógica.",
+                    confirm_label="Eliminar",
+                    destructive=True,
+                ),
+            ),
+        ),
+    ),
+    ResourceDefinition(
+        name="lab_results",
+        label="Resultados de laboratorio",
+        api_path="/api/v1/lab-results",
+        view=ResourceView.TABLE,
+        read_permission=LabResultPermissions.READ,
+        list_query=LAB_RESULTS,
+        list_schema=LabResultListItem,
+        create_schema=LabResultCreate,
+        update_schema=LabResultUpdate,
+        create_permission=LabResultPermissions.CREATE,
+        update_permission=LabResultPermissions.UPDATE,
+        detail_url_template="/api/v1/lab-results/{id}",
+        actions=(
+            ActionDef(
+                name="delete",
+                label="Eliminar",
+                method=HttpMethod.DELETE,
+                url_template="/api/v1/lab-results/{id}",
+                scope=ActionScope.ITEM,
+                danger=True,
+                permission=LabResultPermissions.DELETE,
+                confirmation=ConfirmationDef(
+                    title="Eliminar resultado de laboratorio",
+                    message="El resultado se dará de baja lógica.",
                     confirm_label="Eliminar",
                     destructive=True,
                 ),

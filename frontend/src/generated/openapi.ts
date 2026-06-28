@@ -771,6 +771,43 @@ export interface paths {
         patch: operations["update_doctor_api_v1_doctors__doctor_id__patch"];
         trace?: never;
     };
+    "/api/v1/lab-results": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Lab Results */
+        get: operations["list_lab_results_api_v1_lab_results_get"];
+        put?: never;
+        /** Create Lab Result */
+        post: operations["create_lab_result_api_v1_lab_results_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lab-results/{result_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Lab Result */
+        get: operations["get_lab_result_api_v1_lab_results__result_id__get"];
+        put?: never;
+        post?: never;
+        /** Delete Lab Result */
+        delete: operations["delete_lab_result_api_v1_lab_results__result_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Lab Result */
+        patch: operations["update_lab_result_api_v1_lab_results__result_id__patch"];
+        trace?: never;
+    };
     "/api/v1/medical-history-versions": {
         parameters: {
             query?: never;
@@ -2733,6 +2770,214 @@ export interface components {
             placeholder: string;
             type: components["schemas"]["FieldValueType"];
         };
+        /**
+         * LabResultAbnormalFlag
+         * @description Marca de anormalidad de un resultado de laboratorio/observación.
+         *
+         *     ``unknown`` cubre los resultados aún sin clasificar (p. ej. extraídos de un
+         *     archivo sin rango de referencia). Los valores fuera de rango clínico son
+         *     ``low``/``high``; ``critical`` señala un valor de alerta que exige revisión.
+         * @enum {string}
+         */
+        LabResultAbnormalFlag: "normal" | "low" | "high" | "critical" | "unknown";
+        /**
+         * LabResultCreate
+         * @description Registro de un resultado de laboratorio/observación estructurado.
+         *
+         *     Registrar un resultado es una ESCRITURA clínica: el médico aprueba el payload
+         *     exacto (protocolo P1 en el copiloto). La auditoría, la revisión y el borrado
+         *     los gobierna el servidor; no se aceptan como entrada.
+         */
+        LabResultCreate: {
+            /**
+             * Paciente
+             * Format: uuid
+             * @description Paciente al que pertenece el resultado.
+             */
+            patient_id: string;
+            /**
+             * Consulta
+             * @description Consulta asociada, si aplica.
+             */
+            consultation_id?: string | null;
+            /**
+             * Documento de origen
+             * @description Archivo clínico del que se extrajo el resultado, si aplica.
+             */
+            clinical_document_id?: string | null;
+            /**
+             * Analito o prueba
+             * @description Nombre del analito o prueba (p. ej. 'HbA1c').
+             */
+            analyte_name: string;
+            /** Código (LOINC) */
+            analyte_code?: string | null;
+            /** Valor numérico */
+            value_numeric?: number | null;
+            /** Valor cualitativo */
+            value_text?: string | null;
+            /** Unidad */
+            unit?: string | null;
+            /** Rango de referencia (mín.) */
+            reference_range_low?: number | null;
+            /** Rango de referencia (máx.) */
+            reference_range_high?: number | null;
+            /**
+             * Marca de anormalidad
+             * @default unknown
+             */
+            abnormal_flag: components["schemas"]["LabResultAbnormalFlag"];
+            /** Fecha de medición */
+            measured_at?: string | null;
+            /** Laboratorio / fuente */
+            source_name?: string | null;
+            /** Método */
+            method?: string | null;
+        };
+        /**
+         * LabResultListItem
+         * @description Versión de listado de un resultado de laboratorio.
+         *
+         *     Declara los campos de filtro (``patient_id``, ``consultation_id``,
+         *     ``analyte_name``, ``abnormal_flag``, ``measured_at``) que el motor de query
+         *     exige presentes en el schema de listado.
+         */
+        LabResultListItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Paciente
+             * Format: uuid
+             */
+            patient_id: string;
+            /** Consulta */
+            consultation_id?: string | null;
+            /** Analito */
+            analyte_name: string;
+            /** Código */
+            analyte_code?: string | null;
+            /** Valor */
+            value_numeric?: number | null;
+            /** Valor (texto) */
+            value_text?: string | null;
+            /** Unidad */
+            unit?: string | null;
+            /** Ref. mín. */
+            reference_range_low?: number | null;
+            /** Ref. máx. */
+            reference_range_high?: number | null;
+            /** Anormalidad */
+            abnormal_flag: components["schemas"]["LabResultAbnormalFlag"];
+            /**
+             * Medición
+             * Format: date-time
+             */
+            measured_at: string;
+            /** Fuente */
+            source_name?: string | null;
+            /** Revisado */
+            reviewed_at?: string | null;
+            /**
+             * Creado
+             * Format: date-time
+             */
+            created_at: string;
+            /** Actualizado */
+            updated_at?: string | null;
+        };
+        /**
+         * LabResultRead
+         * @description Representación pública completa de un resultado de laboratorio.
+         */
+        LabResultRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Patient Id
+             * Format: uuid
+             */
+            patient_id: string;
+            /** Consultation Id */
+            consultation_id?: string | null;
+            /** Clinical Document Id */
+            clinical_document_id?: string | null;
+            /** Analyte Name */
+            analyte_name: string;
+            /** Analyte Code */
+            analyte_code?: string | null;
+            /** Value Numeric */
+            value_numeric?: number | null;
+            /** Value Text */
+            value_text?: string | null;
+            /** Unit */
+            unit?: string | null;
+            /** Reference Range Low */
+            reference_range_low?: number | null;
+            /** Reference Range High */
+            reference_range_high?: number | null;
+            abnormal_flag: components["schemas"]["LabResultAbnormalFlag"];
+            /**
+             * Measured At
+             * Format: date-time
+             */
+            measured_at: string;
+            /** Source Name */
+            source_name?: string | null;
+            /** Method */
+            method?: string | null;
+            /** Reviewed At */
+            reviewed_at?: string | null;
+            /** Reviewed By */
+            reviewed_by?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /**
+         * LabResultUpdate
+         * @description Edición parcial de un resultado (PATCH).
+         *
+         *     ``patient_id``, la auditoría, la revisión y el borrado no se declaran aquí:
+         *     enviarlos da 422 (extra forbid).
+         */
+        LabResultUpdate: {
+            /** Consulta */
+            consultation_id?: string | null;
+            /** Documento de origen */
+            clinical_document_id?: string | null;
+            /** Analito o prueba */
+            analyte_name?: string | null;
+            /** Código (LOINC) */
+            analyte_code?: string | null;
+            /** Valor numérico */
+            value_numeric?: number | null;
+            /** Valor cualitativo */
+            value_text?: string | null;
+            /** Unidad */
+            unit?: string | null;
+            /** Rango de referencia (mín.) */
+            reference_range_low?: number | null;
+            /** Rango de referencia (máx.) */
+            reference_range_high?: number | null;
+            /** Marca de anormalidad */
+            abnormal_flag?: components["schemas"]["LabResultAbnormalFlag"] | null;
+            /** Fecha de medición */
+            measured_at?: string | null;
+            /** Laboratorio / fuente */
+            source_name?: string | null;
+            /** Método */
+            method?: string | null;
+        };
         /** LoginRequest */
         LoginRequest: {
             /**
@@ -3101,6 +3346,12 @@ export interface components {
         OffsetPage_DoctorListItem_: {
             /** Items */
             items: components["schemas"]["DoctorListItem"][];
+            pagination: components["schemas"]["OffsetPagination"];
+        };
+        /** OffsetPage[LabResultListItem] */
+        OffsetPage_LabResultListItem_: {
+            /** Items */
+            items: components["schemas"]["LabResultListItem"][];
             pagination: components["schemas"]["OffsetPagination"];
         };
         /** OffsetPage[MedicalHistoryVersionListItem] */
@@ -6765,6 +7016,196 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DoctorRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_lab_results_api_v1_lab_results_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+                /** @description Campos de orden separados por coma. Use '-' para orden descendente. */
+                sort?: string;
+                patient_id?: string | null;
+                consultation_id?: string | null;
+                analyte_name?: string | null;
+                abnormal_flag?: components["schemas"]["LabResultAbnormalFlag"] | null;
+                id_in?: string[] | null;
+                abnormal_flag_in?: components["schemas"]["LabResultAbnormalFlag"][] | null;
+                analyte_name_ne?: string | null;
+                analyte_name_contains?: string | null;
+                analyte_name_startswith?: string | null;
+                analyte_name_endswith?: string | null;
+                measured_at_on?: string | null;
+                measured_at_before?: string | null;
+                measured_at_after?: string | null;
+                measured_at_from?: string | null;
+                measured_at_to?: string | null;
+                q?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OffsetPage_LabResultListItem_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_lab_result_api_v1_lab_results_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LabResultCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LabResultRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_lab_result_api_v1_lab_results__result_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                result_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LabResultRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_lab_result_api_v1_lab_results__result_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                result_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LabResultRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_lab_result_api_v1_lab_results__result_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                result_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LabResultUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LabResultRead"];
                 };
             };
             /** @description Validation Error */

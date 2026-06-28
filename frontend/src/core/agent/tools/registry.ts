@@ -466,6 +466,82 @@ const TOOLS: ToolDefinition[] = [
       ),
   },
   {
+    name: "clinical.list_lab_results",
+    description:
+      "Lista resultados de laboratorio/observaciones ESTRUCTURADOS (valor, unidad, rango de " +
+      "referencia, marca de anormalidad, fecha). Habilita tendencias y fuera-de-rango. Puede " +
+      "filtrar por paciente (patient_id), analito (analyte, coincidencia parcial; p. ej. " +
+      "'HbA1c'), rango de fecha de medición (date_from/date_to, sobre measured_at) y solo " +
+      "anormales (abnormal_only: incluye bajo, alto y crítico). Solo lectura.",
+    kind: "read",
+    inputSchema: {
+      type: "object",
+      properties: {
+        patient_id: PATIENT_FILTER_PROP,
+        analyte: {
+          type: "string",
+          description: "Filtra por nombre de analito (coincidencia parcial, sin distinguir mayúsculas).",
+        },
+        abnormal_only: {
+          type: "boolean",
+          description: "Si es true, devuelve solo resultados anormales (bajo, alto o crítico).",
+        },
+        date_from: DATE_FROM_PROP,
+        date_to: DATE_TO_PROP,
+        limit: LIMIT_PROP,
+        offset: OFFSET_PROP,
+      },
+      required: [],
+      additionalProperties: false,
+    },
+    execute: (args, ctx) => {
+      const params = new URLSearchParams();
+      if (typeof args.patient_id === "string" && args.patient_id !== "") {
+        params.set("patient_id", args.patient_id);
+      }
+      // El nombre de analito usa coincidencia parcial (ILIKE) que el backend honra.
+      if (typeof args.analyte === "string" && args.analyte !== "") {
+        params.set("analyte_name_contains", args.analyte);
+      }
+      if (typeof args.date_from === "string" && args.date_from !== "") {
+        params.set("measured_at_from", args.date_from);
+      }
+      if (typeof args.date_to === "string" && args.date_to !== "") {
+        params.set("measured_at_to", args.date_to);
+      }
+      // "Solo anormales" = abnormal_flag IN (low, high, critical): el backend lo expone como
+      // parámetro repetido abnormal_flag_in.
+      if (args.abnormal_only === true) {
+        for (const flag of ["low", "high", "critical"]) {
+          params.append("abnormal_flag_in", flag);
+        }
+      }
+      if (typeof args.limit === "number") params.set("limit", String(args.limit));
+      if (typeof args.offset === "number") params.set("offset", String(args.offset));
+      const qs = params.toString();
+      return ctx.api(`/api/v1/lab-results${qs ? `?${qs}` : ""}`);
+    },
+  },
+  {
+    name: "clinical.get_lab_result",
+    description: "Obtiene el detalle de un resultado de laboratorio por su id. Solo lectura.",
+    kind: "read",
+    inputSchema: {
+      type: "object",
+      properties: {
+        lab_result_id: {
+          type: "string",
+          description: "Id (UUID) del resultado de laboratorio.",
+          format: "uuid",
+        },
+      },
+      required: ["lab_result_id"],
+      additionalProperties: false,
+    },
+    execute: (args, ctx) =>
+      ctx.api(`/api/v1/lab-results/${encodeURIComponent(String(args.lab_result_id))}`),
+  },
+  {
     // Acceso clínico estructurado estilo FHIR: equivalente NATIVO a un MCP-server FHIR
     // (p.ej. wso2/fhir-mcp-server) respetando la AUTORIDAD CLÍNICA. Se ejecuta en el
     // NAVEGADOR con la cookie del médico (ctx.api -> credentials:include); FastAPI valida
@@ -727,6 +803,67 @@ const TOOLS: ToolDefinition[] = [
         method: "POST",
         body: args as Record<string, unknown>,
       }),
+  },
+  {
+    name: "clinical.create_lab_result_draft",
+    description:
+      "Registra un resultado de laboratorio/observación ESTRUCTURADO para un paciente (valor " +
+      "numérico o cualitativo, unidad, rango de referencia, marca de anormalidad, fecha). " +
+      "Acción de escritura: requiere confirmación explícita del médico antes de guardarse. El " +
+      "médico revisa y aprueba el dato exacto; nada se guarda de forma autónoma.",
+    kind: "write",
+    inputSchema: {
+      type: "object",
+      properties: {
+        patient_id: { type: "string", description: "Id (UUID) del paciente.", format: "uuid" },
+        analyte_name: { type: "string", description: "Nombre del analito o prueba (p. ej. 'HbA1c')." },
+        value_numeric: { type: "number", description: "Valor numérico del resultado (si es cuantitativo)." },
+        value_text: { type: "string", description: "Valor cualitativo (p. ej. 'positivo'), si aplica." },
+        unit: { type: "string", description: "Unidad de medida (opcional)." },
+        reference_range_low: { type: "number", description: "Límite inferior del rango de referencia (opcional)." },
+        reference_range_high: { type: "number", description: "Límite superior del rango de referencia (opcional)." },
+        abnormal_flag: {
+          type: "string",
+          description: "Marca de anormalidad.",
+          enum: ["normal", "low", "high", "critical", "unknown"],
+        },
+        measured_at: {
+          type: "string",
+          description: "Fecha y hora ISO 8601 de la medición (opcional; por defecto, ahora).",
+        },
+        consultation_id: {
+          type: "string",
+          description: "Id (UUID) de la consulta asociada (opcional).",
+          format: "uuid",
+        },
+        clinical_document_id: {
+          type: "string",
+          description: "Id (UUID) del documento de origen (opcional).",
+          format: "uuid",
+        },
+        source_name: { type: "string", description: "Laboratorio o fuente (opcional)." },
+        method: { type: "string", description: "Método de medición (opcional)." },
+      },
+      required: ["patient_id", "analyte_name"],
+      additionalProperties: false,
+    },
+    approval: {
+      actionType: "create_lab_result_draft",
+      targetResource: "lab_results",
+      summarize: (args) => {
+        const value =
+          args.value_numeric !== undefined && args.value_numeric !== null
+            ? `${String(args.value_numeric)}${args.unit ? ` ${String(args.unit)}` : ""}`
+            : String(args.value_text ?? "—");
+        return (
+          `Registrar el resultado "${String(args.analyte_name ?? "—")}" = ${value} ` +
+          `para el paciente ${String(args.patient_id ?? "—")}` +
+          `${args.abnormal_flag ? ` (marca: ${String(args.abnormal_flag)})` : ""}.`
+        );
+      },
+    },
+    execute: (args, ctx) =>
+      ctx.api(`/api/v1/lab-results`, { method: "POST", body: args as Record<string, unknown> }),
   },
   {
     // REMEMBER (P2): el agente PROPONE persistir una memoria del médico. Es una escritura

@@ -144,6 +144,20 @@ class ClinicalDocumentStatus(str, Enum):
     DELETED = "deleted"
 
 
+class LabResultAbnormalFlag(str, Enum):
+    """Marca de anormalidad de un resultado de laboratorio/observación.
+
+    ``unknown`` cubre los resultados aún sin clasificar (p. ej. extraídos de un
+    archivo sin rango de referencia). Los valores fuera de rango clínico son
+    ``low``/``high``; ``critical`` señala un valor de alerta que exige revisión."""
+
+    NORMAL = "normal"
+    LOW = "low"
+    HIGH = "high"
+    CRITICAL = "critical"
+    UNKNOWN = "unknown"
+
+
 class AiProvider(str, Enum):
     """Proveedor de IA de una credencial registrada por el usuario."""
 
