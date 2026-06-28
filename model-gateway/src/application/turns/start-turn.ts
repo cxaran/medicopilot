@@ -74,11 +74,16 @@ export class StartTurn {
         authorization.modelId
       );
 
+      const hasImageContent = request.messages.some((message) =>
+        message.content.some((part) => part.type === "image")
+      );
+
       const negotiated = negotiateCapabilities({
         model,
         tools: request.tools,
         generation: request.generation,
-        policy: authorization.allowedCapabilities
+        policy: authorization.allowedCapabilities,
+        hasImageContent
       });
 
       const requestedMaxOutputTokens = Math.min(

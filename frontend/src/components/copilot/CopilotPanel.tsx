@@ -17,7 +17,13 @@ import {
   reduceTurnEvent,
   type TurnState,
 } from "@/core/agent/turn-reducer";
-import type { ServerEvent, WireModel, WireProviderStatus } from "@/core/agent/protocol";
+import type {
+  ServerEvent,
+  WireContentPart,
+  WireMessage,
+  WireModel,
+  WireProviderStatus,
+} from "@/core/agent/protocol";
 import {
   executeTool,
   rejectedByUserResult,
@@ -27,10 +33,19 @@ import { toWireToolDefinitions, type ToolDefinition } from "@/core/agent/tools/r
 import { isUiSpec, type UiSpec } from "@/core/agent/tools/ui-spec";
 import { GeneratedUi } from "@/components/copilot/GeneratedUi";
 
+/** Imagen adjunta a un mensaje: data URL para previsualizar + base64 puro para el cable. */
+interface AttachedImage {
+  dataUrl: string;
+  mimeType: string;
+  base64: string;
+  name: string;
+}
+
 interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   text: string;
+  image?: AttachedImage;
   isError?: boolean;
 }
 
@@ -89,8 +104,10 @@ export function CopilotPanel() {
   const [turn, setTurn] = useState<TurnState>(initialTurnState());
   const [toolCalls, setToolCalls] = useState<ToolCallView[]>([]);
   const [input, setInput] = useState("");
+  const [attachedImage, setAttachedImage] = useState<AttachedImage | null>(null);
 
   const clientRef = useRef<AgentClient | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const turnRef = useRef<TurnState>(initialTurnState());
   const idRef = useRef(0);
   const messagesRef = useRef<ChatMessage[]>([]);
@@ -245,18 +262,78 @@ export function CopilotPanel() {
   }, []);
 
   const isBusy = turn.status === "running" || turn.status === "waiting_for_tool";
-  const canSend = status === "connected" && !isBusy && input.trim().length > 0;
+  const selectedModelSupportsVision =
+    models
+      .find((model) => model.id === selectedModel)
+      ?.capabilities.input_modalities.includes("image") ?? false;
+  const canSend =
+    status === "connected" &&
+    !isBusy &&
+    (input.trim().length > 0 || attachedImage !== null);
 
-  const sendUserTurn = (text: string): void => {
-    if (!text || status !== "connected" || isBusy) {
+  const clearAttachedImage = (): void => {
+    setAttachedImage(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  // Al cambiar de modelo, si el nuevo no admite visión descarta la imagen adjunta para no
+  // enviar un turno que el gateway rechazaría (modelo text-only).
+  const handleModelChange = (modelId: string): void => {
+    setSelectedModel(modelId);
+    const supportsVision =
+      models.find((model) => model.id === modelId)?.capabilities.input_modalities.includes("image") ??
+      false;
+    if (!supportsVision) {
+      clearAttachedImage();
+    }
+  };
+
+  const handleSelectImage = (file: File | null): void => {
+    if (!file) {
       return;
     }
-    const userMessage: ChatMessage = { id: nextId(), role: "user", text };
+    if (!file.type.startsWith("image/")) {
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = typeof reader.result === "string" ? reader.result : "";
+      // El data URL es `data:<mime>;base64,<datos>`; el cable lleva solo el base64.
+      const base64 = dataUrl.includes(",") ? dataUrl.slice(dataUrl.indexOf(",") + 1) : "";
+      if (!base64) {
+        return;
+      }
+      setAttachedImage({ dataUrl, mimeType: file.type, base64, name: file.name });
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const sendUserTurn = (text: string, image?: AttachedImage | null): void => {
+    if ((!text && !image) || status !== "connected" || isBusy) {
+      return;
+    }
+    const userMessage: ChatMessage = {
+      id: nextId(),
+      role: "user",
+      text,
+      ...(image ? { image } : {}),
+    };
     const history = [...messagesRef.current, userMessage];
-    const wireMessages = history.map((message) => ({
-      role: message.role,
-      content: [{ type: "text" as const, text: message.text }],
-    }));
+    const wireMessages: WireMessage[] = history.map((message) => {
+      const content: WireContentPart[] = [];
+      if (message.text) {
+        content.push({ type: "text", text: message.text });
+      }
+      if (message.image) {
+        content.push({ type: "image", mimeType: message.image.mimeType, data: message.image.base64 });
+      }
+      if (content.length === 0) {
+        content.push({ type: "text", text: "" });
+      }
+      return { role: message.role, content };
+    });
 
     setMessages(history);
     turnRef.current = { ...initialTurnState(), status: "running" };
@@ -275,11 +352,12 @@ export function CopilotPanel() {
 
   const handleSend = (): void => {
     const text = input.trim();
-    if (!text) {
+    if (!text && !attachedImage) {
       return;
     }
-    sendUserTurn(text);
+    sendUserTurn(text, attachedImage);
     setInput("");
+    clearAttachedImage();
   };
 
   // Seguimiento desde una UI generada (submit de form / clic de botón): continúa la
@@ -358,7 +436,7 @@ export function CopilotPanel() {
           </label>
           <Select
             value={selectedModel}
-            onChange={(event) => setSelectedModel(event.target.value)}
+            onChange={(event) => handleModelChange(event.target.value)}
             disabled={models.length === 0}
             aria-label="Modelo del copiloto"
           >
@@ -374,6 +452,7 @@ export function CopilotPanel() {
           </Select>
           <p className="text-xs text-[var(--tx2)]">
             {models.length} modelo(s) en el catálogo del gateway.
+            {selectedModelSupportsVision && " · admite imágenes"}
           </p>
         </Card>
 
@@ -427,31 +506,73 @@ export function CopilotPanel() {
           )}
         </div>
 
-        <div className="flex items-end gap-2 border-t border-[var(--border)] pt-3">
-          <Input
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey) {
-                event.preventDefault();
-                handleSend();
-              }
-            }}
-            placeholder={
-              status === "connected" ? "Escribe tu consulta…" : "Copiloto no conectado"
-            }
-            disabled={status !== "connected" || isBusy}
-            aria-label="Mensaje para el copiloto"
-          />
-          {isBusy ? (
-            <Button type="button" onClick={handleCancel} className="shrink-0">
-              Cancelar
-            </Button>
-          ) : (
-            <Button type="button" onClick={handleSend} disabled={!canSend} className="shrink-0">
-              Enviar
-            </Button>
+        <div className="flex flex-col gap-2 border-t border-[var(--border)] pt-3">
+          {attachedImage && (
+            <div className="flex items-center gap-3 rounded-[12px] border border-[var(--border2)] bg-[var(--bg2)] p-2">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={attachedImage.dataUrl}
+                alt={attachedImage.name}
+                className="h-14 w-14 rounded-[8px] object-cover"
+              />
+              <span className="flex-1 truncate text-xs text-[var(--tx2)]">{attachedImage.name}</span>
+              <button
+                type="button"
+                onClick={clearAttachedImage}
+                className="shrink-0 rounded-[8px] border border-[var(--border2)] px-2.5 py-1.5 text-xs font-semibold text-[var(--tx)] transition hover:bg-[var(--panel2)]"
+              >
+                Quitar
+              </button>
+            </div>
           )}
+
+          <div className="flex items-end gap-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(event) => handleSelectImage(event.target.files?.[0] ?? null)}
+              aria-hidden="true"
+              tabIndex={-1}
+            />
+            {selectedModelSupportsVision && (
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={status !== "connected" || isBusy}
+                className="shrink-0 rounded-[11px] border border-[var(--border2)] px-3 py-2.5 text-sm font-semibold text-[var(--tx)] transition hover:bg-[var(--panel2)] disabled:opacity-50"
+                aria-label="Adjuntar imagen"
+                title="Adjuntar imagen"
+              >
+                Imagen
+              </button>
+            )}
+            <Input
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  handleSend();
+                }
+              }}
+              placeholder={
+                status === "connected" ? "Escribe tu consulta…" : "Copiloto no conectado"
+              }
+              disabled={status !== "connected" || isBusy}
+              aria-label="Mensaje para el copiloto"
+            />
+            {isBusy ? (
+              <Button type="button" onClick={handleCancel} className="shrink-0">
+                Cancelar
+              </Button>
+            ) : (
+              <Button type="button" onClick={handleSend} disabled={!canSend} className="shrink-0">
+                Enviar
+              </Button>
+            )}
+          </div>
         </div>
       </Card>
     </div>
@@ -473,6 +594,16 @@ function MessageBubble({ message }: Readonly<{ message: ChatMessage }>) {
       >
         {!isUser && (
           <div className="mb-1 text-xs font-semibold text-[var(--tx2)]">Asistente (borrador)</div>
+        )}
+        {message.image && (
+          <>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={message.image.dataUrl}
+              alt={message.image.name}
+              className="mb-2 max-h-48 rounded-[8px] object-contain"
+            />
+          </>
         )}
         {message.text}
       </div>

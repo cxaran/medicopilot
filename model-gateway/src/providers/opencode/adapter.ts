@@ -20,6 +20,33 @@ export type OpencodeProviderId = "opencode_zen" | "opencode_go";
 export const OPENCODE_PROVIDER_ID: OpencodeProviderId = "opencode_zen";
 export const OPENCODE_GO_PROVIDER_ID: OpencodeProviderId = "opencode_go";
 
+// Modelos opencode con ENTRADA DE IMAGEN (visión). El /models de opencode NO expone
+// modalidades, así que se curan aquí (alineado con el catálogo de OpenClaw). Si el row de
+// /models sí trae `modalities`, ese metadato tiene prioridad sobre esta tabla.
+const OPENCODE_VISION_MODEL_IDS = new Set<string>([
+  "kimi-k2.5",
+  "kimi-k2.6",
+  "kimi-k2.7-code",
+  "mimo-v2-omni",
+  "mimo-v2.5",
+  "qwen3.5-plus",
+  "qwen3.6-plus",
+  "qwen3.7-plus"
+]);
+
+/**
+ * ¿El modelo opencode acepta imágenes? Cura por id (sufijo ``-free`` ignorado) más las
+ * familias multimodales conocidas de Zen (Claude, Gemini). El resto se asume text-only de
+ * forma honesta (no se inventa visión). minimax-m3, deepseek-* y glm-* son text-only.
+ */
+export function opencodeSupportsVision(modelId: string): boolean {
+  const base = modelId.replace(/-free$/, "");
+  if (OPENCODE_VISION_MODEL_IDS.has(base)) {
+    return true;
+  }
+  return /^(claude-|gemini-)/.test(base);
+}
+
 export interface OpencodeProviderOptions {
   baseUrl: string;
   // Distingue Zen de Go: misma forma de cable (OpenAI-compatible) pero distinto
@@ -383,9 +410,13 @@ export function createOpencodeModel(input: {
   const baseUrl = input.baseUrl.replace(/\/+$/, "");
   const supportsTools = row?.supports_tools ?? true;
   const supportsReasoning = row?.supports_reasoning ?? false;
-  const modalities = row?.modalities ?? ["text"];
+  // Si /models trae `modalities`, ese metadato manda; si no (caso opencode, que devuelve filas
+  // bare), se cura la visión por id con `opencodeSupportsVision`.
+  const hasVision = row?.modalities
+    ? row.modalities.includes("image")
+    : opencodeSupportsVision(input.modelId);
   const inputModalities = new Set<"text" | "image" | "audio" | "video" | "file">(["text"]);
-  if (modalities.includes("image")) {
+  if (hasVision) {
     inputModalities.add("image");
   }
   const contextWindow = row?.context_length ?? row?.context_window ?? 128000;

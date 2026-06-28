@@ -23,6 +23,8 @@ export interface CapabilityNegotiationRequest {
   tools: readonly ModelToolDefinition[];
   generation: GenerationOptions;
   policy: CapabilityPolicy;
+  /** El turno incluye al menos una parte de imagen en sus mensajes. */
+  hasImageContent?: boolean;
 }
 
 export interface CapabilityNegotiationResult {
@@ -38,6 +40,19 @@ function requireSupported(value: string, code: string, message: string): void {
 
 export function negotiateCapabilities(request: CapabilityNegotiationRequest): CapabilityNegotiationResult {
   const { model, tools, generation, policy } = request;
+
+  if (request.hasImageContent) {
+    if (!policy.images) {
+      throw new GatewayError("CAPABILITY_NOT_ALLOWED", "Image input is disabled by profile policy");
+    }
+
+    if (!model.capabilities.inputModalities.has("image")) {
+      throw new GatewayError(
+        "CAPABILITY_UNSUPPORTED",
+        "Image input is not supported by the selected model"
+      );
+    }
+  }
 
   if (tools.length > 0) {
     if (!policy.tools) {

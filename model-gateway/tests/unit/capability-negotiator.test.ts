@@ -30,6 +30,51 @@ describe("capability negotiator", () => {
     ).toThrow("Tool calling is not supported");
   });
 
+  it("rechaza imágenes cuando el modelo es text-only (inputModalities sin image)", () => {
+    const model = createFakeModel(); // text-only por defecto
+    expect(() =>
+      negotiateCapabilities({
+        model,
+        policy: { ...policy, images: true },
+        tools: [],
+        generation: { maxOutputTokens: 100 },
+        hasImageContent: true
+      })
+    ).toThrow("Image input is not supported");
+  });
+
+  it("rechaza imágenes cuando la política las deshabilita", () => {
+    const base = createFakeModel();
+    const model = createFakeModel({
+      capabilities: { ...base.capabilities, inputModalities: new Set(["text", "image"]) }
+    });
+    expect(() =>
+      negotiateCapabilities({
+        model,
+        policy: { ...policy, images: false },
+        tools: [],
+        generation: { maxOutputTokens: 100 },
+        hasImageContent: true
+      })
+    ).toThrow("Image input is disabled");
+  });
+
+  it("acepta imágenes cuando el modelo tiene visión y la política lo permite", () => {
+    const base = createFakeModel();
+    const model = createFakeModel({
+      capabilities: { ...base.capabilities, inputModalities: new Set(["text", "image"]) }
+    });
+    expect(() =>
+      negotiateCapabilities({
+        model,
+        policy: { ...policy, images: true },
+        tools: [],
+        generation: { maxOutputTokens: 100 },
+        hasImageContent: true
+      })
+    ).not.toThrow();
+  });
+
   it("rejects strict JSON Schema when unsupported", () => {
     const base = createFakeModel();
     const model = createFakeModel({

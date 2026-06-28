@@ -6,6 +6,17 @@ const TextContentPartSchema = Type.Object({
   text: Type.String()
 });
 
+// Parte de imagen: `mimeType`/`data` (data URL base64) en camelCase para mapear directo al
+// CanonicalContentPart del dominio sin renombrar en el parser. Solo se acepta en modelos con
+// visión (la negociación de capacidades lo valida).
+const ImageContentPartSchema = Type.Object({
+  type: Type.Literal("image"),
+  mimeType: Type.String({ minLength: 1 }),
+  data: Type.String({ minLength: 1 })
+});
+
+const ContentPartSchema = Type.Union([TextContentPartSchema, ImageContentPartSchema]);
+
 const MessageSchema = Type.Object({
   role: Type.Union([
     Type.Literal("system"),
@@ -13,7 +24,7 @@ const MessageSchema = Type.Object({
     Type.Literal("assistant"),
     Type.Literal("tool")
   ]),
-  content: Type.Array(TextContentPartSchema, { minItems: 1 })
+  content: Type.Array(ContentPartSchema, { minItems: 1 })
 });
 
 const ToolSchema = Type.Object({

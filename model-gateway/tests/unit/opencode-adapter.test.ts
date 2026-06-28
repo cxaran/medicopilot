@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   OpencodeProviderAdapter,
   createOpencodeModel,
+  opencodeSupportsVision,
   OPENCODE_PROVIDER_ID,
   OPENCODE_GO_PROVIDER_ID
 } from "../../src/providers/opencode/adapter.js";
@@ -74,6 +75,39 @@ async function collect(iterable: AsyncIterable<ProviderEvent>): Promise<Provider
 
 const model = createOpencodeModel({ baseUrl: BASE_URL, modelId: "test-model" });
 const userMessage: CanonicalMessage[] = [{ role: "user", content: [{ type: "text", text: "Hola" }] }];
+
+describe("opencode visión (mapa curado de modalidades)", () => {
+  it("marca image en inputModalities para modelos de visión curados (sufijo -free ignorado)", () => {
+    for (const id of ["qwen3.7-plus", "mimo-v2.5", "kimi-k2.7-code", "mimo-v2.5-free"]) {
+      expect(opencodeSupportsVision(id)).toBe(true);
+      const m = createOpencodeModel({ baseUrl: BASE_URL, modelId: id });
+      expect(m.capabilities.inputModalities.has("image")).toBe(true);
+    }
+  });
+
+  it("trata como text-only los modelos sin visión conocida", () => {
+    for (const id of ["minimax-m3", "deepseek-v4-flash-free", "glm-5.2", "test-model"]) {
+      expect(opencodeSupportsVision(id)).toBe(false);
+      const m = createOpencodeModel({ baseUrl: BASE_URL, modelId: id });
+      expect(m.capabilities.inputModalities.has("image")).toBe(false);
+    }
+  });
+
+  it("familias multimodales de Zen (claude-*, gemini-*) reportan visión", () => {
+    expect(opencodeSupportsVision("claude-fable-5")).toBe(true);
+    expect(opencodeSupportsVision("gemini-3-pro")).toBe(true);
+  });
+
+  it("el metadato modalities del row tiene prioridad sobre el mapa curado", () => {
+    // Row dice text-only para un id que el mapa marcaría como visión.
+    const m = createOpencodeModel({
+      baseUrl: BASE_URL,
+      modelId: "qwen3.7-plus",
+      row: { id: "qwen3.7-plus", modalities: ["text"] }
+    });
+    expect(m.capabilities.inputModalities.has("image")).toBe(false);
+  });
+});
 
 describe("OpencodeProviderAdapter.verifyCredential", () => {
   it("devuelve valid=true con 200 y usa Bearer con la key arrendada", async () => {

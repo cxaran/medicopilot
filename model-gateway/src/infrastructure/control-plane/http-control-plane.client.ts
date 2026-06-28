@@ -72,7 +72,9 @@ export class HttpControlPlaneClient implements ControlPlanePort {
         tools: true,
         structuredOutput: true,
         reasoning: false,
-        images: false,
+        // La política permite imágenes; la capacidad real del modelo (inputModalities) es el
+        // gate efectivo en la negociación. Modelos text-only rechazan el turno con imagen.
+        images: true,
         audio: false
       },
       limits: {

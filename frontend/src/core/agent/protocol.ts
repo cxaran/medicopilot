@@ -8,6 +8,7 @@ export type GatewayProtocol =
   | "gemini_generate_content"
   | "ollama_chat"
   | "opencode_zen"
+  | "opencode_go"
   | "fake";
 
 export interface WireModelCapabilities {
@@ -57,9 +58,15 @@ export interface TurnUsage {
 
 // --- Mensajes cliente -> gateway. -------------------------------------------------
 
+// Parte de imagen: `mimeType`/`data` (base64) en camelCase, igual que el ContentPart del
+// dominio del gateway (el parser del WS no renombra el contenido de los mensajes).
+export type WireContentPart =
+  | { type: "text"; text: string }
+  | { type: "image"; mimeType: string; data: string };
+
 export interface WireMessage {
   role: "system" | "user" | "assistant" | "tool";
-  content: { type: "text"; text: string }[];
+  content: WireContentPart[];
 }
 
 export interface WireTool {

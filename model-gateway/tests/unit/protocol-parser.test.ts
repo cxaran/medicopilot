@@ -103,6 +103,37 @@ describe("parseClientMessage: turn.start", () => {
     expect(() => parseClientMessage(validStart({ messages: [] }))).toThrow();
   });
 
+  it("acepta una parte de imagen y la mapea tal cual al dominio (mimeType/data)", () => {
+    const parsed = parseClientMessage(
+      validStart({
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "describe esta imagen" },
+              { type: "image", mimeType: "image/png", data: "QUJD" }
+            ]
+          }
+        ]
+      })
+    );
+    if (parsed.kind !== "turn.start") throw new Error("esperado turn.start");
+    expect(parsed.request.messages[0]!.content).toEqual([
+      { type: "text", text: "describe esta imagen" },
+      { type: "image", mimeType: "image/png", data: "QUJD" }
+    ]);
+  });
+
+  it("rechaza una parte de imagen sin data (minLength 1)", () => {
+    expect(() =>
+      parseClientMessage(
+        validStart({
+          messages: [{ role: "user", content: [{ type: "image", mimeType: "image/png", data: "" }] }]
+        })
+      )
+    ).toThrow();
+  });
+
   it("rechaza turn.start con temperature fuera de rango (> 2)", () => {
     expect(() =>
       parseClientMessage(validStart({ generation: { max_output_tokens: 10, temperature: 3 } }))
