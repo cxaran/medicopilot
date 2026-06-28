@@ -1,3 +1,4 @@
+from backend.app.models.agent_memory import AgentMemory
 from backend.app.models.ai_provider_credential import AiProviderCredential
 from backend.app.models.appointment import Appointment
 from backend.app.models.audit_event import AuditEvent
@@ -9,6 +10,7 @@ from backend.app.models.consultation_diagnosis import ConsultationDiagnosis
 from backend.app.models.doctor import Doctor
 from backend.app.models.enums import (
     ActiveInactiveStatus,
+    AgentMemoryKind,
     AiOutputStatus,
     AiProvider,
     AppointmentStatus,
@@ -37,6 +39,8 @@ from backend.app.models.vital_sign import VitalSign
 
 __all__ = [
     "ActiveInactiveStatus",
+    "AgentMemory",
+    "AgentMemoryKind",
     "AiOutputStatus",
     "AiProvider",
     "AiProviderCredential",

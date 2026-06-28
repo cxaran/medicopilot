@@ -47,6 +47,7 @@ BACKEND_CANONICAL_TEST_MODULES = (
     "backend.tests.test_ai_providers_routes",
     "backend.tests.test_agent_internal_lease",
     "backend.tests.test_agent_oauth",
+    "backend.tests.test_agent_memories_routes",
 )
 
 

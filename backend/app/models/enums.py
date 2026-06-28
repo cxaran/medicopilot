@@ -156,6 +156,15 @@ class AiProvider(str, Enum):
     OLLAMA = "ollama"
 
 
+class AgentMemoryKind(str, Enum):
+    """Tipo de memoria persistente que el agente acumula para el usuario médico."""
+
+    NOTA = "nota"
+    PREFERENCIA = "preferencia"
+    HECHO_CLINICO = "hecho_clinico"
+    RECORDATORIO = "recordatorio"
+
+
 class AiCredentialType(str, Enum):
     """Tipo de credencial de proveedor de IA almacenada por el usuario.
 

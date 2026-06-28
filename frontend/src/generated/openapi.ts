@@ -79,6 +79,42 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/users/me/agent-memories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Memories */
+        get: operations["list_memories_api_v1_users_me_agent_memories_get"];
+        put?: never;
+        /** Create Memory */
+        post: operations["create_memory_api_v1_users_me_agent_memories_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/users/me/agent-memories/{memory_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Memory */
+        delete: operations["delete_memory_api_v1_users_me_agent_memories__memory_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Memory */
+        patch: operations["update_memory_api_v1_users_me_agent_memories__memory_id__patch"];
+        trace?: never;
+    };
     "/api/v1/users/me/ai-providers/oauth/openai/start": {
         parameters: {
             query?: never;
@@ -1342,6 +1378,86 @@ export interface components {
          * @enum {string}
          */
         ActiveInactiveStatus: "active" | "inactive";
+        /**
+         * AgentMemoryCreate
+         * @description Alta de una memoria del agente del usuario autenticado.
+         *
+         *     ``content`` es el contenido EN CLARO (entrada): se cifra antes de guardar. La
+         *     auditoría y el soft-delete los gobierna el servidor.
+         */
+        AgentMemoryCreate: {
+            /** Título */
+            title: string;
+            /**
+             * Contenido
+             * @description Contenido de la memoria (puede ser clínico sensible).
+             */
+            content: string;
+            /**
+             * Tipo
+             * @default nota
+             */
+            kind: components["schemas"]["AgentMemoryKind"];
+            /** Paciente relacionado */
+            patient_id?: string | null;
+            /** Consulta relacionada */
+            consultation_id?: string | null;
+        };
+        /**
+         * AgentMemoryKind
+         * @description Tipo de memoria persistente que el agente acumula para el usuario médico.
+         * @enum {string}
+         */
+        AgentMemoryKind: "nota" | "preferencia" | "hecho_clinico" | "recordatorio";
+        /**
+         * AgentMemoryRead
+         * @description Representación de una memoria para su DUEÑO: incluye el ``content`` descifrado.
+         *
+         *     A diferencia de las API keys, es la propia memoria del usuario, así que el dueño sí
+         *     recibe el contenido en claro. NUNCA se devuelve a otro usuario (las rutas son
+         *     owner-only y filtran por dueño).
+         */
+        AgentMemoryRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Title */
+            title: string;
+            /** Content */
+            content: string;
+            kind: components["schemas"]["AgentMemoryKind"];
+            /** Patient Id */
+            patient_id?: string | null;
+            /** Consultation Id */
+            consultation_id?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /**
+         * AgentMemoryUpdate
+         * @description Actualización parcial de una memoria (owner-only).
+         *
+         *     Solo se aplican los campos enviados. ``content`` (si viene) reemplaza y recifra el
+         *     contenido. ``user_id`` es inmutable (no se declara).
+         */
+        AgentMemoryUpdate: {
+            /** Title */
+            title?: string | null;
+            /** Content */
+            content?: string | null;
+            kind?: components["schemas"]["AgentMemoryKind"] | null;
+            /** Patient Id */
+            patient_id?: string | null;
+            /** Consultation Id */
+            consultation_id?: string | null;
+        };
         /**
          * AiCredentialType
          * @description Tipo de credencial de proveedor de IA almacenada por el usuario.
@@ -4483,6 +4599,144 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CredentialLeaseResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_memories_api_v1_users_me_agent_memories_get: {
+        parameters: {
+            query?: {
+                patient_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentMemoryRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_memory_api_v1_users_me_agent_memories_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentMemoryCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentMemoryRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_memory_api_v1_users_me_agent_memories__memory_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                memory_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MessageResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_memory_api_v1_users_me_agent_memories__memory_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                memory_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentMemoryUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentMemoryRead"];
                 };
             };
             /** @description Validation Error */
