@@ -1,6 +1,12 @@
 import { ApiRequestError } from "@/core/api/api-error";
 
-import { getTool, defaultToolContext, type ToolDefinition, type ToolExecutionContext } from "./registry";
+import {
+  getTool,
+  defaultToolContext,
+  ToolExecutionError,
+  type ToolDefinition,
+  type ToolExecutionContext,
+} from "./registry";
 import { validateArgs } from "./schema-validator";
 
 // Resultado que se devuelve al gateway en turn.tool_result (forma de cable de B6).
@@ -79,6 +85,9 @@ export async function executeTool(
   } catch (error) {
     if (error instanceof ApiRequestError) {
       return mapApiError(error);
+    }
+    if (error instanceof ToolExecutionError) {
+      return { status: "error", code: error.code, message: error.message };
     }
     return { status: "error", code: "execution_failed", message: "No se pudo ejecutar la herramienta." };
   }

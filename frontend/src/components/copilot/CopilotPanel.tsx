@@ -24,6 +24,8 @@ import {
   resolveToolCall,
 } from "@/core/agent/tools/tool-runner";
 import { toWireToolDefinitions, type ToolDefinition } from "@/core/agent/tools/registry";
+import { isUiSpec, type UiSpec } from "@/core/agent/tools/ui-spec";
+import { GeneratedUi } from "@/components/copilot/GeneratedUi";
 
 interface ChatMessage {
   id: string;
@@ -42,6 +44,7 @@ interface ToolCallView {
   argsText: string;
   status: ToolCallStatus;
   resultText?: string;
+  resultContent?: unknown;
   errorText?: string;
 }
 
@@ -185,7 +188,7 @@ export function CopilotPanel() {
           patchToolCall(
             callId,
             result.status === "success"
-              ? { status: "success", resultText: previewContent(result.content) }
+              ? { status: "success", resultText: previewContent(result.content), resultContent: result.content }
               : { status: "error", errorText: result.message },
           );
           clientRef.current?.sendToolResult(turnId, callId, result);
@@ -246,8 +249,7 @@ export function CopilotPanel() {
   const isBusy = turn.status === "running" || turn.status === "waiting_for_tool";
   const canSend = status === "connected" && !isBusy && input.trim().length > 0;
 
-  const handleSend = (): void => {
-    const text = input.trim();
+  const sendUserTurn = (text: string): void => {
     if (!text || status !== "connected" || isBusy) {
       return;
     }
@@ -269,7 +271,22 @@ export function CopilotPanel() {
       tools: toWireToolDefinitions(),
       generation: { max_output_tokens: 1024 },
     });
+  };
+
+  const handleSend = (): void => {
+    const text = input.trim();
+    if (!text) {
+      return;
+    }
+    sendUserTurn(text);
     setInput("");
+  };
+
+  // Seguimiento desde una UI generada (submit de form / clic de botón): continúa la
+  // conversación con el modelo. Respeta el principio borrador: si el modelo decide una
+  // acción de escritura clínica, pasa por la aprobación de B8.
+  const handleSendFollowup = (text: string): void => {
+    sendUserTurn(text.trim());
   };
 
   const handleCancel = (): void => {
@@ -287,7 +304,7 @@ export function CopilotPanel() {
       patchToolCall(
         callId,
         result.status === "success"
-          ? { status: "success", resultText: previewContent(result.content) }
+          ? { status: "success", resultText: previewContent(result.content), resultContent: result.content }
           : { status: "error", errorText: result.message },
       );
       clientRef.current?.sendToolResult(pending.turnId, callId, result);
@@ -396,6 +413,7 @@ export function CopilotPanel() {
               call={call}
               onApprove={() => approveWrite(call.callId)}
               onReject={() => rejectWrite(call.callId)}
+              onSendFollowup={handleSendFollowup}
             />
           ))}
 
@@ -462,12 +480,31 @@ function MessageBubble({ message }: Readonly<{ message: ChatMessage }>) {
   );
 }
 
+function isSandboxResult(value: unknown): value is { value: unknown; logs: string[] } {
+  return typeof value === "object" && value !== null && "logs" in value;
+}
+
 function ToolCallCard({
   call,
   onApprove,
   onReject,
-}: Readonly<{ call: ToolCallView; onApprove: () => void; onReject: () => void }>) {
+  onSendFollowup,
+}: Readonly<{
+  call: ToolCallView;
+  onApprove: () => void;
+  onReject: () => void;
+  onSendFollowup: (text: string) => void;
+}>) {
   const meta = TOOL_STATUS[call.status];
+  const uiSpec: UiSpec | null =
+    call.status === "success" && call.name.startsWith("ui.") && isUiSpec(call.resultContent)
+      ? call.resultContent
+      : null;
+  const sandboxResult =
+    call.status === "success" && call.name === "sandbox.run_js" && isSandboxResult(call.resultContent)
+      ? call.resultContent
+      : null;
+
   return (
     <div className="rounded-[12px] border border-[var(--border2)] bg-[var(--bg2)] px-3.5 py-2.5">
       <div className="flex flex-wrap items-center gap-2">
@@ -478,9 +515,11 @@ function ToolCallCard({
         <Badge tone={meta.tone}>{meta.label}</Badge>
       </div>
 
-      <pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-words text-xs text-[var(--tx2)]">
-        {call.argsText}
-      </pre>
+      {!uiSpec && (
+        <pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-words text-xs text-[var(--tx2)]">
+          {call.argsText}
+        </pre>
+      )}
 
       {call.status === "awaiting_approval" && (
         <div className="mt-2">
@@ -503,7 +542,26 @@ function ToolCallCard({
         </div>
       )}
 
-      {call.status === "success" && call.resultText && (
+      {uiSpec && (
+        <div className="mt-2 rounded-[8px] bg-[var(--panel2)] p-3">
+          <GeneratedUi spec={uiSpec} onSendFollowup={onSendFollowup} />
+        </div>
+      )}
+
+      {sandboxResult && (
+        <div className="mt-2 space-y-2">
+          {sandboxResult.logs.length > 0 && (
+            <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-[8px] bg-[var(--panel2)] p-2 text-xs text-[var(--tx2)]">
+              {sandboxResult.logs.join("\n")}
+            </pre>
+          )}
+          <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-[8px] bg-[var(--panel2)] p-2 text-xs text-[var(--tx)]">
+            {previewContent(sandboxResult.value)}
+          </pre>
+        </div>
+      )}
+
+      {call.status === "success" && !uiSpec && !sandboxResult && call.resultText && (
         <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-[8px] bg-[var(--panel2)] p-2 text-xs text-[var(--tx)]">
           {call.resultText}
         </pre>
