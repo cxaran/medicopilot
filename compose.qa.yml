@@ -32,6 +32,11 @@ x-backend-environment: &backend-environment
   SMTP_TLS: "false"
   SMTP_SSL: "false"
   SMTP_USE_CREDENTIALS: "false"
+  # Clave Fernet DEDICADA (QA-only) para cifrar en reposo las credenciales de proveedor
+  # de IA (B3/B10). Sin ella, el alta de API key responde 500. El flujo OAuth de ChatGPT
+  # se deja SIN configurar a propósito (sin OPENAI_OAUTH_*) para validar la ruta "no
+  # disponible" (503) sin credenciales reales.
+  AI_CREDENTIAL_KEY: 28xZin-IsJd7cWkJZFtFum3N6c-2zjtONYJ9I144pp0=
   POSTGRES_USER: medicopilot
   POSTGRES_PASSWORD: medicopilot
   POSTGRES_SERVER: postgres

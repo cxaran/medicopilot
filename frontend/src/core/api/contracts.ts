@@ -7,6 +7,18 @@ export type UserProfileRead = components["schemas"]["UserProfileRead"];
 export type UserProfileUpdate = components["schemas"]["UserProfileUpdate"];
 export type UserPasswordChangeRequest = components["schemas"]["UserPasswordChangeRequest"];
 
+// Proveedores de IA del usuario (credenciales API key + conexión OAuth ChatGPT). El
+// secreto en claro nunca viaja de vuelta: ``AiProviderCredentialRead`` no lo incluye.
+export type AiProvider = components["schemas"]["AiProvider"];
+export type AiCredentialType = components["schemas"]["AiCredentialType"];
+export type AiProviderCredentialRead = components["schemas"]["AiProviderCredentialRead"];
+export type AiProviderCredentialCreate = components["schemas"]["AiProviderCredentialCreate"];
+export type AiProviderCredentialUpdate = components["schemas"]["AiProviderCredentialUpdate"];
+export type OAuthStartResponse = components["schemas"]["OAuthStartResponse"];
+export type OAuthStatusResponse = components["schemas"]["OAuthStatusResponse"];
+export type OAuthCompleteRequest = components["schemas"]["OAuthCompleteRequest"];
+export type MessageResponse = components["schemas"]["MessageResponse"];
+
 // Capabilities de recursos (Commit 3 backend). Aliases type-only sobre los schemas
 // generados; nunca interfaces escritas a mano.
 export type ResourceCapability = components["schemas"]["ResourceCapability"];
