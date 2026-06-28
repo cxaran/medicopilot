@@ -37,6 +37,10 @@ x-backend-environment: &backend-environment
   # se deja SIN configurar a propósito (sin OPENAI_OAUTH_*) para validar la ruta "no
   # disponible" (503) sin credenciales reales.
   AI_CREDENTIAL_KEY: 28xZin-IsJd7cWkJZFtFum3N6c-2zjtONYJ9I144pp0=
+  # Secretos compartidos con el model-gateway (B14a). Valores DUMMY de QA (no producción);
+  # el ticket y el internal DEBEN coincidir con los del servicio model-gateway de abajo.
+  AGENT_GATEWAY_TICKET_SECRET: qa-agent-ticket-secret-shared-dummy
+  AGENT_GATEWAY_INTERNAL_SECRET: qa-internal-lease-secret-shared-dummy
   POSTGRES_USER: medicopilot
   POSTGRES_PASSWORD: medicopilot
   POSTGRES_SERVER: postgres
@@ -105,10 +109,40 @@ services:
       migrate:
         condition: service_completed_successfully
 
+  # model-gateway (B14a): runtime de inferencia. Verifica el ticket JWT del backend y
+  # arrienda credenciales por el puente interno; sus secretos DEBEN coincidir con los del
+  # backend QA. Sin credencial de proveedor real solo responde catálogo (models.list).
+  model-gateway:
+    build:
+      context: ./model-gateway
+    image: medicopilot-gateway:qa
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: "8081"
+      GATEWAY_PUBLIC_PATH_PREFIX: /model-gateway
+      GATEWAY_ENABLE_ROOT_PATH_ALIAS: "true"
+      # El navegador llega por nginx en http://localhost:3300 (origen de las peticiones).
+      GATEWAY_ALLOWED_ORIGINS: http://localhost:3300
+      # Mismos valores que el backend QA (verificación de ticket y arriendo interno).
+      GATEWAY_AGENT_TICKET_SECRET: qa-agent-ticket-secret-shared-dummy
+      GATEWAY_BACKEND_INTERNAL_URL: http://backend:8000
+      GATEWAY_BACKEND_INTERNAL_SECRET: qa-internal-lease-secret-shared-dummy
+      # Base de opencode (provisional; no se usa sin credencial real, eso es B14b).
+      GATEWAY_OPENCODE_BASE_URL: https://opencode.ai/zen/v1
+    expose:
+      - "8081"
+    depends_on:
+      - backend
+
   frontend:
     build:
       context: ./frontend
       target: prod
+      args:
+        # URL pública del gateway vía nginx (mismo origen que el frontend QA). Se inyecta
+        # en build (NEXT_PUBLIC_*) para que el copiloto conecte en QA.
+        NEXT_PUBLIC_AGENT_GATEWAY_URL: http://localhost:3300/model-gateway
     image: medicopilot-frontend:qa
     environment:
       API_PROXY_TARGET: http://backend:8000
@@ -123,10 +157,12 @@ services:
     ports:
       - "3300:80"
     volumes:
-      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      # Config QA propia (añade la ruta /model-gateway/ con WS); el dev manual no se toca.
+      - ./nginx/nginx.qa.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
       - frontend
       - backend
+      - model-gateway
 
   mailpit:
     image: axllent/mailpit:latest
