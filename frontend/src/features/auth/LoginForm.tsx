@@ -6,8 +6,8 @@ import { useRouter } from "next/navigation";
 import { ApiRequestError } from "@/core/api/api-error";
 import { browserApi } from "@/core/api/browser-client";
 import { Button } from "@/components/ui/Button";
-import { FieldError } from "@/components/ui/FieldError";
 import { Input } from "@/components/ui/Input";
+import { AuthAlert, AuthLabel } from "@/features/auth/PublicAuthShell";
 
 export function LoginForm() {
   const router = useRouter();
@@ -43,22 +43,12 @@ export function LoginForm() {
 
   return (
     <form className="space-y-4" onSubmit={onSubmit}>
-      <div className="space-y-1">
-        <label className="text-sm font-medium" htmlFor="email">
-          Email
-        </label>
-        <Input
-          id="email"
-          name="email"
-          type="email"
-          autoComplete="email"
-          required
-        />
+      <div className="space-y-1.5">
+        <AuthLabel htmlFor="email">Correo electrónico</AuthLabel>
+        <Input id="email" name="email" type="email" autoComplete="email" required />
       </div>
-      <div className="space-y-1">
-        <label className="text-sm font-medium" htmlFor="password">
-          Contraseña
-        </label>
+      <div className="space-y-1.5">
+        <AuthLabel htmlFor="password">Contraseña</AuthLabel>
         <Input
           id="password"
           name="password"
@@ -67,7 +57,11 @@ export function LoginForm() {
           required
         />
       </div>
-      <FieldError message={error} />
+      {error ? (
+        <AuthAlert tone="danger" role="alert">
+          {error}
+        </AuthAlert>
+      ) : null}
       <Button className="w-full" disabled={isPending} type="submit">
         {isPending ? "Ingresando..." : "Ingresar"}
       </Button>
