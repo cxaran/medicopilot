@@ -82,6 +82,16 @@ export class InMemoryTurnStore implements TurnStorePort {
     return turn;
   }
 
+  async cancel(turnId: string): Promise<ModelTurn> {
+    const turn = this.mustGet(turnId);
+    assertTurnTransition(turn.status, "cancelled");
+    turn.status = "cancelled";
+    turn.pendingToolCalls.clear();
+    turn.providerContinuationState = null;
+    turn.updatedAt = new Date();
+    return turn;
+  }
+
   async cancelByBrowserSession(browserSessionId: string): Promise<ModelTurn[]> {
     const cancelled: ModelTurn[] = [];
 
@@ -89,6 +99,8 @@ export class InMemoryTurnStore implements TurnStorePort {
       if (turn.browserSessionId === browserSessionId && !isTerminalStatus(turn.status)) {
         assertTurnTransition(turn.status, "cancelled");
         turn.status = "cancelled";
+        turn.pendingToolCalls.clear();
+        turn.providerContinuationState = null;
         turn.updatedAt = new Date();
         cancelled.push(turn);
       }

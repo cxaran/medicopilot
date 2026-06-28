@@ -17,5 +17,7 @@ export interface TurnStorePort {
   consumeToolResult(turnId: string, result: ToolCallResult): Promise<{ turn: ModelTurn; call: ToolCallRequest }>;
   setContinuationState(turnId: string, continuationState: unknown | null): Promise<ModelTurn>;
   setUsage(turnId: string, usage: ModelTurn["usage"]): Promise<ModelTurn>;
+  // Cancela un turn concreto (B6: verbo agent.cancel_turn) limpiando sus pending tool calls.
+  cancel(turnId: string): Promise<ModelTurn>;
   cancelByBrowserSession(browserSessionId: string): Promise<ModelTurn[]>;
 }

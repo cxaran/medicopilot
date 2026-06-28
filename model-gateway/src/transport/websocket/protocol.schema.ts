@@ -67,6 +67,33 @@ export const TurnToolResultMessageSchema = Type.Object({
   result: ToolResultPayloadSchema
 });
 
+// B6: RPC de catálogo y verbos de control sobre el MISMO WS (patrón OpenClaw).
+export const ModelsListMessageSchema = Type.Object({
+  type: Type.Literal("models.list"),
+  request_id: Type.String({ minLength: 1 }),
+  view: Type.Optional(Type.Literal("default"))
+});
+
+export const ProviderStatusMessageSchema = Type.Object({
+  type: Type.Literal("provider.status"),
+  request_id: Type.String({ minLength: 1 })
+});
+
+export const AgentCancelTurnMessageSchema = Type.Object({
+  type: Type.Literal("agent.cancel_turn"),
+  request_id: Type.String({ minLength: 1 }),
+  // Opcional: si se omite, cancela el/los turn(s) activo(s) de la sesión.
+  turn_id: Type.Optional(Type.String({ minLength: 1 }))
+});
+
 export type TurnStartMessage = Static<typeof TurnStartMessageSchema>;
 export type TurnToolResultMessage = Static<typeof TurnToolResultMessageSchema>;
-export type ClientMessage = TurnStartMessage | TurnToolResultMessage;
+export type ModelsListMessage = Static<typeof ModelsListMessageSchema>;
+export type ProviderStatusMessage = Static<typeof ProviderStatusMessageSchema>;
+export type AgentCancelTurnMessage = Static<typeof AgentCancelTurnMessageSchema>;
+export type ClientMessage =
+  | TurnStartMessage
+  | TurnToolResultMessage
+  | ModelsListMessage
+  | ProviderStatusMessage
+  | AgentCancelTurnMessage;

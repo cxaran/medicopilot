@@ -1,16 +1,27 @@
 import { Value } from "@sinclair/typebox/value";
-import { TurnStartMessageSchema, TurnToolResultMessageSchema } from "./protocol.schema.js";
+import {
+  AgentCancelTurnMessageSchema,
+  ModelsListMessageSchema,
+  ProviderStatusMessageSchema,
+  TurnStartMessageSchema,
+  TurnToolResultMessageSchema
+} from "./protocol.schema.js";
+import type { TSchema } from "@sinclair/typebox";
+import type { CatalogView } from "../../ports/model-catalog.port.js";
 import type { ClientMessage } from "./protocol.schema.js";
 import type { StartTurnRequest } from "../../application/capabilities/request-normalizer.js";
 import type { ToolCallResult } from "../../domain/tool.js";
 
-function schemaErrorText(schema: typeof TurnStartMessageSchema | typeof TurnToolResultMessageSchema, value: unknown): string {
+function schemaErrorText(schema: TSchema, value: unknown): string {
   return [...Value.Errors(schema, value)].map((error) => `${error.path} ${error.message}`).join("; ");
 }
 
 export type ParsedClientMessage =
   | { kind: "turn.start"; request: StartTurnRequest }
-  | { kind: "turn.tool_result"; turnId: string; result: ToolCallResult };
+  | { kind: "turn.tool_result"; turnId: string; result: ToolCallResult }
+  | { kind: "models.list"; requestId: string; view: CatalogView }
+  | { kind: "provider.status"; requestId: string }
+  | { kind: "agent.cancel_turn"; requestId: string; turnId?: string };
 
 export function parseClientMessage(raw: unknown): ParsedClientMessage {
   const parsed = typeof raw === "string" ? (JSON.parse(raw) as unknown) : raw;
@@ -75,6 +86,37 @@ export function parseClientMessage(raw: unknown): ParsedClientMessage {
         result: typed.result
       }
     };
+  }
+
+  if (typed.type === "models.list") {
+    if (!Value.Check(ModelsListMessageSchema, typed)) {
+      throw new Error(schemaErrorText(ModelsListMessageSchema, typed));
+    }
+
+    return { kind: "models.list", requestId: typed.request_id, view: typed.view ?? "default" };
+  }
+
+  if (typed.type === "provider.status") {
+    if (!Value.Check(ProviderStatusMessageSchema, typed)) {
+      throw new Error(schemaErrorText(ProviderStatusMessageSchema, typed));
+    }
+
+    return { kind: "provider.status", requestId: typed.request_id };
+  }
+
+  if (typed.type === "agent.cancel_turn") {
+    if (!Value.Check(AgentCancelTurnMessageSchema, typed)) {
+      throw new Error(schemaErrorText(AgentCancelTurnMessageSchema, typed));
+    }
+
+    const parsedCancel: { kind: "agent.cancel_turn"; requestId: string; turnId?: string } = {
+      kind: "agent.cancel_turn",
+      requestId: typed.request_id
+    };
+    if (typed.turn_id !== undefined) {
+      parsedCancel.turnId = typed.turn_id;
+    }
+    return parsedCancel;
   }
 
   throw new Error("Unknown WebSocket message type");

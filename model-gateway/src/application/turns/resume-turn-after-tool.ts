@@ -53,6 +53,7 @@ export class ResumeTurnAfterTool {
       const abortController = new AbortController();
 
       await this.dependencies.turnStore.transition(turn.id, "running");
+      const accumulator = { text: "" };
       for await (const event of adapter.resumeTurn({
         turnId: turn.id,
         model,
@@ -62,7 +63,8 @@ export class ResumeTurnAfterTool {
         signal: abortController.signal
       })) {
         if (event.type === "text.delta") {
-          await sink.emit({ type: "turn.text.delta", turn_id: turn.id, delta: event.delta });
+          accumulator.text += event.delta;
+          await sink.emit({ type: "turn.text.delta", turn_id: turn.id, delta: event.delta, snapshot: accumulator.text });
         } else if (event.type === "reasoning.summary") {
           await sink.emit({ type: "turn.reasoning.summary", turn_id: turn.id, summary: event.summary });
         } else if (event.type === "tool_call.ready") {

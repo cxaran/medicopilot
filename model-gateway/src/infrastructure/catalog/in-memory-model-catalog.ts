@@ -1,6 +1,6 @@
 import { GatewayError } from "../../kernel/errors.js";
 import { createFakeModel } from "../../domain/model.js";
-import type { ModelCatalogPort } from "../../ports/model-catalog.port.js";
+import type { CatalogView, ModelCatalogPort } from "../../ports/model-catalog.port.js";
 import type { ModelDescriptor, ModelId, ProviderId } from "../../domain/model.js";
 
 export class InMemoryModelCatalog implements ModelCatalogPort {
@@ -19,5 +19,10 @@ export class InMemoryModelCatalog implements ModelCatalogPort {
     }
 
     return model;
+  }
+
+  async list(_input?: { view?: CatalogView }): Promise<ModelDescriptor[]> {
+    // MG-001/B6: una sola vista ("default"); devuelve todo el catálogo en memoria.
+    return [...this.models.values()];
   }
 }

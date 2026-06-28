@@ -43,6 +43,18 @@ The first real provider adapter is `OpencodeProviderAdapter` (`providers/opencod
 
 Capability schema enrichment (B5, OpenClaw pattern): `ModelCapabilities` now separates the native `contextWindowTokens` from an effective `effectiveContextTokens` cap (the context budgeter uses the smaller), and adds a `compat` block of fine wire-shape flags (`supportsTools`, `supportsReasoningEffort`, `thinkingFormat`, `supportsStrictMode`, `supportsUsageInStreaming`, `supportsEagerToolInputStreaming`) consumed by provider adapters. The granular capability checks remain authoritative in the negotiator. All HTTP for opencode is mocked in tests; the real end-to-end with a live key lands in B13.
 
+## WebSocket protocol (MG-002, B6)
+
+Over the same authenticated WebSocket as the turn flow, the gateway exposes catalog RPCs and control verbs (OpenClaw pattern: catalog over the same WS, no separate REST). The turn flow (`turn.start` / `turn.tool_result` → `turn.started` / `turn.text.delta` / `turn.tool_call.ready` / `turn.completed` / `turn.failed`) is unchanged and additive.
+
+Client → gateway:
+
+- `models.list` `{ request_id, view?: "default" }` — read-only. Replies `models.list.result` `{ request_id, view, models }`, where each model is the catalog descriptor in wire shape (snake_case) with the enriched B5 capabilities (native `context_window_tokens` vs `effective_context_tokens`, `compat` flags, modality arrays). Includes both the opencode and fake models. No credentials are exposed.
+- `provider.status` `{ request_id }` — read-only. Replies `provider.status.result` `{ request_id, providers }` listing the provider protocols registered gateway-side (`opencode_zen`, `fake`) with `available` reflecting gateway config (e.g. opencode base URL set). It does **not** read user credentials — the frontend queries those against FastAPI `/users/me/ai-providers`.
+- `agent.cancel_turn` `{ request_id, turn_id? }` — cancels an in-flight turn of the current browser session (transitions to `cancelled` via the state machine, clears pending tool calls). If `turn_id` is omitted, cancels the session's active turn(s). Emits `turn.cancelled` `{ turn_id }` per cancelled turn and replies `agent.cancel_turn.result` `{ request_id, cancelled_turn_ids }`. On failure (e.g. no active turn → `NO_ACTIVE_TURN`, foreign/unknown turn → `TURN_NOT_FOUND`, already terminal → `TURN_NOT_CANCELLABLE`) replies `rpc.error` `{ request_id, code, message }`.
+
+Streaming snapshot (OpenClaw resync pattern): `turn.text.delta` now also carries a `snapshot` field — the accumulated assistant text for the current streaming segment — so a reconnecting client can resync without replaying every delta. This is additive (existing consumers can ignore it). The snapshot resets per streaming segment; a full cross-segment snapshot that survives a tool round-trip is deferred (it would require persisting accumulated text in the turn store).
+
 ## Routing
 
 - The canonical public prefix is configured by `GATEWAY_PUBLIC_PATH_PREFIX`, defaulting to `/model-gateway`.

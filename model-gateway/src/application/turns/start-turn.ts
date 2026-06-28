@@ -17,10 +17,13 @@ import type { TurnUsage } from "../../domain/usage.js";
 
 export type TurnEvent =
   | { type: "turn.started"; turn_id: string }
-  | { type: "turn.text.delta"; turn_id: string; delta: string }
+  // B6 (patrón OpenClaw): además del delta incremental, snapshot = texto acumulado del
+  // mensaje en este segmento de streaming, para que un cliente que reconecta resincronice.
+  | { type: "turn.text.delta"; turn_id: string; delta: string; snapshot: string }
   | { type: "turn.reasoning.summary"; turn_id: string; summary: string }
   | { type: "turn.tool_call.ready"; turn_id: string; call_id: string; tool_name: string; arguments: unknown }
   | { type: "turn.completed"; turn_id: string; usage: { input_tokens: number | null; output_tokens: number | null; cached_input_tokens: number | null } }
+  | { type: "turn.cancelled"; turn_id: string }
   | { type: "turn.failed"; turn_id?: string; code: string; message: string; details?: unknown };
 
 export interface TurnEventSink {
@@ -115,6 +118,7 @@ export class StartTurn {
 
       const adapter = this.dependencies.providerRegistry.get(model.route.protocol);
       const abortController = new AbortController();
+      const accumulator = { text: "" };
 
       for await (const event of adapter.startTurn({
         turnId: turn.id,
@@ -125,7 +129,7 @@ export class StartTurn {
         options: negotiated.generation,
         signal: abortController.signal
       })) {
-        await this.handleProviderEvent(turn.id, event, sink);
+        await this.handleProviderEvent(turn.id, event, sink, accumulator);
       }
     } catch (error) {
       const gatewayError = toGatewayError(error);
@@ -158,9 +162,15 @@ export class StartTurn {
     }
   }
 
-  private async handleProviderEvent(turnId: string, event: ProviderEvent, sink: TurnEventSink): Promise<void> {
+  private async handleProviderEvent(
+    turnId: string,
+    event: ProviderEvent,
+    sink: TurnEventSink,
+    accumulator: { text: string }
+  ): Promise<void> {
     if (event.type === "text.delta") {
-      await sink.emit({ type: "turn.text.delta", turn_id: turnId, delta: event.delta });
+      accumulator.text += event.delta;
+      await sink.emit({ type: "turn.text.delta", turn_id: turnId, delta: event.delta, snapshot: accumulator.text });
       return;
     }
 

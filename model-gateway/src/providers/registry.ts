@@ -20,4 +20,8 @@ export class ProviderRegistry implements ProviderRegistryPort {
 
     return adapter;
   }
+
+  protocols(): ProviderProtocol[] {
+    return [...this.adapters.keys()];
+  }
 }

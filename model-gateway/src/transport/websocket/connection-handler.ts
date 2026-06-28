@@ -3,13 +3,17 @@ import type { FastifyRequest } from "fastify";
 import { parseCookie } from "../http/cookies.js";
 import { StartTurn } from "../../application/turns/start-turn.js";
 import { ResumeTurnAfterTool } from "../../application/turns/resume-turn-after-tool.js";
+import { CancelTurn } from "../../application/turns/cancel-turn.js";
+import { toGatewayError } from "../../kernel/errors.js";
 import { parseClientMessage } from "./protocol.parser.js";
+import { describeProviderStatus, toWireModel } from "./wire.js";
 import type { GatewayContainer } from "../../bootstrap/container.js";
 import type { TurnEventSink } from "../../application/turns/start-turn.js";
 
 export function createWebSocketHandler(container: GatewayContainer) {
   const startTurn = new StartTurn(container);
   const resumeTurn = new ResumeTurnAfterTool(container);
+  const cancelTurn = new CancelTurn(container);
 
   return (socket: WebSocket, request: FastifyRequest): void => {
     const origin = request.headers.origin;
@@ -25,11 +29,15 @@ export function createWebSocketHandler(container: GatewayContainer) {
       return;
     }
 
+    const send = (payload: unknown): void => {
+      if (socket.readyState === socket.OPEN) {
+        socket.send(JSON.stringify(payload));
+      }
+    };
+
     const sink: TurnEventSink = {
       async emit(event) {
-        if (socket.readyState === socket.OPEN) {
-          socket.send(JSON.stringify(event));
-        }
+        send(event);
       }
     };
 
@@ -38,37 +46,83 @@ export function createWebSocketHandler(container: GatewayContainer) {
         try {
           const raw = data.toString();
           if (Buffer.byteLength(raw, "utf8") > container.settings.maxWebSocketMessageBytes) {
-            socket.send(
-              JSON.stringify({
-                type: "protocol.error",
-                code: "MESSAGE_TOO_LARGE",
-                message: "WebSocket message exceeds the configured size limit"
-              })
-            );
+            send({
+              type: "protocol.error",
+              code: "MESSAGE_TOO_LARGE",
+              message: "WebSocket message exceeds the configured size limit"
+            });
             return;
           }
 
           const parsed = parseClientMessage(raw);
-          if (parsed.kind === "turn.start") {
-            await startTurn.execute(browserSession, parsed.request, sink);
-          } else {
-            if (Buffer.byteLength(JSON.stringify(parsed.result.result), "utf8") > container.settings.maxToolResultBytes) {
-              socket.send(
-                JSON.stringify({
+
+          switch (parsed.kind) {
+            case "turn.start":
+              await startTurn.execute(browserSession, parsed.request, sink);
+              return;
+
+            case "turn.tool_result": {
+              if (
+                Buffer.byteLength(JSON.stringify(parsed.result.result), "utf8") >
+                container.settings.maxToolResultBytes
+              ) {
+                send({
                   type: "turn.failed",
                   turn_id: parsed.turnId,
                   code: "TOOL_RESULT_TOO_LARGE",
                   message: "Tool result exceeds the configured size limit"
-                })
-              );
+                });
+                return;
+              }
+
+              await resumeTurn.execute(parsed.turnId, parsed.result, sink);
               return;
             }
 
-            await resumeTurn.execute(parsed.turnId, parsed.result, sink);
+            case "models.list": {
+              const models = await container.modelCatalog.list({ view: parsed.view });
+              send({
+                type: "models.list.result",
+                request_id: parsed.requestId,
+                view: parsed.view,
+                models: models.map(toWireModel)
+              });
+              return;
+            }
+
+            case "provider.status": {
+              const providers = describeProviderStatus(
+                container.providerRegistry.protocols(),
+                container.settings
+              );
+              send({ type: "provider.status.result", request_id: parsed.requestId, providers });
+              return;
+            }
+
+            case "agent.cancel_turn": {
+              try {
+                const cancelInput = parsed.turnId === undefined ? {} : { turnId: parsed.turnId };
+                const cancelledTurnIds = await cancelTurn.execute(browserSession, cancelInput, sink);
+                send({
+                  type: "agent.cancel_turn.result",
+                  request_id: parsed.requestId,
+                  cancelled_turn_ids: cancelledTurnIds
+                });
+              } catch (error) {
+                const gatewayError = toGatewayError(error);
+                send({
+                  type: "rpc.error",
+                  request_id: parsed.requestId,
+                  code: gatewayError.code,
+                  message: gatewayError.message
+                });
+              }
+              return;
+            }
           }
         } catch (error) {
           const message = error instanceof Error ? error.message : "Invalid WebSocket message";
-          socket.send(JSON.stringify({ type: "protocol.error", code: "INVALID_MESSAGE", message }));
+          send({ type: "protocol.error", code: "INVALID_MESSAGE", message });
         }
       })();
     });
