@@ -91,11 +91,25 @@ class LabAbnormalCriterion(ApiWriteSchema):
 
 
 class VitalThresholdCriterion(ApiWriteSchema):
-    """Umbral sobre un signo vital: métrica, comparador y valor de referencia."""
+    """Umbral sobre un signo vital: métrica, comparador y valor de referencia.
+
+    ``comparator`` y ``value`` son opcionales: si se omiten ambos, se usa el umbral de
+    bandera roja CONFIGURADO en la institución para ese signo vital. Si se quiere un
+    umbral explícito, deben indicarse AMBOS (no uno solo).
+    """
 
     vital: VitalMetric
-    comparator: Comparator
-    value: float
+    comparator: Optional[Comparator] = None
+    value: Optional[float] = None
+
+    @model_validator(mode="after")
+    def _both_or_neither(self) -> "VitalThresholdCriterion":
+        if (self.comparator is None) != (self.value is None):
+            raise ValueError(
+                "Indique 'comparator' y 'value' juntos, o ninguno para usar la "
+                "configuración institucional."
+            )
+        return self
 
 
 class AgeRangeCriterion(ApiWriteSchema):

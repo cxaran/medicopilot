@@ -22,10 +22,12 @@ contactar pacientes ni se actúa sobre ella automáticamente.
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter
+from fastapi import APIRouter, status
 from sqlalchemy import ColumnElement, func, literal, or_, select
 from sqlalchemy.orm.attributes import InstrumentedAttribute
+from sqlmodel import Session
 
+from backend.app.api.resource_actions import api_error
 from backend.app.core.database import SessionDep
 from backend.app.core.settings import settings
 from backend.app.models.appointment import Appointment
@@ -49,6 +51,7 @@ from backend.app.schemas.cohort import (
     VitalThresholdCriterion,
 )
 from backend.app.security.groups.population import PopulationPermissions
+from backend.app.services.institutional_settings import resolve_vital_threshold
 
 router = APIRouter(prefix="/population", tags=["population"])
 
@@ -143,15 +146,17 @@ def _lab_abnormal_exists(
     return select(literal(1)).select_from(LabResult).where(*clauses).exists()
 
 
-def _vital_threshold_exists(criterion: VitalThresholdCriterion) -> ColumnElement[bool]:
+def _vital_threshold_exists(
+    vital: VitalMetric, comparator: Comparator, value: float
+) -> ColumnElement[bool]:
     """EXISTS: el paciente tiene una medición de signo vital que cruza el umbral."""
-    column = _VITAL_COLUMNS[criterion.vital]
+    column = _VITAL_COLUMNS[vital]
     comparisons: dict[Comparator, ColumnElement[bool]] = {
-        Comparator.GTE: column >= criterion.value,
-        Comparator.LTE: column <= criterion.value,
-        Comparator.GT: column > criterion.value,
-        Comparator.LT: column < criterion.value,
-        Comparator.EQ: column == criterion.value,
+        Comparator.GTE: column >= value,
+        Comparator.LTE: column <= value,
+        Comparator.GT: column > value,
+        Comparator.LT: column < value,
+        Comparator.EQ: column == value,
     }
     return (
         select(literal(1))
@@ -162,7 +167,7 @@ def _vital_threshold_exists(criterion: VitalThresholdCriterion) -> ColumnElement
             Consultation.deleted_at.is_(None),
             VitalSign.deleted_at.is_(None),
             column.is_not(None),
-            comparisons[criterion.comparator],
+            comparisons[comparator],
         )
         .exists()
     )
@@ -183,13 +188,40 @@ def _appointment_no_show_exists(
     return select(literal(1)).select_from(Appointment).where(*clauses).exists()
 
 
+def _resolve_vital_threshold(
+    session: Session, criterion: VitalThresholdCriterion
+) -> ColumnElement[bool]:
+    """Resuelve el umbral de signo vital: valor explícito o configuración institucional.
+
+    Si el criterio trae comparador+valor, se usan tal cual (camino explícito, sin cambios).
+    Si no, se lee el umbral de bandera roja configurado para ese signo vital; si no hay
+    configuración, responde 422.
+    """
+    if criterion.comparator is not None and criterion.value is not None:
+        return _vital_threshold_exists(
+            criterion.vital, criterion.comparator, criterion.value
+        )
+    resolved = resolve_vital_threshold(session, criterion.vital)
+    if resolved is None:
+        api_error(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "missing_threshold",
+            f"No hay un umbral configurado para '{criterion.vital.value}'; "
+            "indique 'comparator' y 'value' explícitos.",
+        )
+    comparator, value = resolved
+    return _vital_threshold_exists(criterion.vital, comparator, value)
+
+
 def build_cohort_conditions(
-    criteria: CohortCriteria, *, today: date, tz: ZoneInfo
+    criteria: CohortCriteria, *, today: date, tz: ZoneInfo, session: Session
 ) -> list[ColumnElement[bool]]:
     """Traduce los criterios a predicados ORM sobre ``Patient`` (todos AND).
 
     Siempre se excluye a los pacientes con baja lógica. ``today`` y ``tz`` se inyectan
-    para que la edad y las ventanas de fecha sean deterministas y comprobables.
+    para que la edad y las ventanas de fecha sean deterministas y comprobables. La
+    ``session`` permite resolver umbrales desde la configuración institucional cuando el
+    criterio de signo vital no trae un valor explícito.
     """
     conditions: list[ColumnElement[bool]] = [Patient.deleted_at.is_(None)]
 
@@ -212,7 +244,7 @@ def build_cohort_conditions(
         conditions.append(_lab_abnormal_exists(criteria.lab_abnormal, tz))
 
     if criteria.vital_threshold is not None:
-        conditions.append(_vital_threshold_exists(criteria.vital_threshold))
+        conditions.append(_resolve_vital_threshold(session, criteria.vital_threshold))
 
     if criteria.appointment_no_show is not None:
         conditions.append(_appointment_no_show_exists(criteria.appointment_no_show, tz))
@@ -228,7 +260,7 @@ def query_cohort(
 ) -> CohortResult:
     tz = ZoneInfo(settings.application_timezone)
     today = datetime.now(tz).date()
-    conditions = build_cohort_conditions(payload, today=today, tz=tz)
+    conditions = build_cohort_conditions(payload, today=today, tz=tz, session=session)
 
     count = session.execute(
         select(func.count()).select_from(Patient).where(*conditions)

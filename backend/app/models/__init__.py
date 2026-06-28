@@ -35,9 +35,11 @@ from backend.app.models.enums import (
     PregnancyStatus,
     PrescriptionStatus,
     RecordStatus,
+    SettingCategory,
     Sex,
     StudyOrderStatus,
 )
+from backend.app.models.institutional_setting import InstitutionalSetting
 from backend.app.models.lab_result import LabResult
 from backend.app.models.medical_history import MedicalHistoryVersion
 from backend.app.models.medication_template import MedicationTemplate
@@ -79,6 +81,7 @@ __all__ = [
     "ConsultationDiagnosisKind",
     "ConsultationStatus",
     "Doctor",
+    "InstitutionalSetting",
     "LabResult",
     "LabResultAbnormalFlag",
     "MedicalHistoryVersion",
@@ -96,6 +99,7 @@ __all__ = [
     "RecordStatus",
     "Role",
     "RoleAccess",
+    "SettingCategory",
     "Sex",
     "StudyOrder",
     "StudyOrderStatus",

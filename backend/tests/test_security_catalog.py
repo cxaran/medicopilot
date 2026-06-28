@@ -47,6 +47,9 @@ from backend.app.security.groups.clinical_tasks import (  # noqa: E402
     ClinicalTaskPermissions,
 )
 from backend.app.security.groups.doctors import DoctorPermissions  # noqa: E402
+from backend.app.security.groups.institutional_settings import (  # noqa: E402
+    InstitutionalSettingPermissions,
+)
 from backend.app.security.groups.lab_results import LabResultPermissions  # noqa: E402
 from backend.app.security.groups.medical_history_versions import (  # noqa: E402
     MedicalHistoryVersionPermissions,
@@ -99,6 +102,7 @@ class SecurityCatalogTest(unittest.TestCase):
                 ClinicalDocumentPermissions,
                 PopulationPermissions,
                 ReportsPermissions,
+                InstitutionalSettingPermissions,
                 PermissionPermissions,
             ],
         )
@@ -189,6 +193,10 @@ class SecurityCatalogTest(unittest.TestCase):
                 "clinical_documents:download",
                 "population:read",
                 "reports:read",
+                "institutional_settings:read",
+                "institutional_settings:create",
+                "institutional_settings:update",
+                "institutional_settings:delete",
                 "permissions:read",
             ],
         )

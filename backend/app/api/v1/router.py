@@ -19,6 +19,9 @@ from backend.app.api.v1.consultation_diagnoses import (
 )
 from backend.app.api.v1.consultations import router as consultations_router
 from backend.app.api.v1.doctors import router as doctors_router
+from backend.app.api.v1.institutional_settings import (
+    router as institutional_settings_router,
+)
 from backend.app.api.v1.lab_results import router as lab_results_router
 from backend.app.api.v1.medical_history_versions import (
     router as medical_history_versions_router,
@@ -60,6 +63,7 @@ router.include_router(clinical_tasks_router)
 router.include_router(consultation_diagnoses_router)
 router.include_router(consultations_router)
 router.include_router(doctors_router)
+router.include_router(institutional_settings_router)
 router.include_router(lab_results_router)
 router.include_router(medical_history_versions_router)
 router.include_router(medication_templates_router)

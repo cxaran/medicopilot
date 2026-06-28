@@ -845,6 +845,43 @@ export interface paths {
         patch: operations["update_doctor_api_v1_doctors__doctor_id__patch"];
         trace?: never;
     };
+    "/api/v1/institutional-settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Institutional Settings */
+        get: operations["list_institutional_settings_api_v1_institutional_settings_get"];
+        put?: never;
+        /** Create Institutional Setting */
+        post: operations["create_institutional_setting_api_v1_institutional_settings_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/institutional-settings/{setting_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Institutional Setting */
+        get: operations["get_institutional_setting_api_v1_institutional_settings__setting_id__get"];
+        put?: never;
+        post?: never;
+        /** Delete Institutional Setting */
+        delete: operations["delete_institutional_setting_api_v1_institutional_settings__setting_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Institutional Setting */
+        patch: operations["update_institutional_setting_api_v1_institutional_settings__setting_id__patch"];
+        trace?: never;
+    };
     "/api/v1/lab-results": {
         parameters: {
             query?: never;
@@ -3372,6 +3409,93 @@ export interface components {
          */
         HttpMethod: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
         /**
+         * InstitutionalSettingCreate
+         * @description Alta de una configuración institucional.
+         */
+        InstitutionalSettingCreate: {
+            /** Key */
+            key: string;
+            category: components["schemas"]["SettingCategory"];
+            /**
+             * Value
+             * @description Valor JSON; su forma depende de la categoría.
+             */
+            value: {
+                [key: string]: unknown;
+            };
+            /** Description */
+            description: string;
+        };
+        /**
+         * InstitutionalSettingListItem
+         * @description Versión para listados (declara todos los campos filtrables/buscables).
+         */
+        InstitutionalSettingListItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Key */
+            key: string;
+            category: components["schemas"]["SettingCategory"];
+            /** Value */
+            value: {
+                [key: string]: unknown;
+            };
+            /** Description */
+            description: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /**
+         * InstitutionalSettingRead
+         * @description Representación pública de una configuración institucional.
+         */
+        InstitutionalSettingRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Key */
+            key: string;
+            category: components["schemas"]["SettingCategory"];
+            /** Value */
+            value: {
+                [key: string]: unknown;
+            };
+            /** Description */
+            description: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /**
+         * InstitutionalSettingUpdate
+         * @description Actualización parcial de una configuración institucional.
+         */
+        InstitutionalSettingUpdate: {
+            /** Key */
+            key?: string | null;
+            category?: components["schemas"]["SettingCategory"] | null;
+            /** Value */
+            value?: {
+                [key: string]: unknown;
+            } | null;
+            /** Description */
+            description?: string | null;
+        };
+        /**
          * ItemReference
          * @description Referencia pública y estable de un item de listado.
          *
@@ -3989,6 +4113,12 @@ export interface components {
         OffsetPage_DoctorListItem_: {
             /** Items */
             items: components["schemas"]["DoctorListItem"][];
+            pagination: components["schemas"]["OffsetPagination"];
+        };
+        /** OffsetPage[InstitutionalSettingListItem] */
+        OffsetPage_InstitutionalSettingListItem_: {
+            /** Items */
+            items: components["schemas"]["InstitutionalSettingListItem"][];
             pagination: components["schemas"]["OffsetPagination"];
         };
         /** OffsetPage[LabResultListItem] */
@@ -5169,6 +5299,12 @@ export interface components {
             permissions?: string[];
         };
         /**
+         * SettingCategory
+         * @description Categoría/ámbito de una configuración institucional (regla clínica configurable).
+         * @enum {string}
+         */
+        SettingCategory: "vital_threshold" | "lab_target" | "follow_up" | "protocol";
+        /**
          * Sex
          * @description Sexo registrado para fines clínicos y administrativos.
          * @enum {string}
@@ -5726,12 +5862,16 @@ export interface components {
         /**
          * VitalThresholdCriterion
          * @description Umbral sobre un signo vital: métrica, comparador y valor de referencia.
+         *
+         *     ``comparator`` y ``value`` son opcionales: si se omiten ambos, se usa el umbral de
+         *     bandera roja CONFIGURADO en la institución para ese signo vital. Si se quiere un
+         *     umbral explícito, deben indicarse AMBOS (no uno solo).
          */
         VitalThresholdCriterion: {
             vital: components["schemas"]["VitalMetric"];
-            comparator: components["schemas"]["Comparator"];
+            comparator?: components["schemas"]["Comparator"] | null;
             /** Value */
-            value: number;
+            value?: number | null;
         };
         /**
          * WidgetType
@@ -8248,6 +8388,183 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DoctorRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_institutional_settings_api_v1_institutional_settings_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+                /** @description Campos de orden separados por coma. Use '-' para orden descendente. */
+                sort?: string;
+                category?: components["schemas"]["SettingCategory"] | null;
+                id_in?: string[] | null;
+                q?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OffsetPage_InstitutionalSettingListItem_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_institutional_setting_api_v1_institutional_settings_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InstitutionalSettingCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstitutionalSettingRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_institutional_setting_api_v1_institutional_settings__setting_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                setting_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstitutionalSettingRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_institutional_setting_api_v1_institutional_settings__setting_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                setting_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstitutionalSettingRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_institutional_setting_api_v1_institutional_settings__setting_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                setting_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InstitutionalSettingUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstitutionalSettingRead"];
                 };
             };
             /** @description Validation Error */

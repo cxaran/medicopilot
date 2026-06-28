@@ -242,5 +242,14 @@ class AiCredentialType(str, Enum):
     OAUTH = "oauth"
 
 
+class SettingCategory(str, Enum):
+    """Categoría/ámbito de una configuración institucional (regla clínica configurable)."""
+
+    VITAL_THRESHOLD = "vital_threshold"
+    LAB_TARGET = "lab_target"
+    FOLLOW_UP = "follow_up"
+    PROTOCOL = "protocol"
+
+
 def enum_values(enum_class: type[Enum]) -> list[str]:
     return [str(member.value) for member in enum_class]

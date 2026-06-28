@@ -21,6 +21,7 @@ from backend.app.models.clinical_task import ClinicalTask
 from backend.app.models.consultation import Consultation
 from backend.app.models.consultation_diagnosis import ConsultationDiagnosis
 from backend.app.models.doctor import Doctor
+from backend.app.models.institutional_setting import InstitutionalSetting
 from backend.app.models.lab_result import LabResult
 from backend.app.models.medical_history import MedicalHistoryVersion
 from backend.app.models.medication_template import MedicationTemplate
@@ -99,6 +100,11 @@ from backend.app.schemas.lab_result import (
     LabResultListItem,
     LabResultUpdate,
 )
+from backend.app.schemas.institutional_setting import (
+    InstitutionalSettingCreate,
+    InstitutionalSettingListItem,
+    InstitutionalSettingUpdate,
+)
 from backend.app.schemas.medical_history_version import (
     MedicalHistoryVersionCreate,
     MedicalHistoryVersionListItem,
@@ -157,6 +163,9 @@ from backend.app.security.groups.medication_templates import (
 )
 from backend.app.security.groups.prescriptions import PrescriptionPermissions
 from backend.app.security.groups.doctors import DoctorPermissions
+from backend.app.security.groups.institutional_settings import (
+    InstitutionalSettingPermissions,
+)
 from backend.app.security.groups.lab_results import LabResultPermissions
 from backend.app.security.groups.patient_clinical_items import (
     PatientClinicalItemPermissions,
@@ -252,6 +261,22 @@ MEDICATION_TEMPLATES = ResourceQuery(
         search_fields=("medication_name", "presentation", "default_instructions"),
         in_fields=("id",),
         default_sort="medication_name",
+    ),
+)
+
+INSTITUTIONAL_SETTINGS = ResourceQuery(
+    name="InstitutionalSettingQuery",
+    model=InstitutionalSetting,
+    schema=InstitutionalSettingListItem,
+    options=QueryOptions(
+        # ``category`` (enum no-nativo) por igualdad; búsqueda libre por clave/descripción
+        # (metadata de configuración, no datos de paciente). Los listados excluyen las
+        # eliminadas (``deleted_at``) vía stmt base en el router.
+        filter_fields=("category",),
+        sort_fields=("key", "category", "created_at", "updated_at"),
+        search_fields=("key", "description"),
+        in_fields=("id",),
+        default_sort="key",
     ),
 )
 
@@ -872,6 +897,37 @@ RESOURCE_REGISTRY: tuple[ResourceDefinition, ...] = (
                 confirmation=ConfirmationDef(
                     title="Eliminar plantilla",
                     message="La plantilla de medicamento se dará de baja lógica.",
+                    confirm_label="Eliminar",
+                    destructive=True,
+                ),
+            ),
+        ),
+    ),
+    ResourceDefinition(
+        name="institutional_settings",
+        label="Configuración institucional",
+        api_path="/api/v1/institutional-settings",
+        view=ResourceView.TABLE,
+        read_permission=InstitutionalSettingPermissions.READ,
+        list_query=INSTITUTIONAL_SETTINGS,
+        list_schema=InstitutionalSettingListItem,
+        create_schema=InstitutionalSettingCreate,
+        update_schema=InstitutionalSettingUpdate,
+        create_permission=InstitutionalSettingPermissions.CREATE,
+        update_permission=InstitutionalSettingPermissions.UPDATE,
+        detail_url_template="/api/v1/institutional-settings/{id}",
+        actions=(
+            ActionDef(
+                name="delete",
+                label="Eliminar",
+                method=HttpMethod.DELETE,
+                url_template="/api/v1/institutional-settings/{id}",
+                scope=ActionScope.ITEM,
+                danger=True,
+                permission=InstitutionalSettingPermissions.DELETE,
+                confirmation=ConfirmationDef(
+                    title="Eliminar configuración",
+                    message="La configuración institucional se dará de baja lógica.",
                     confirm_label="Eliminar",
                     destructive=True,
                 ),

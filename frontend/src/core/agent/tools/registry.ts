@@ -815,6 +815,51 @@ const TOOLS: ToolDefinition[] = [
     execute: (args, ctx) => ctx.api(buildReportPath(args)),
   },
   {
+    // Configuración institucional (G5 fase 3): umbrales/metas/intervalos clínicos que la
+    // clínica configura. Solo lectura; FastAPI exige institutional_settings:read. Permite que
+    // el copiloto FUNDAMENTE sus sugerencias en la configuración de la institución, presentada
+    // EXPLÍCITAMENTE como configuración institucional (no como opinión del agente).
+    name: "clinical.get_institutional_config",
+    description:
+      "Devuelve la configuración institucional (umbrales de bandera roja, metas de " +
+      "laboratorio, intervalos de seguimiento, protocolos) para fundamentar sugerencias en " +
+      "los valores que la CLÍNICA configuró, no en la opinión del agente. Filtra por " +
+      "category (vital_threshold/lab_target/follow_up/protocol) o busca por clave/descripción " +
+      "(search). Preséntalo como configuración institucional. Solo lectura.",
+    kind: "read",
+    inputSchema: {
+      type: "object",
+      properties: {
+        category: {
+          type: "string",
+          description: "Filtra por categoría de configuración.",
+          enum: ["vital_threshold", "lab_target", "follow_up", "protocol"],
+        },
+        search: {
+          type: "string",
+          description: "Busca por clave o descripción (p. ej. 'vital_redflag.systolic_bp').",
+        },
+        limit: LIMIT_PROP,
+        offset: OFFSET_PROP,
+      },
+      required: [],
+      additionalProperties: false,
+    },
+    execute: (args, ctx) => {
+      const params = new URLSearchParams();
+      if (typeof args.category === "string" && args.category !== "") {
+        params.set("category", args.category);
+      }
+      if (typeof args.search === "string" && args.search !== "") {
+        params.set("q", args.search);
+      }
+      if (typeof args.limit === "number") params.set("limit", String(args.limit));
+      if (typeof args.offset === "number") params.set("offset", String(args.offset));
+      const qs = params.toString();
+      return ctx.api(`/api/v1/institutional-settings${qs ? `?${qs}` : ""}`);
+    },
+  },
+  {
     // Acceso clínico estructurado estilo FHIR: equivalente NATIVO a un MCP-server FHIR
     // (p.ej. wso2/fhir-mcp-server) respetando la AUTORIDAD CLÍNICA. Se ejecuta en el
     // NAVEGADOR con la cookie del médico (ctx.api -> credentials:include); FastAPI valida

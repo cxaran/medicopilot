@@ -10,6 +10,7 @@ from backend.app.auth.security import generate_token, get_password_hash
 from backend.app.models.setup import PlatformSetup
 from backend.app.models.user import Role, RoleAccess, User, UserRole
 from backend.app.security.catalog import declared_permissions
+from backend.app.services.institutional_settings import seed_institutional_settings
 from backend.app.utils.utc_now import utc_now
 
 SETUP_ID = 1
@@ -147,6 +148,11 @@ def initialize_platform(session: Session, payload: BootstrapInitializeInput) -> 
         completed_by_user_id=user.id,
         system_admin_role_id=system_admin_role.id,
     )
+    session.flush()
+
+    # Siembra idempotente de la configuración institucional por defecto (umbrales,
+    # metas e intervalos). Deja la plataforma con reglas clínicas configurables listas.
+    seed_institutional_settings(session)
     session.flush()
 
     return BootstrapInitializeResult(
