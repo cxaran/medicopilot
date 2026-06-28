@@ -24,5 +24,8 @@ argon2-cffi==25.1.0
 PyJWT[crypto]==2.13.0
 # python-jose[cryptography]==3.5.0
 
+# Cifrado en reposo de secretos de credenciales de proveedor de IA (Fernet).
+cryptography==49.0.0
+
 # Mantener solo mientras existan hashes bcrypt heredados:
 passlib[bcrypt]==1.7.4

@@ -122,6 +122,11 @@ class Settings(BaseSettings):
     agent_gateway_ticket_secret: SecretStr | None = None
     agent_gateway_ticket_ttl_seconds: int = 90
 
+    # Clave DEDICADA (Fernet, urlsafe base64 de 32 bytes) para cifrar en reposo los
+    # secretos de credenciales de proveedor de IA. Sensible: nunca se loguea. Generar:
+    #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    ai_credential_key: SecretStr | None = None
+
     @model_validator(mode="after")
     def _validate_agent_gateway_ticket_ttl(self) -> Self:
         if not (60 <= self.agent_gateway_ticket_ttl_seconds <= 120):

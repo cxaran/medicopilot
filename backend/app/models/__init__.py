@@ -1,3 +1,4 @@
+from backend.app.models.ai_provider_credential import AiProviderCredential
 from backend.app.models.appointment import Appointment
 from backend.app.models.audit_event import AuditEvent
 from backend.app.models.base import Base
@@ -9,6 +10,7 @@ from backend.app.models.doctor import Doctor
 from backend.app.models.enums import (
     ActiveInactiveStatus,
     AiOutputStatus,
+    AiProvider,
     AppointmentStatus,
     ClinicalDocumentStatus,
     ClinicalDocumentType,
@@ -36,6 +38,8 @@ from backend.app.models.vital_sign import VitalSign
 __all__ = [
     "ActiveInactiveStatus",
     "AiOutputStatus",
+    "AiProvider",
+    "AiProviderCredential",
     "Appointment",
     "AppointmentStatus",
     "AuditEvent",

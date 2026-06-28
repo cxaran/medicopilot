@@ -144,5 +144,17 @@ class ClinicalDocumentStatus(str, Enum):
     DELETED = "deleted"
 
 
+class AiProvider(str, Enum):
+    """Proveedor de IA de una credencial registrada por el usuario."""
+
+    OPENCODE_ZEN = "opencode_zen"
+    OPENCODE_GO = "opencode_go"
+    OPENAI = "openai"
+    ANTHROPIC = "anthropic"
+    GEMINI = "gemini"
+    OPENROUTER = "openrouter"
+    OLLAMA = "ollama"
+
+
 def enum_values(enum_class: type[Enum]) -> list[str]:
     return [str(member.value) for member in enum_class]

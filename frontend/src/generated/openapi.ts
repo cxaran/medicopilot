@@ -62,6 +62,42 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/users/me/ai-providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Credentials */
+        get: operations["list_credentials_api_v1_users_me_ai_providers_get"];
+        put?: never;
+        /** Create Credential */
+        post: operations["create_credential_api_v1_users_me_ai_providers_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/users/me/ai-providers/{credential_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Credential */
+        delete: operations["delete_credential_api_v1_users_me_ai_providers__credential_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Credential */
+        patch: operations["update_credential_api_v1_users_me_ai_providers__credential_id__patch"];
+        trace?: never;
+    };
     "/api/v1/appointments": {
         parameters: {
             query?: never;
@@ -1221,6 +1257,74 @@ export interface components {
          * @enum {string}
          */
         ActiveInactiveStatus: "active" | "inactive";
+        /**
+         * AiProvider
+         * @description Proveedor de IA de una credencial registrada por el usuario.
+         * @enum {string}
+         */
+        AiProvider: "opencode_zen" | "opencode_go" | "openai" | "anthropic" | "gemini" | "openrouter" | "ollama";
+        /**
+         * AiProviderCredentialCreate
+         * @description Alta de una credencial de proveedor de IA del usuario autenticado.
+         *
+         *     ``secret`` es el secreto EN CLARO (entrada): se cifra antes de guardar y nunca
+         *     se devuelve. La auditoría y el soft-delete los gobierna el servidor.
+         */
+        AiProviderCredentialCreate: {
+            /** Proveedor */
+            provider: components["schemas"]["AiProvider"];
+            /** Etiqueta */
+            label: string;
+            /**
+             * Secreto
+             * @description Secreto del proveedor (solo entrada).
+             */
+            secret: string;
+            /** Modelo por defecto */
+            default_model?: string | null;
+        };
+        /**
+         * AiProviderCredentialRead
+         * @description Representación pública de una credencial. NUNCA expone el secreto en claro.
+         */
+        AiProviderCredentialRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            provider: components["schemas"]["AiProvider"];
+            /** Label */
+            label: string;
+            /** Is Active */
+            is_active: boolean;
+            /** Default Model */
+            default_model?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /**
+         * AiProviderCredentialUpdate
+         * @description Actualización parcial de una credencial (owner-only).
+         *
+         *     Solo se aplican los campos enviados. ``secret`` (si viene) reemplaza y recifra
+         *     el secreto; nunca se devuelve. ``provider`` es inmutable (no se declara).
+         */
+        AiProviderCredentialUpdate: {
+            /** Label */
+            label?: string | null;
+            /** Secret */
+            secret?: string | null;
+            /** Default Model */
+            default_model?: string | null;
+            /** Is Active */
+            is_active?: boolean | null;
+        };
         /**
          * AppointmentCancel
          * @description Cuerpo de la cancelación: motivo opcional, no vacío si se envía.
@@ -4178,6 +4282,142 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConnectionTicketRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_credentials_api_v1_users_me_ai_providers_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiProviderCredentialRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_credential_api_v1_users_me_ai_providers_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AiProviderCredentialCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiProviderCredentialRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_credential_api_v1_users_me_ai_providers__credential_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                credential_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MessageResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_credential_api_v1_users_me_ai_providers__credential_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                credential_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AiProviderCredentialUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiProviderCredentialRead"];
                 };
             };
             /** @description Validation Error */
