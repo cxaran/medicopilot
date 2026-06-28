@@ -62,6 +62,15 @@ function PrescriptionIcon() {
   );
 }
 
+function CopilotIcon() {
+  return (
+    <svg {...iconProps} aria-hidden="true">
+      <path d="M12 3v3M5 8h14a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1Z" />
+      <path d="M9 13h.01M15 13h.01M9.5 16.5h5" />
+    </svg>
+  );
+}
+
 function UsersIcon() {
   return (
     <svg {...iconProps} aria-hidden="true">
@@ -92,6 +101,7 @@ type NavItem = {
 // muestran si el recurso esta en el catalogo del usuario (evita enlaces muertos).
 const NAV_ITEMS: NavItem[] = [
   { label: "Inicio", href: "/", icon: <HomeIcon /> },
+  { label: "Copiloto", href: "/copilot", icon: <CopilotIcon /> },
   { label: "Pacientes", href: "/resources/patients", resource: "patients", icon: <PatientsIcon /> },
   {
     label: "Consultas",
