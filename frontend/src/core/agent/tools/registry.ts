@@ -2,7 +2,7 @@ import { browserApi } from "@/core/api/browser-client";
 import type { ApiRequestInit } from "@/core/api/request";
 import type { WireTool } from "@/core/agent/protocol";
 
-import type { ObjectSchema } from "./schema-validator";
+import type { ObjectSchema, PropSchema } from "./schema-validator";
 import { browserSandboxRunner, type SandboxRunner } from "./sandbox";
 import { parseButtonsSpec, parseChartSpec, parseFormSpec } from "./ui-spec";
 import {
@@ -108,6 +108,95 @@ function listQuery(args: Record<string, unknown>): string {
   return qs ? `?${qs}` : "";
 }
 
+// --- Filtros de las tools de listado (G1) ---
+// CADA filtro expuesto está VERIFICADO contra la API real (resource registry/routers): solo se
+// envía un parámetro que el backend honra. Naming del backend: igualdad -> ``<campo>``; rango de
+// fecha de calendario -> ``<campo>_from`` / ``<campo>_to`` (valor date YYYY-MM-DD, inclusivos).
+// Los filtros clínicamente útiles que el backend AÚN no soporta NO se exponen (ver el reporte).
+
+const LIMIT_PROP: PropSchema = {
+  type: "integer",
+  description: "Máximo de elementos (1-100).",
+  minimum: 1,
+  maximum: 100,
+};
+const OFFSET_PROP: PropSchema = {
+  type: "integer",
+  description: "Desplazamiento para paginar.",
+  minimum: 0,
+};
+const DATE_FROM_PROP: PropSchema = {
+  type: "string",
+  description: "Fecha inicial del rango, inclusiva (YYYY-MM-DD).",
+};
+const DATE_TO_PROP: PropSchema = {
+  type: "string",
+  description: "Fecha final del rango, inclusiva (YYYY-MM-DD).",
+};
+const PATIENT_FILTER_PROP: PropSchema = {
+  type: "string",
+  description: "Filtra por id (UUID) del paciente.",
+  format: "uuid",
+};
+const CONSULTATION_FILTER_PROP: PropSchema = {
+  type: "string",
+  description: "Filtra por id (UUID) de la consulta.",
+  format: "uuid",
+};
+const DOCTOR_FILTER_PROP: PropSchema = {
+  type: "string",
+  description: "Filtra por id (UUID) del médico.",
+  format: "uuid",
+};
+const STATUS_FILTER_PROP: PropSchema = {
+  type: "string",
+  description: "Filtra por estado (valor exacto del backend).",
+};
+
+// Esquema de una tool de listado con sus filtros + paginación (additionalProperties:false: el
+// modelo solo puede enviar los parámetros que el backend honra).
+function clinicalListSchema(filters: Record<string, PropSchema>): ObjectSchema {
+  return {
+    type: "object",
+    properties: { ...filters, limit: LIMIT_PROP, offset: OFFSET_PROP },
+    required: [],
+    additionalProperties: false,
+  };
+}
+
+// Construye el query string de un listado clínico: filtros de igualdad (mismo nombre que el
+// campo del backend) + rango de fecha (date_from/date_to -> <campo>_from/<campo>_to) + paginación.
+function clinicalListQuery(
+  args: Record<string, unknown>,
+  spec: { eq?: readonly string[]; dateField?: string },
+): string {
+  const params = new URLSearchParams();
+  for (const key of spec.eq ?? []) {
+    const value = args[key];
+    if (typeof value === "string" && value !== "") {
+      params.set(key, value);
+    }
+  }
+  if (spec.dateField) {
+    const from = args.date_from;
+    const to = args.date_to;
+    if (typeof from === "string" && from !== "") {
+      params.set(`${spec.dateField}_from`, from);
+    }
+    if (typeof to === "string" && to !== "") {
+      params.set(`${spec.dateField}_to`, to);
+    }
+  }
+  if (typeof args.limit === "number") {
+    params.set("limit", String(args.limit));
+  }
+  if (typeof args.offset === "number") {
+    params.set("offset", String(args.offset));
+  }
+  const qs = params.toString();
+  return qs ? `?${qs}` : "";
+}
+
 // Todas las tools mapean a la API REST EXISTENTE de FastAPI usando la cookie del médico.
 // FastAPI valida cookie+rol+permiso+paciente en cada llamada; el gateway nunca toca el
 // expediente. Las de escritura crean BORRADORES y van siempre gated por confirmación.
@@ -194,24 +283,187 @@ const TOOLS: ToolDefinition[] = [
   },
   {
     name: "clinical.list_recent_consultations",
-    description: "Lista las consultas médicas recientes (paginado). Solo lectura.",
+    description:
+      "Lista consultas médicas (paginado). Puede filtrar por paciente (patient_id), médico " +
+      "tratante (attending_doctor_id), estado (status) y rango de fecha de atención " +
+      "(date_from/date_to, sobre consulted_at). Solo lectura.",
     kind: "read",
-    inputSchema: LIST_SCHEMA,
-    execute: (args, ctx) => ctx.api(`/api/v1/consultations${listQuery(args)}`),
+    inputSchema: clinicalListSchema({
+      patient_id: PATIENT_FILTER_PROP,
+      attending_doctor_id: DOCTOR_FILTER_PROP,
+      status: STATUS_FILTER_PROP,
+      date_from: DATE_FROM_PROP,
+      date_to: DATE_TO_PROP,
+    }),
+    execute: (args, ctx) =>
+      ctx.api(
+        `/api/v1/consultations${clinicalListQuery(args, {
+          eq: ["patient_id", "attending_doctor_id", "status"],
+          dateField: "consulted_at",
+        })}`,
+      ),
   },
   {
     name: "clinical.list_prescriptions",
-    description: "Lista las recetas médicas (paginado). Solo lectura.",
+    description:
+      "Lista recetas médicas (paginado). Puede filtrar por consulta (consultation_id) y estado " +
+      "(status). Nota: el backend no expone filtro por paciente ni rango de fecha en recetas. " +
+      "Solo lectura.",
     kind: "read",
-    inputSchema: LIST_SCHEMA,
-    execute: (args, ctx) => ctx.api(`/api/v1/prescriptions${listQuery(args)}`),
+    inputSchema: clinicalListSchema({
+      consultation_id: CONSULTATION_FILTER_PROP,
+      status: STATUS_FILTER_PROP,
+    }),
+    execute: (args, ctx) =>
+      ctx.api(`/api/v1/prescriptions${clinicalListQuery(args, { eq: ["consultation_id", "status"] })}`),
   },
   {
     name: "clinical.list_appointments",
-    description: "Lista las citas de la agenda (paginado). Solo lectura.",
+    description:
+      "Lista citas de la agenda (paginado). Puede filtrar por paciente (patient_id), médico " +
+      "(doctor_id), estado (status) y rango de fecha agendada (date_from/date_to, sobre " +
+      "scheduled_at). Solo lectura.",
     kind: "read",
-    inputSchema: LIST_SCHEMA,
-    execute: (args, ctx) => ctx.api(`/api/v1/appointments${listQuery(args)}`),
+    inputSchema: clinicalListSchema({
+      patient_id: PATIENT_FILTER_PROP,
+      doctor_id: DOCTOR_FILTER_PROP,
+      status: STATUS_FILTER_PROP,
+      date_from: DATE_FROM_PROP,
+      date_to: DATE_TO_PROP,
+    }),
+    execute: (args, ctx) =>
+      ctx.api(
+        `/api/v1/appointments${clinicalListQuery(args, {
+          eq: ["patient_id", "doctor_id", "status"],
+          dateField: "scheduled_at",
+        })}`,
+      ),
+  },
+  {
+    name: "clinical.list_vital_signs",
+    description:
+      "Lista signos vitales medidos (paginado). Se consultan por consulta (consultation_id) y " +
+      "admiten rango de fecha de medición (date_from/date_to, sobre measured_at). Nota: el " +
+      "backend no expone filtro por paciente en signos vitales (usa la consulta del paciente). " +
+      "Solo lectura.",
+    kind: "read",
+    inputSchema: clinicalListSchema({
+      consultation_id: CONSULTATION_FILTER_PROP,
+      date_from: DATE_FROM_PROP,
+      date_to: DATE_TO_PROP,
+    }),
+    execute: (args, ctx) =>
+      ctx.api(
+        `/api/v1/vital-signs${clinicalListQuery(args, {
+          eq: ["consultation_id"],
+          dateField: "measured_at",
+        })}`,
+      ),
+  },
+  {
+    name: "clinical.list_documents",
+    description:
+      "Lista documentos clínicos (paginado): devuelve METADATOS y una URL de descarga por " +
+      "documento (no descarga el contenido). Puede filtrar por paciente (patient_id), consulta " +
+      "(consultation_id), tipo (document_type) y rango de fecha de carga (date_from/date_to, " +
+      "sobre uploaded_at). Solo lectura.",
+    kind: "read",
+    inputSchema: clinicalListSchema({
+      patient_id: PATIENT_FILTER_PROP,
+      consultation_id: CONSULTATION_FILTER_PROP,
+      document_type: { type: "string", description: "Filtra por tipo de documento (valor del backend)." },
+      date_from: DATE_FROM_PROP,
+      date_to: DATE_TO_PROP,
+    }),
+    execute: async (args, ctx) => {
+      const page = await ctx.api<{ items?: Array<Record<string, unknown>> }>(
+        `/api/v1/clinical-documents${clinicalListQuery(args, {
+          eq: ["patient_id", "consultation_id", "document_type"],
+          dateField: "uploaded_at",
+        })}`,
+      );
+      // Añade la URL de descarga EXISTENTE por documento sin leer bytes (endpoint real).
+      const items = Array.isArray(page?.items) ? page.items : [];
+      const withDownload = items.map((item) => {
+        const id = item.id;
+        return typeof id === "string"
+          ? { ...item, download_url: `/api/v1/clinical-documents/${encodeURIComponent(id)}/download` }
+          : item;
+      });
+      return { ...page, items: withDownload };
+    },
+  },
+  {
+    name: "clinical.list_diagnoses",
+    description:
+      "Lista diagnósticos de consulta (paginado). Se consultan por consulta (consultation_id) y " +
+      "pueden filtrarse por tipo (diagnosis_kind). Nota: el backend no expone filtro por " +
+      "paciente ni rango de fecha en diagnósticos. Solo lectura.",
+    kind: "read",
+    inputSchema: clinicalListSchema({
+      consultation_id: CONSULTATION_FILTER_PROP,
+      diagnosis_kind: {
+        type: "string",
+        description: "Tipo de diagnóstico.",
+        enum: ["primary", "secondary", "suspected"],
+      },
+    }),
+    execute: (args, ctx) =>
+      ctx.api(
+        `/api/v1/consultation-diagnoses${clinicalListQuery(args, {
+          eq: ["consultation_id", "diagnosis_kind"],
+        })}`,
+      ),
+  },
+  {
+    name: "clinical.list_medical_history_versions",
+    description:
+      "Lista versiones de la historia clínica de un paciente (paginado). Se consultan por " +
+      "paciente (patient_id) y pueden filtrarse por estado (status, p. ej. current). Nota: el " +
+      "backend no expone rango de fecha en historia clínica. Solo lectura.",
+    kind: "read",
+    inputSchema: clinicalListSchema({
+      patient_id: PATIENT_FILTER_PROP,
+      status: STATUS_FILTER_PROP,
+    }),
+    execute: (args, ctx) =>
+      ctx.api(
+        `/api/v1/medical-history-versions${clinicalListQuery(args, {
+          eq: ["patient_id", "status"],
+        })}`,
+      ),
+  },
+  {
+    name: "clinical.list_doctors",
+    description:
+      "Lista los médicos del consultorio (paginado). Puede filtrar por estado (status) y rango " +
+      "de fecha de alta (date_from/date_to, sobre created_at). Solo lectura.",
+    kind: "read",
+    inputSchema: clinicalListSchema({
+      status: STATUS_FILTER_PROP,
+      date_from: DATE_FROM_PROP,
+      date_to: DATE_TO_PROP,
+    }),
+    execute: (args, ctx) =>
+      ctx.api(
+        `/api/v1/doctors${clinicalListQuery(args, { eq: ["status"], dateField: "created_at" })}`,
+      ),
+  },
+  {
+    name: "clinical.list_medication_templates",
+    description:
+      "Lista las plantillas de medicamentos del catálogo (paginado). Puede filtrar por médico " +
+      "dueño (doctor_id) y estado (status). Nota: el backend no expone filtro por paciente ni " +
+      "rango de fecha en plantillas. Solo lectura.",
+    kind: "read",
+    inputSchema: clinicalListSchema({
+      doctor_id: DOCTOR_FILTER_PROP,
+      status: STATUS_FILTER_PROP,
+    }),
+    execute: (args, ctx) =>
+      ctx.api(
+        `/api/v1/medication-templates${clinicalListQuery(args, { eq: ["doctor_id", "status"] })}`,
+      ),
   },
   {
     // Acceso clínico estructurado estilo FHIR: equivalente NATIVO a un MCP-server FHIR
