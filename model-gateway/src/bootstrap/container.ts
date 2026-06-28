@@ -6,7 +6,9 @@ import { InMemoryTurnStore } from "../infrastructure/turn-store/in-memory-turn-s
 import { NoopRateLimiter } from "../infrastructure/rate-limit/noop-rate-limiter.js";
 import { PinoTelemetry } from "../infrastructure/observability/pino-telemetry.js";
 import { FakeProviderAdapter } from "../providers/fake/adapter.js";
+import { OpencodeProviderAdapter, createOpencodeModel } from "../providers/opencode/adapter.js";
 import { ProviderRegistry } from "../providers/registry.js";
+import { createFakeModel } from "../domain/model.js";
 import { InMemoryBrowserSessionStore } from "../application/browser-sessions/session-store.js";
 import type { GatewaySettings } from "../config/settings.js";
 import type { ControlPlanePort } from "../ports/control-plane.port.js";
@@ -41,11 +43,19 @@ export function createContainer(settings = loadSettings()): GatewayContainer {
         })
       : new FakeControlPlaneClient();
 
+  // B5: primer proveedor real. El catálogo combina el fake (dev) + un modelo curado de
+  // opencode; el registry expone ambos protocolos.
+  const opencodeAdapter = new OpencodeProviderAdapter({ baseUrl: settings.opencodeBaseUrl });
+  const opencodeModel = createOpencodeModel({
+    baseUrl: settings.opencodeBaseUrl,
+    modelId: settings.opencodeDefaultModel
+  });
+
   return {
     settings,
     controlPlane,
-    modelCatalog: new InMemoryModelCatalog(),
-    providerRegistry: new ProviderRegistry([new FakeProviderAdapter()]),
+    modelCatalog: new InMemoryModelCatalog([createFakeModel(), opencodeModel]),
+    providerRegistry: new ProviderRegistry([new FakeProviderAdapter(), opencodeAdapter]),
     turnStore: new InMemoryTurnStore(),
     limiter: new NoopRateLimiter(),
     telemetry: new PinoTelemetry(),

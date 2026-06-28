@@ -21,7 +21,9 @@ const baseSettings: GatewaySettings = {
   maxToolResultBytes: 64 * 1024,
   toolResultTimeoutMs: 1000,
   devTicket: "test-ticket",
-  agentTicketSecret: ""
+  agentTicketSecret: "",
+  opencodeBaseUrl: "https://opencode.test/v1",
+  opencodeDefaultModel: "test-model"
 };
 
 function startMessage() {

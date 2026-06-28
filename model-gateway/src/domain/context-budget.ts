@@ -25,6 +25,8 @@ export class ContextBudgeter {
   assess(request: ContextBudgetRequest): ContextBudgetResult {
     const windows = [
       request.model.capabilities.contextWindowTokens,
+      // Cap efectivo (B5): si está definido, también acota la ventana usable.
+      request.model.capabilities.effectiveContextTokens,
       request.profileMaxInputTokens,
       request.gatewayGlobalMaxContextTokens
     ].filter((value): value is number => typeof value === "number");

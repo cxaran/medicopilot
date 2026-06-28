@@ -25,7 +25,9 @@ const baseSettings: GatewaySettings = {
   // Alto para que el timeout de tool-result no dispare durante el test.
   toolResultTimeoutMs: 60000,
   devTicket: "test-ticket",
-  agentTicketSecret: ""
+  agentTicketSecret: "",
+  opencodeBaseUrl: "https://opencode.test/v1",
+  opencodeDefaultModel: "test-model"
 };
 
 function createCapturingTelemetry(): TelemetryPort & {

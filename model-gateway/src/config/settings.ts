@@ -21,6 +21,11 @@ export interface GatewaySettings {
   // control-plane fake (dev/tests); si están, se usa el HttpControlPlaneClient real.
   backendInternalUrl?: string | undefined;
   backendInternalSecret?: string | undefined;
+  // B5: proveedor real opencode (OpenAI-compatible). Base URL configurable (la key NO
+  // se configura aquí: llega por arriendo de B4). El default es provisional y se afina
+  // en B13 con la key real.
+  opencodeBaseUrl: string;
+  opencodeDefaultModel: string;
 }
 
 function numberFromEnv(name: string, fallback: number): number {
@@ -63,6 +68,8 @@ export function loadSettings(): GatewaySettings {
     devTicket: process.env.GATEWAY_DEV_TICKET ?? "dev-ticket",
     agentTicketSecret: process.env.GATEWAY_AGENT_TICKET_SECRET ?? "",
     backendInternalUrl: process.env.GATEWAY_BACKEND_INTERNAL_URL || undefined,
-    backendInternalSecret: process.env.GATEWAY_BACKEND_INTERNAL_SECRET || undefined
+    backendInternalSecret: process.env.GATEWAY_BACKEND_INTERNAL_SECRET || undefined,
+    opencodeBaseUrl: process.env.GATEWAY_OPENCODE_BASE_URL ?? "https://opencode.ai/zen/v1",
+    opencodeDefaultModel: process.env.GATEWAY_OPENCODE_DEFAULT_MODEL ?? "gpt-4o-mini"
   };
 }

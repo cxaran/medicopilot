@@ -32,6 +32,17 @@ FastAPI owns AI provider credentials, encrypted at rest. The gateway does **not*
 
 MG-002 is still in progress: `authorizeTurn` resolves the real `userId` from the session but the provider/model/capability negotiation remains scaffolded for a later slice.
 
+## Real provider: opencode (MG-002, B5)
+
+The first real provider adapter is `OpencodeProviderAdapter` (`providers/opencode/`), targeting opencode zen, which is OpenAI-compatible (`/chat/completions` + `/models`, `Authorization: Bearer <key>`).
+
+- It uses the **leased** credential from B4 (`ProviderTurnInput.credential`) for the `Authorization` header on every call; the secret is never logged (the adapter does no logging).
+- `verifyCredential` does a light `GET /models` (200 → valid, 401/403 → invalid). `discoverModels` maps `/models` rows to `ModelDescriptor[]`, enriching capabilities from row metadata with safe defaults. `startTurn` POSTs `/chat/completions` with `stream=true` and translates the SSE stream into provider events (`text.delta`, `reasoning.summary`, `tool_call.ready` with a continuation state, `completed` with usage). `resumeTurn` appends the tool results to the stored history and re-issues the streamed completion.
+- The base URL (`GATEWAY_OPENCODE_BASE_URL`) and default model (`GATEWAY_OPENCODE_DEFAULT_MODEL`) are configurable; their defaults are **provisional** and will be confirmed in B13 against the real key. No credentials are configured here — they arrive via the B4 lease.
+- The model catalog now combines the fake model (dev) with a curated opencode model, and the provider registry exposes both protocols.
+
+Capability schema enrichment (B5, OpenClaw pattern): `ModelCapabilities` now separates the native `contextWindowTokens` from an effective `effectiveContextTokens` cap (the context budgeter uses the smaller), and adds a `compat` block of fine wire-shape flags (`supportsTools`, `supportsReasoningEffort`, `thinkingFormat`, `supportsStrictMode`, `supportsUsageInStreaming`, `supportsEagerToolInputStreaming`) consumed by provider adapters. The granular capability checks remain authoritative in the negotiator. All HTTP for opencode is mocked in tests; the real end-to-end with a live key lands in B13.
+
 ## Routing
 
 - The canonical public prefix is configured by `GATEWAY_PUBLIC_PATH_PREFIX`, defaulting to `/model-gateway`.

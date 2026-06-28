@@ -50,6 +50,13 @@ export function negotiateCapabilities(request: CapabilityNegotiationRequest): Ca
       "Tool calling is not supported by the selected model"
     );
 
+    // B5: respeta también el flag fino de compatibilidad del proveedor. La capacidad
+    // granular (arriba) sigue siendo la autoridad; esto cubre proveedores que anuncian
+    // soporte general pero deshabilitan tools para un modelo concreto.
+    if (!model.capabilities.compat.supportsTools) {
+      throw new GatewayError("CAPABILITY_UNSUPPORTED", "Tool calling is not supported by the selected model");
+    }
+
     if (tools.some((tool) => tool.strict)) {
       requireSupported(
         model.capabilities.toolCalling.strictSchema,

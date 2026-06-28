@@ -24,7 +24,9 @@ const baseSettings: GatewaySettings = {
   maxToolResultBytes: 64 * 1024,
   toolResultTimeoutMs: 1000,
   devTicket: "test-ticket",
-  agentTicketSecret: SECRET
+  agentTicketSecret: SECRET,
+  opencodeBaseUrl: "https://opencode.test/v1",
+  opencodeDefaultModel: "test-model"
 };
 
 let app: FastifyInstance | null = null;

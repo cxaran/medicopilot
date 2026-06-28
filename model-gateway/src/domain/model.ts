@@ -7,7 +7,33 @@ export type ProviderProtocol =
   | "anthropic_messages"
   | "gemini_generate_content"
   | "ollama_chat"
+  // B5: opencode zen es OpenAI-compatible (chat completions + /models, Bearer auth).
+  | "opencode_zen"
   | "fake";
+
+// Formato de "thinking"/razonamiento que entiende el proveedor en el cable (patrón
+// OpenClaw): cada familia expone el control de razonamiento de forma distinta.
+export type ThinkingFormat =
+  | "none"
+  | "openai_reasoning_effort"
+  | "anthropic_thinking"
+  | "gemini_thinking";
+
+// Flags finos de compatibilidad (patrón OpenClaw ModelCatalogCompatConfig). Son
+// PISTAS DE FORMA DE CABLE que consumen los adaptadores de proveedor para construir
+// la request; la negociación granular (toolCalling/structuredOutput/reasoning) sigue
+// siendo la autoridad para aceptar/rechazar.
+export interface ModelCompatFlags {
+  supportsTools: boolean;
+  supportsReasoningEffort: boolean;
+  thinkingFormat: ThinkingFormat;
+  // Structured/strict output (response_format json_schema con strict).
+  supportsStrictMode: boolean;
+  // Usage incluido dentro del stream (OpenAI stream_options.include_usage).
+  supportsUsageInStreaming: boolean;
+  // Streaming temprano de argumentos de tool (deltas de tool_call.function.arguments).
+  supportsEagerToolInputStreaming: boolean;
+}
 
 export type CapabilitySupport = "supported" | "unsupported" | "unknown";
 
@@ -42,8 +68,14 @@ export interface ModelCapabilities {
     exact: CapabilitySupport;
     estimated: CapabilitySupport;
   };
+  // Ventana de contexto NATIVA del modelo (lo que anuncia el proveedor).
   contextWindowTokens: number | null;
+  // Cap EFECTIVO en runtime (más bajo que el nativo si la cuenta/plan lo limita); se
+  // mantiene separado del nativo para que el context budgeter pueda usar el menor.
+  effectiveContextTokens: number | null;
   maxOutputTokens: number | null;
+  // Flags finos de compatibilidad consumidos por los adaptadores de proveedor.
+  compat: ModelCompatFlags;
 }
 
 export interface ModelRoute {
@@ -101,7 +133,16 @@ export function createFakeModel(overrides: Partial<ModelDescriptor> = {}): Model
         estimated: "supported"
       },
       contextWindowTokens: 128000,
-      maxOutputTokens: 4096
+      effectiveContextTokens: null,
+      maxOutputTokens: 4096,
+      compat: {
+        supportsTools: true,
+        supportsReasoningEffort: false,
+        thinkingFormat: "none",
+        supportsStrictMode: true,
+        supportsUsageInStreaming: true,
+        supportsEagerToolInputStreaming: false
+      }
     },
     source: "manual",
     metadataRevision: "test",
