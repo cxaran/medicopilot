@@ -74,6 +74,12 @@ class ConsultationDiagnosisCreate(ApiWriteSchema):
         title="Código",
         json_schema_extra={"ui": {"form": True, "widget": "text"}},
     )
+    clinical_code_id: Optional[uuid.UUID] = Field(
+        default=None,
+        title="Código clínico (catálogo)",
+        description="Código clínico validado del catálogo (CIE-10), si se eligió uno.",
+        json_schema_extra={"ui": {"form": True, "widget": "text"}},
+    )
     notes: Optional[str] = Field(
         default=None,
         title="Notas",
@@ -114,6 +120,12 @@ class ConsultationDiagnosisUpdate(ApiPatchSchema):
         title="Código",
         json_schema_extra={"ui": {"form": True, "widget": "text"}},
     )
+    clinical_code_id: Optional[uuid.UUID] = Field(
+        default=None,
+        title="Código clínico (catálogo)",
+        description="Código clínico validado del catálogo (CIE-10), si se eligió uno.",
+        json_schema_extra={"ui": {"form": True, "widget": "text"}},
+    )
     notes: Optional[str] = Field(
         default=None,
         title="Notas",
@@ -139,6 +151,7 @@ class ConsultationDiagnosisRead(ApiReadSchema):
     diagnosis_text: str
     coding_system: Optional[str] = None
     code: Optional[str] = None
+    clinical_code_id: Optional[uuid.UUID] = None
     notes: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None

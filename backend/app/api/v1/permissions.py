@@ -24,9 +24,17 @@ _GROUP_LABELS = {
     "consultations": "Consultas médicas",
     "consultation_diagnoses": "Diagnósticos de consulta",
     "vital_signs": "Signos vitales",
+    "lab_results": "Resultados de laboratorio",
+    "clinical_events": "Eventos clínicos",
+    "study_orders": "Órdenes de estudio",
+    "clinical_tasks": "Tareas clínicas",
     "prescriptions": "Recetas médicas",
     "appointments": "Agenda y citas",
     "clinical_documents": "Documentos clínicos",
+    "population": "Población y cohortes",
+    "reports": "Reportes y analítica",
+    "institutional_settings": "Configuración institucional",
+    "clinical_codes": "Códigos clínicos",
     "permissions": "Permisos",
 }
 
@@ -44,9 +52,15 @@ def _group_name(group: type[SecurityGroup]) -> str:
         "consultation": "consultations",
         "consultationdiagnosis": "consultation_diagnoses",
         "vitalsign": "vital_signs",
+        "labresult": "lab_results",
+        "clinicalevent": "clinical_events",
+        "studyorder": "study_orders",
+        "clinicaltask": "clinical_tasks",
         "prescription": "prescriptions",
         "appointment": "appointments",
         "clinicaldocument": "clinical_documents",
+        "institutionalsetting": "institutional_settings",
+        "clinicalcode": "clinical_codes",
         "permission": "permissions",
     }.get(singular, singular)
 

@@ -10,6 +10,7 @@ from backend.app.auth.security import generate_token, get_password_hash
 from backend.app.models.setup import PlatformSetup
 from backend.app.models.user import Role, RoleAccess, User, UserRole
 from backend.app.security.catalog import declared_permissions
+from backend.app.services.clinical_codes import seed_clinical_codes
 from backend.app.services.institutional_settings import seed_institutional_settings
 from backend.app.utils.utc_now import utc_now
 
@@ -153,6 +154,11 @@ def initialize_platform(session: Session, payload: BootstrapInitializeInput) -> 
     # Siembra idempotente de la configuración institucional por defecto (umbrales,
     # metas e intervalos). Deja la plataforma con reglas clínicas configurables listas.
     seed_institutional_settings(session)
+    session.flush()
+
+    # Siembra idempotente del catálogo INICIAL de códigos clínicos de apoyo (CIE-10/
+    # LOINC/ATC). Cobertura limitada y extensible; sólo códigos reales (ver el servicio).
+    seed_clinical_codes(session)
     session.flush()
 
     return BootstrapInitializeResult(

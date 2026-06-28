@@ -15,6 +15,7 @@ from pydantic import BaseModel
 
 from backend.app.core.settings import settings
 from backend.app.models.appointment import Appointment
+from backend.app.models.clinical_code import ClinicalCode
 from backend.app.models.clinical_document import ClinicalDocument
 from backend.app.models.clinical_event import ClinicalEvent
 from backend.app.models.clinical_task import ClinicalTask
@@ -94,6 +95,11 @@ from backend.app.schemas.consultation_diagnosis import (
     ConsultationDiagnosisListItem,
     ConsultationDiagnosisUpdate,
 )
+from backend.app.schemas.clinical_code import (
+    ClinicalCodeCreate,
+    ClinicalCodeListItem,
+    ClinicalCodeUpdate,
+)
 from backend.app.schemas.doctor import DoctorCreate, DoctorListItem, DoctorUpdate
 from backend.app.schemas.lab_result import (
     LabResultCreate,
@@ -146,6 +152,7 @@ from backend.app.schemas.user_admin import (
     UserAdminListItem,
     UserAdminUpdate,
 )
+from backend.app.security.groups.clinical_codes import ClinicalCodePermissions
 from backend.app.security.groups.clinical_documents import ClinicalDocumentPermissions
 from backend.app.security.groups.clinical_events import ClinicalEventPermissions
 from backend.app.security.groups.clinical_tasks import ClinicalTaskPermissions
@@ -277,6 +284,23 @@ INSTITUTIONAL_SETTINGS = ResourceQuery(
         search_fields=("key", "description"),
         in_fields=("id",),
         default_sort="key",
+    ),
+)
+
+CLINICAL_CODES = ResourceQuery(
+    name="ClinicalCodeQuery",
+    model=ClinicalCode,
+    schema=ClinicalCodeListItem,
+    options=QueryOptions(
+        # ``system`` (enum no-nativo) por igualdad (select). Búsqueda libre por código y
+        # término (metadata de catálogo, no datos de paciente): un término desconocido no
+        # coincide y la búsqueda devuelve vacío. Los listados excluyen los eliminados
+        # (``deleted_at``) vía stmt base en el router.
+        filter_fields=("system",),
+        sort_fields=("system", "code", "display_term", "created_at"),
+        search_fields=("code", "display_term"),
+        in_fields=("id",),
+        default_sort="display_term",
     ),
 )
 
@@ -928,6 +952,37 @@ RESOURCE_REGISTRY: tuple[ResourceDefinition, ...] = (
                 confirmation=ConfirmationDef(
                     title="Eliminar configuración",
                     message="La configuración institucional se dará de baja lógica.",
+                    confirm_label="Eliminar",
+                    destructive=True,
+                ),
+            ),
+        ),
+    ),
+    ResourceDefinition(
+        name="clinical_codes",
+        label="Códigos clínicos",
+        api_path="/api/v1/clinical-codes",
+        view=ResourceView.TABLE,
+        read_permission=ClinicalCodePermissions.READ,
+        list_query=CLINICAL_CODES,
+        list_schema=ClinicalCodeListItem,
+        create_schema=ClinicalCodeCreate,
+        update_schema=ClinicalCodeUpdate,
+        create_permission=ClinicalCodePermissions.CREATE,
+        update_permission=ClinicalCodePermissions.UPDATE,
+        detail_url_template="/api/v1/clinical-codes/{id}",
+        actions=(
+            ActionDef(
+                name="delete",
+                label="Eliminar",
+                method=HttpMethod.DELETE,
+                url_template="/api/v1/clinical-codes/{id}",
+                scope=ActionScope.ITEM,
+                danger=True,
+                permission=ClinicalCodePermissions.DELETE,
+                confirmation=ConfirmationDef(
+                    title="Eliminar código clínico",
+                    message="El código clínico se dará de baja lógica.",
                     confirm_label="Eliminar",
                     destructive=True,
                 ),

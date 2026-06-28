@@ -555,6 +555,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/clinical-codes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Clinical Codes */
+        get: operations["list_clinical_codes_api_v1_clinical_codes_get"];
+        put?: never;
+        /** Create Clinical Code */
+        post: operations["create_clinical_code_api_v1_clinical_codes_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clinical-codes/{code_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Clinical Code */
+        get: operations["get_clinical_code_api_v1_clinical_codes__code_id__get"];
+        put?: never;
+        post?: never;
+        /** Delete Clinical Code */
+        delete: operations["delete_clinical_code_api_v1_clinical_codes__code_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Clinical Code */
+        patch: operations["update_clinical_code_api_v1_clinical_codes__code_id__patch"];
+        trace?: never;
+    };
     "/api/v1/clinical-documents": {
         parameters: {
             query?: never;
@@ -2255,6 +2292,91 @@ export interface components {
             description: string | null;
         };
         /**
+         * ClinicalCodeCreate
+         * @description Alta de un código clínico en el catálogo de apoyo.
+         */
+        ClinicalCodeCreate: {
+            /** Sistema */
+            system: components["schemas"]["ClinicalCodeSystem"];
+            /** Código */
+            code: string;
+            /** Término */
+            display_term: string;
+            /** Código padre */
+            parent_code?: string | null;
+        };
+        /**
+         * ClinicalCodeListItem
+         * @description Versión para listados (declara los campos filtrables/buscables).
+         */
+        ClinicalCodeListItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Sistema */
+            system: components["schemas"]["ClinicalCodeSystem"];
+            /** Código */
+            code: string;
+            /** Término */
+            display_term: string;
+            /** Código padre */
+            parent_code?: string | null;
+            /**
+             * Creado
+             * Format: date-time
+             */
+            created_at: string;
+            /** Actualizado */
+            updated_at?: string | null;
+        };
+        /**
+         * ClinicalCodeRead
+         * @description Representación pública de un código clínico.
+         */
+        ClinicalCodeRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            system: components["schemas"]["ClinicalCodeSystem"];
+            /** Code */
+            code: string;
+            /** Display Term */
+            display_term: string;
+            /** Parent Code */
+            parent_code?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /**
+         * ClinicalCodeSystem
+         * @description Sistema de codificación clínica de un código del catálogo de apoyo.
+         *
+         *     ``cie10`` para diagnósticos (CIE-10/ICD-10 de la OMS), ``loinc`` para analitos y
+         *     observaciones de laboratorio (LOINC) y ``atc`` para medicamentos (clasificación
+         *     ATC de la OMS). La cobertura sembrada es LIMITADA y extensible.
+         * @enum {string}
+         */
+        ClinicalCodeSystem: "cie10" | "loinc" | "atc";
+        /**
+         * ClinicalCodeUpdate
+         * @description Actualización parcial de un código clínico (PATCH).
+         */
+        ClinicalCodeUpdate: {
+            /** Término */
+            display_term?: string | null;
+            /** Código padre */
+            parent_code?: string | null;
+        };
+        /**
          * ClinicalDocumentListItem
          * @description Versión de listado compatible con ``ResourceQuery``: metadata segura, sin binario.
          */
@@ -2865,6 +2987,11 @@ export interface components {
             coding_system?: string | null;
             /** Código */
             code?: string | null;
+            /**
+             * Código clínico (catálogo)
+             * @description Código clínico validado del catálogo (CIE-10), si se eligió uno.
+             */
+            clinical_code_id?: string | null;
             /** Notas */
             notes?: string | null;
         };
@@ -2927,6 +3054,8 @@ export interface components {
             coding_system?: string | null;
             /** Code */
             code?: string | null;
+            /** Clinical Code Id */
+            clinical_code_id?: string | null;
             /** Notes */
             notes?: string | null;
             /**
@@ -2953,6 +3082,11 @@ export interface components {
             coding_system?: string | null;
             /** Código */
             code?: string | null;
+            /**
+             * Código clínico (catálogo)
+             * @description Código clínico validado del catálogo (CIE-10), si se eligió uno.
+             */
+            clinical_code_id?: string | null;
             /** Notas */
             notes?: string | null;
         };
@@ -4077,6 +4211,12 @@ export interface components {
         OffsetPage_AppointmentListItem_: {
             /** Items */
             items: components["schemas"]["AppointmentListItem"][];
+            pagination: components["schemas"]["OffsetPagination"];
+        };
+        /** OffsetPage[ClinicalCodeListItem] */
+        OffsetPage_ClinicalCodeListItem_: {
+            /** Items */
+            items: components["schemas"]["ClinicalCodeListItem"][];
             pagination: components["schemas"]["OffsetPagination"];
         };
         /** OffsetPage[ClinicalDocumentListItem] */
@@ -7146,6 +7286,183 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BootstrapInitializeRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_clinical_codes_api_v1_clinical_codes_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+                /** @description Campos de orden separados por coma. Use '-' para orden descendente. */
+                sort?: string;
+                system?: components["schemas"]["ClinicalCodeSystem"] | null;
+                id_in?: string[] | null;
+                q?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OffsetPage_ClinicalCodeListItem_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_clinical_code_api_v1_clinical_codes_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClinicalCodeCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClinicalCodeRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_clinical_code_api_v1_clinical_codes__code_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                code_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClinicalCodeRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_clinical_code_api_v1_clinical_codes__code_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                code_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClinicalCodeRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_clinical_code_api_v1_clinical_codes__code_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                code_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClinicalCodeUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClinicalCodeRead"];
                 };
             };
             /** @description Validation Error */

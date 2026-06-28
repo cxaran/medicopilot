@@ -56,6 +56,12 @@ class ConsultationDiagnosis(Base):
     code: Mapped[Optional[str]] = mapped_column(
         String(80), nullable=True, comment="Código del diagnóstico, si se registra."
     )
+    clinical_code_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("clinical_codes.id", ondelete="RESTRICT"),
+        nullable=True,
+        comment="Código clínico validado (CIE-10) del catálogo, vinculado al diagnóstico si se eligió uno.",
+    )
     notes: Mapped[Optional[str]] = mapped_column(
         Text, nullable=True, comment="Observaciones breves sobre el diagnóstico."
     )
@@ -96,6 +102,7 @@ class ConsultationDiagnosis(Base):
     )
 
     consultation = relationship("Consultation")
+    clinical_code = relationship("ClinicalCode", foreign_keys=[clinical_code_id])
     created_by_user = relationship("User", foreign_keys=[created_by])
     updated_by_user = relationship("User", foreign_keys=[updated_by])
     deleted_by_user = relationship("User", foreign_keys=[deleted_by])

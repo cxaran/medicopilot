@@ -860,6 +860,48 @@ const TOOLS: ToolDefinition[] = [
     },
   },
   {
+    // Codificación clínica (G5 fase 4): catálogo de apoyo CIE-10/LOINC/ATC. Solo lectura;
+    // FastAPI exige clinical_codes:read. Es una AYUDA a la codificación que el médico
+    // confirma: un término desconocido devuelve vacío; el agente NUNCA debe inventar un
+    // código que el catálogo no devolvió.
+    name: "clinical.search_codes",
+    description:
+      "Busca códigos clínicos de apoyo en el catálogo por sistema y término. system: 'cie10' " +
+      "(diagnósticos), 'loinc' (laboratorio) o 'atc' (medicamentos); query es el término o " +
+      "código a buscar. Devuelve los códigos que COINCIDEN; si no hay coincidencia, devuelve " +
+      "vacío. Es una ayuda a la codificación que el médico confirma: NUNCA inventes un código " +
+      "que no aparezca en el resultado. Solo lectura.",
+    kind: "read",
+    inputSchema: {
+      type: "object",
+      properties: {
+        system: {
+          type: "string",
+          description: "Sistema de codificación a consultar.",
+          enum: ["cie10", "loinc", "atc"],
+        },
+        query: {
+          type: "string",
+          description: "Término o código a buscar (p. ej. 'diabetes', 'HbA1c', 'E11.9').",
+        },
+        limit: LIMIT_PROP,
+        offset: OFFSET_PROP,
+      },
+      required: ["system", "query"],
+      additionalProperties: false,
+    },
+    execute: (args, ctx) => {
+      const params = new URLSearchParams();
+      params.set("system", String(args.system ?? ""));
+      if (typeof args.query === "string" && args.query !== "") {
+        params.set("q", args.query);
+      }
+      if (typeof args.limit === "number") params.set("limit", String(args.limit));
+      if (typeof args.offset === "number") params.set("offset", String(args.offset));
+      return ctx.api(`/api/v1/clinical-codes?${params.toString()}`);
+    },
+  },
+  {
     // Acceso clínico estructurado estilo FHIR: equivalente NATIVO a un MCP-server FHIR
     // (p.ej. wso2/fhir-mcp-server) respetando la AUTORIDAD CLÍNICA. Se ejecuta en el
     // NAVEGADOR con la cookie del médico (ctx.api -> credentials:include); FastAPI valida

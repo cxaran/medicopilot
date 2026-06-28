@@ -267,14 +267,30 @@ _CLIENT_WRITABLE_EXCEPTIONS = frozenset(
         ("medication_templates", "status"),
         ("patients", "status"),
         ("patient_clinical_items", "status"),
+        # ``status`` operativo/clínico editable en el form de estos recursos. A diferencia
+        # de consultations/prescriptions/appointments/clinical_documents (que NO exponen
+        # ``status`` y lo cambian sólo vía finalize/void/cancel/archive), estos tres NO
+        # tienen acciones de ciclo de vida: su estado es entrada legítima del cliente.
+        ("clinical_events", "status"),
+        ("study_orders", "status"),
+        ("clinical_tasks", "status"),
         # Marcas temporales CLÍNICAS que captura el médico (no son auditoría). La
         # auditoría real (created_at/updated_at/deleted_at) queda cubierta por los
         # prefijos y nunca se expone en los write schemas.
         ("consultations", "consulted_at"),  # "Fecha de atención" (opcional)
         ("consultations", "next_appointment_at"),  # "Próxima cita sugerida"
         ("vital_signs", "measured_at"),  # "Fecha de medición"
+        ("lab_results", "measured_at"),  # "Fecha de medición" del resultado (análogo a vital_signs)
+        ("clinical_events", "started_at"),  # "Inicio" del evento clínico que captura el médico
+        ("clinical_events", "ended_at"),  # "Fin" del evento clínico que captura el médico
+        ("study_orders", "ordered_at"),  # "Fecha de la orden" que captura el médico
+        ("clinical_tasks", "due_at"),  # "Vencimiento" de la tarea que fija el usuario
         ("appointments", "scheduled_at"),  # "Inicio" de la cita
         ("appointments.reschedule", "scheduled_at"),  # nueva fecha al reagendar
+        # ``ordered_by`` (médico que ordena el estudio) NO es auditoría: es un dato clínico
+        # que el cliente provee al crear la orden (qué médico la indica), distinto de
+        # ``created_by`` (auditoría del servidor). Sólo se declara en el alta.
+        ("study_orders", "ordered_by"),
     }
 )
 

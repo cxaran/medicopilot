@@ -251,5 +251,17 @@ class SettingCategory(str, Enum):
     PROTOCOL = "protocol"
 
 
+class ClinicalCodeSystem(str, Enum):
+    """Sistema de codificación clínica de un código del catálogo de apoyo.
+
+    ``cie10`` para diagnósticos (CIE-10/ICD-10 de la OMS), ``loinc`` para analitos y
+    observaciones de laboratorio (LOINC) y ``atc`` para medicamentos (clasificación
+    ATC de la OMS). La cobertura sembrada es LIMITADA y extensible."""
+
+    CIE10 = "cie10"
+    LOINC = "loinc"
+    ATC = "atc"
+
+
 def enum_values(enum_class: type[Enum]) -> list[str]:
     return [str(member.value) for member in enum_class]

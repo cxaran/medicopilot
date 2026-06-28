@@ -4,6 +4,7 @@ from backend.app.models.ai_provider_credential import AiProviderCredential
 from backend.app.models.appointment import Appointment
 from backend.app.models.audit_event import AuditEvent
 from backend.app.models.base import Base
+from backend.app.models.clinical_code import ClinicalCode
 from backend.app.models.clinical_document import ClinicalDocument
 from backend.app.models.clinical_event import ClinicalEvent
 from backend.app.models.clinical_task import ClinicalTask
@@ -17,6 +18,7 @@ from backend.app.models.enums import (
     AiOutputStatus,
     AiProvider,
     AppointmentStatus,
+    ClinicalCodeSystem,
     ClinicalDocumentStatus,
     ClinicalDocumentType,
     ClinicalEventStatus,
@@ -63,6 +65,8 @@ __all__ = [
     "AppointmentStatus",
     "AuditEvent",
     "Base",
+    "ClinicalCode",
+    "ClinicalCodeSystem",
     "ClinicalDocument",
     "ClinicalDocumentStatus",
     "ClinicalDocumentType",
