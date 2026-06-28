@@ -70,8 +70,14 @@ Leyenda UI: ✅ existe y funciona · ⚠️ existe pero rota/incompleta · ❌ n
   FK cubiertas: `patient_id`, `doctor_id`/`attending_doctor_id`, `consultation_id`. Las FK
   restantes (`appointment_id`, `related_diagnosis_id`, `prescription_id`, `user_id`…) siguen
   con texto manual hasta ampliar el mapa de `relation-picker.ts`.
-- **Página de detalle de solo lectura:** hoy se usa la edición precargada. Aceptable; un
-  detalle dedicado sería mejora futura, no bloqueo. → backlog.
+- **Página de detalle de solo lectura:** **hecho.** Ruta genérica
+  `app/(platform)/resources/[resourceName]/[id]/page.tsx` que pinta TODOS los campos en
+  lectura con la misma metadata de capability que la edición (`resource-detail-view.ts` +
+  `ResourceDetailFields`): sin un solo input; `select`→etiqueta de opción; fechas/horas/números
+  formateados; FK→etiqueta humana vía `fetchRelationItem` (`RelationLabel`), con respaldo al UUID.
+  Une los campos de creación ∪ actualización para incluir las FK inmutables (p. ej. `patient_id`,
+  que el form de update omite). Cabecera con Editar + sub-pantallas relacionales + acciones de fila
+  + descarga, cada una gated por la misma señal RBAC del contrato. Enlace "Ver" añadido en la lista.
 - **agent_memories:** el endpoint existe (cliente generado) pero ningún componente lo
   consume; no hay pantalla de gestión de memorias del agente. → **F4**.
 

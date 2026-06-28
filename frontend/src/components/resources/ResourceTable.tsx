@@ -56,6 +56,7 @@ export function ResourceTable({
   actions = [],
   itemReference = null,
   editEnabled = false,
+  detailEnabled = false,
 }: Readonly<{
   label: string;
   list: ResourceListCapability;
@@ -67,12 +68,13 @@ export function ResourceTable({
   actions?: ResourceActionCapability[];
   itemReference?: ItemReference | null;
   editEnabled?: boolean;
+  detailEnabled?: boolean;
 }>) {
   const columns = list.fields.filter((field) => field.visible_in_list);
   const { items } = page;
   const idField = itemReference?.field ?? "id";
   const actionPlaceholder = itemReference?.placeholder ?? "id";
-  const hasActions = editEnabled || relations.length > 0 || actions.length > 0;
+  const hasActions = detailEnabled || editEnabled || relations.length > 0 || actions.length > 0;
   const totalColumns = columns.length + (hasActions ? 1 : 0);
 
   function itemHref(id: string, ...segments: string[]): string {
@@ -147,6 +149,14 @@ export function ResourceTable({
                     {hasActions ? (
                       <td className="px-4 py-3">
                         <div className="flex flex-wrap items-center gap-3">
+                          {id && detailEnabled ? (
+                            <Link
+                              href={`/resources/${encodeURIComponent(resourceName)}/${encodeURIComponent(id)}`}
+                              className="text-sm font-medium text-slate-700 underline-offset-2 hover:text-slate-900 hover:underline"
+                            >
+                              Ver
+                            </Link>
+                          ) : null}
                           {id && editEnabled ? (
                             <Link
                               href={itemHref(id, "edit")}

@@ -108,6 +108,7 @@ export default async function ResourcePage({ params, searchParams }: PageProps) 
         editEnabled={Boolean(
           capability.item_reference && capability.detail && capability.forms?.update,
         )}
+        detailEnabled={Boolean(capability.item_reference && capability.detail)}
       />
       <ResourcePagination prevHref={prevHref} nextHref={nextHref} pagination={pagination} />
     </div>
