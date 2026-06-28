@@ -25,13 +25,25 @@ import type {
   WireProviderStatus,
 } from "@/core/agent/protocol";
 import { executeTool, resolveToolCall } from "@/core/agent/tools/tool-runner";
-import { toWireToolDefinitions, type ToolDefinition } from "@/core/agent/tools/registry";
+import {
+  listTools,
+  toWireToolDefinitions,
+  type ToolDefinition,
+} from "@/core/agent/tools/registry";
+import {
+  buildToolCatalog,
+  creatableResources,
+  effectiveTools,
+  type ToolCatalogEntry,
+} from "@/core/agent/tool-catalog";
 import {
   ApprovalStore,
   applyApprovalDecision,
   buildClinicalActionPlan,
   type ClinicalActionPlan,
 } from "@/core/agent/approval-protocol";
+import { browserApi } from "@/core/api/browser-client";
+import type { ResourceCatalog } from "@/core/api/contracts";
 import { isUiSpec, type UiSpec } from "@/core/agent/tools/ui-spec";
 import { GeneratedUi } from "@/components/copilot/GeneratedUi";
 
@@ -110,6 +122,13 @@ export function CopilotPanel() {
   const [input, setInput] = useState("");
   const [attachedImage, setAttachedImage] = useState<AttachedImage | null>(null);
 
+  // Gating por rol (tool-hardening): recursos en los que el médico puede crear (del catálogo
+  // permission-projected). Las escrituras se filtran ANTES de declararlas al modelo. Vacío
+  // por defecto: hasta cargar el catálogo no se ofrece ninguna escritura (defensa en
+  // profundidad; FastAPI revalida igual). ``toolCatalog`` es la vista de procedencia/auditoría.
+  const [toolCatalog, setToolCatalog] = useState<ToolCatalogEntry[]>([]);
+  const creatableRef = useRef<Set<string>>(new Set());
+
   const clientRef = useRef<AgentClient | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const turnRef = useRef<TurnState>(initialTurnState());
@@ -141,6 +160,27 @@ export function CopilotPanel() {
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
+
+  // Carga el catálogo de recursos (permission-projected) para gatear las tools de escritura
+  // por rol y mostrar la procedencia. Si falla, queda vacío -> ninguna escritura se ofrece.
+  useEffect(() => {
+    let active = true;
+    browserApi<ResourceCatalog>("/api/v1/resources")
+      .then((catalog) => {
+        if (!active) return;
+        const creatable = creatableResources(catalog);
+        creatableRef.current = creatable;
+        setToolCatalog(buildToolCatalog(listTools(), creatable));
+      })
+      .catch(() => {
+        if (!active) return;
+        creatableRef.current = new Set();
+        setToolCatalog(buildToolCatalog(listTools(), new Set()));
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     const applyTurnEvent = (event: ServerEvent): void => {
@@ -362,8 +402,9 @@ export function CopilotPanel() {
       // gateway lo resuelve contra su catálogo para arrendar la credencial correcta.
       profileId: selectedModel,
       messages: wireMessages,
-      // Declara al modelo las tools que el navegador puede ejecutar.
-      tools: toWireToolDefinitions(),
+      // Declara al modelo SOLO las tools efectivas: lecturas + escrituras permitidas por el
+      // rol del médico (gating por permiso). FastAPI revalida en cada ejecución.
+      tools: toWireToolDefinitions(effectiveTools(listTools(), creatableRef.current)),
       generation: { max_output_tokens: 1024 },
     });
   };
@@ -502,6 +543,8 @@ export function CopilotPanel() {
         </Card>
       </div>
 
+      <ToolCatalogPanel entries={toolCatalog} />
+
       <Card className="flex min-h-[280px] flex-col gap-3">
         <div className="flex-1 space-y-3" aria-live="polite">
           {messages.length === 0 && !isBusy && (
@@ -604,6 +647,62 @@ export function CopilotPanel() {
         </div>
       </Card>
     </div>
+  );
+}
+
+function ToolCatalogPanel({ entries }: Readonly<{ entries: ToolCatalogEntry[] }>) {
+  const [open, setOpen] = useState(false);
+  if (entries.length === 0) {
+    return null;
+  }
+  const declared = entries.filter((entry) => entry.status === "declared");
+  const gatedOut = entries.filter((entry) => entry.status === "gated_out");
+
+  return (
+    <Card className="flex flex-col gap-2">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        className="flex items-center justify-between gap-2 text-left"
+        aria-expanded={open}
+      >
+        <span className="text-xs font-semibold uppercase tracking-wide text-[var(--tx2)]">
+          Herramientas del copiloto
+        </span>
+        <span className="text-xs text-[var(--tx2)]">
+          {declared.length} disponibles · {gatedOut.length} restringidas {open ? "▲" : "▼"}
+        </span>
+      </button>
+
+      {open && (
+        <div className="space-y-2">
+          <p className="text-xs text-[var(--tx2)]">
+            Las acciones de escritura solo se ofrecen al modelo si tu rol permite crear en el
+            recurso. El servidor revalida cada acción.
+          </p>
+          <ul className="space-y-1">
+            {entries.map((entry) => (
+              <li
+                key={entry.name}
+                className="flex flex-wrap items-center gap-2 rounded-[8px] bg-[var(--panel2)] px-2.5 py-1.5"
+              >
+                <Badge tone={entry.kind === "write" ? "warn" : "accent"}>
+                  {entry.kind === "write" ? "Escritura" : "Lectura"}
+                </Badge>
+                <code className="text-xs text-[var(--tx)]">{entry.name}</code>
+                <span className="text-xs text-[var(--tx2)]">· {entry.source}</span>
+                <Badge tone={entry.status === "declared" ? "ok" : "neutral"}>
+                  {entry.status === "declared" ? "Disponible" : "Restringida"}
+                </Badge>
+                {entry.reason ? (
+                  <span className="text-xs text-[var(--tx2)]">{entry.reason}</span>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </Card>
   );
 }
 

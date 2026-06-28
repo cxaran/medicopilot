@@ -248,6 +248,161 @@ const TOOLS: ToolDefinition[] = [
       ctx.api(`/api/v1/consultations`, { method: "POST", body: args as Record<string, unknown> }),
   },
   {
+    name: "clinical.create_prescription_draft",
+    description:
+      "Crea una receta médica EN BORRADOR ligada a una consulta. Acción de escritura: " +
+      "requiere confirmación explícita del médico antes de ejecutarse. La receta nace en " +
+      "borrador para que el médico la revise, agregue medicamentos y la apruebe; no se " +
+      "aprueba ni imprime de forma autónoma.",
+    kind: "write",
+    inputSchema: {
+      type: "object",
+      properties: {
+        consultation_id: { type: "string", description: "Id (UUID) de la consulta origen.", format: "uuid" },
+        related_diagnosis_id: {
+          type: "string",
+          description: "Id (UUID) de un diagnóstico de la misma consulta (opcional).",
+          format: "uuid",
+        },
+        observations: { type: "string", description: "Observaciones de la receta (opcional)." },
+      },
+      required: ["consultation_id"],
+      additionalProperties: false,
+    },
+    approval: {
+      actionType: "create_prescription_draft",
+      targetResource: "prescriptions",
+      summarize: (args) =>
+        `Crear una receta médica EN BORRADOR para la consulta ${String(args.consultation_id ?? "—")}.`,
+    },
+    execute: (args, ctx) =>
+      ctx.api(`/api/v1/prescriptions`, { method: "POST", body: args as Record<string, unknown> }),
+  },
+  {
+    name: "clinical.create_diagnosis_draft",
+    description:
+      "Registra un diagnóstico o impresión diagnóstica EN BORRADOR en una consulta. Acción de " +
+      "escritura: requiere confirmación explícita del médico. Es un borrador a revisar; no " +
+      "sustituye el juicio clínico.",
+    kind: "write",
+    inputSchema: {
+      type: "object",
+      properties: {
+        consultation_id: { type: "string", description: "Id (UUID) de la consulta.", format: "uuid" },
+        diagnosis_kind: {
+          type: "string",
+          description: "Tipo de diagnóstico.",
+          enum: ["primary", "secondary", "suspected"],
+        },
+        diagnosis_text: {
+          type: "string",
+          description: "Texto del diagnóstico o impresión diagnóstica.",
+        },
+        notes: { type: "string", description: "Notas (opcional)." },
+      },
+      required: ["consultation_id", "diagnosis_kind", "diagnosis_text"],
+      additionalProperties: false,
+    },
+    approval: {
+      actionType: "create_diagnosis_draft",
+      targetResource: "consultation_diagnoses",
+      summarize: (args) =>
+        `Registrar un diagnóstico (${String(args.diagnosis_kind ?? "—")}) en la consulta ` +
+        `${String(args.consultation_id ?? "—")}: ${String(args.diagnosis_text ?? "—")}.`,
+    },
+    execute: (args, ctx) =>
+      ctx.api(`/api/v1/consultation-diagnoses`, { method: "POST", body: args as Record<string, unknown> }),
+  },
+  {
+    name: "clinical.create_appointment_draft",
+    description:
+      "Agenda una cita EN BORRADOR (estado pendiente) para un paciente con un médico. Acción de " +
+      "escritura: requiere confirmación explícita del médico. La cita nace pendiente; el médico " +
+      "la revisa y confirma.",
+    kind: "write",
+    inputSchema: {
+      type: "object",
+      properties: {
+        patient_id: { type: "string", description: "Id (UUID) del paciente.", format: "uuid" },
+        doctor_id: { type: "string", description: "Id (UUID) del médico.", format: "uuid" },
+        scheduled_at: {
+          type: "string",
+          description: "Fecha y hora ISO 8601 (p. ej. 2026-07-01T10:30).",
+        },
+        duration_minutes: {
+          type: "integer",
+          description: "Duración en minutos (5-480).",
+          minimum: 5,
+          maximum: 480,
+        },
+        reason: { type: "string", description: "Motivo de la cita." },
+        internal_notes: { type: "string", description: "Notas internas (opcional)." },
+      },
+      required: ["patient_id", "doctor_id", "scheduled_at", "duration_minutes", "reason"],
+      additionalProperties: false,
+    },
+    approval: {
+      actionType: "create_appointment_draft",
+      targetResource: "appointments",
+      summarize: (args) =>
+        `Agendar una cita (pendiente) para el paciente ${String(args.patient_id ?? "—")} con el ` +
+        `médico ${String(args.doctor_id ?? "—")} el ${String(args.scheduled_at ?? "—")}. ` +
+        `Motivo: ${String(args.reason ?? "—")}.`,
+    },
+    execute: (args, ctx) =>
+      ctx.api(`/api/v1/appointments`, { method: "POST", body: args as Record<string, unknown> }),
+  },
+  {
+    name: "clinical.create_patient_clinical_item_draft",
+    description:
+      "Registra un dato clínico importante del paciente EN BORRADOR (alergia, enfermedad " +
+      "crónica, medicamento actual, hábito relevante, alerta clínica u otro). Acción de " +
+      "escritura: requiere confirmación explícita del médico.",
+    kind: "write",
+    inputSchema: {
+      type: "object",
+      properties: {
+        patient_id: { type: "string", description: "Id (UUID) del paciente.", format: "uuid" },
+        item_type: {
+          type: "string",
+          description: "Tipo de dato clínico.",
+          enum: [
+            "allergy",
+            "chronic_condition",
+            "current_medication",
+            "relevant_habit",
+            "clinical_alert",
+            "other",
+          ],
+        },
+        title: { type: "string", description: "Nombre del dato clínico." },
+        details: {
+          type: "string",
+          description: "Detalle: reacción, dosis, frecuencia o contexto (opcional).",
+        },
+        severity: {
+          type: "string",
+          description: "Severidad (opcional).",
+          enum: ["low", "moderate", "high", "critical"],
+        },
+      },
+      required: ["patient_id", "item_type", "title"],
+      additionalProperties: false,
+    },
+    approval: {
+      actionType: "create_patient_clinical_item_draft",
+      targetResource: "patient_clinical_items",
+      summarize: (args) =>
+        `Registrar un dato clínico (${String(args.item_type ?? "—")}) para el paciente ` +
+        `${String(args.patient_id ?? "—")}: ${String(args.title ?? "—")}.`,
+    },
+    execute: (args, ctx) =>
+      ctx.api(`/api/v1/patient-clinical-items`, {
+        method: "POST",
+        body: args as Record<string, unknown>,
+      }),
+  },
+  {
     name: "sandbox.run_js",
     description:
       "Ejecuta código JavaScript en un sandbox AISLADO (Web Worker, sin DOM, sin cookies, " +
@@ -394,8 +549,9 @@ export function listTools(): ToolDefinition[] {
 }
 
 // Definiciones para declarar al modelo en turn.start (name/description/input_schema).
-export function toWireToolDefinitions(): WireTool[] {
-  return TOOLS.map((tool) => ({
+// Recibe la lista EFECTIVA de tools (tras el gating por rol); por defecto, todas.
+export function toWireToolDefinitions(tools: ToolDefinition[] = TOOLS): WireTool[] {
+  return tools.map((tool) => ({
     name: tool.name,
     description: tool.description,
     input_schema: (tool.wireSchema ?? tool.inputSchema) as unknown as Record<string, unknown>,
