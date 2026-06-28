@@ -220,8 +220,9 @@ test("buildActionPayload: switch ausente se envía como false", () => {
   formData.set("doctor_id", "doc-1");
   const payload = buildActionPayload(rescheduleAction(), formData);
   assert.equal(payload.notify, false);
-  // Campos string ausentes se envían como cadena vacía (misma semántica que create).
-  assert.equal(payload.reason, "");
+  // Campos opcionales ausentes se envían como null (misma semántica que create): respeta
+  // los Optional del backend y evita 422 en validadores estrictos con cadena vacía.
+  assert.equal(payload.reason, null);
 });
 
 test("actionBody con input_schema toma sólo los campos declarados del payload", () => {

@@ -10,6 +10,10 @@ const SUPPORTED_CREATE_WIDGETS = new Set<WidgetType>([
   "password",
   "switch",
   "textarea",
+  // ``select`` (enum/opciones cerradas) y ``date`` (literal YYYY-MM-DD) son necesarios
+  // para los formularios clínicos (p. ej. sexo/estado y fecha de nacimiento del paciente).
+  "select",
+  "date",
 ]);
 
 // La actualización no admite ``password``: el cambio de contraseña, si existe, tiene
@@ -19,6 +23,8 @@ const SUPPORTED_UPDATE_WIDGETS = new Set<WidgetType>([
   "email",
   "switch",
   "textarea",
+  "select",
+  "date",
 ]);
 
 export class FormContractError extends Error {
@@ -68,7 +74,15 @@ function fieldValue(
     return formData.has(field.name);
   }
   const raw = formData.get(field.name);
-  return typeof raw === "string" ? raw : "";
+  const text = typeof raw === "string" ? raw : "";
+  // Un campo opcional vacío se envía como ``null`` (no ``""``): respeta los ``Optional``
+  // del backend, permite limpiar el valor en PATCH (``exclude_unset``) y evita 422 en
+  // validadores estrictos como ``EmailStr`` o ``date`` que rechazan la cadena vacía. Un
+  // campo requerido vacío conserva ``""`` para que el backend lo reporte como tal.
+  if (text === "" && !field.required) {
+    return null;
+  }
+  return text;
 }
 
 export function buildCreatePayload(

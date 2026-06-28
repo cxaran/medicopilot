@@ -57,6 +57,43 @@ export function ResourceFormFields({
           );
         }
 
+        if (field.widget === "select") {
+          const options = field.options ?? [];
+          const initial = initialValues[field.name];
+          const initialValue = initial == null ? "" : String(initial);
+          return (
+            <div key={field.name}>
+              <label htmlFor={field.name} className="block text-sm font-medium text-slate-900">
+                {field.label}
+              </label>
+              <select
+                id={field.name}
+                name={field.name}
+                required={field.required}
+                defaultValue={initialValue}
+                aria-describedby={errorId}
+                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-slate-500 focus:outline-none"
+              >
+                {/* Opción vacía solo cuando el campo es opcional (permite no elegir). */}
+                {field.required ? null : <option value="">—</option>}
+                {options.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              {field.description ? (
+                <p className="mt-1 text-sm text-slate-500">{field.description}</p>
+              ) : null}
+              {errors.length > 0 ? (
+                <p id={errorId} className="mt-1 text-sm text-red-600">
+                  {errors.join(" ")}
+                </p>
+              ) : null}
+            </div>
+          );
+        }
+
         return (
           <div key={field.name}>
             <label htmlFor={field.name} className="block text-sm font-medium text-slate-900">

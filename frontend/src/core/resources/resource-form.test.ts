@@ -10,6 +10,7 @@ import {
   FormContractError,
   assertSupportedCreateForm,
   assertSupportedUpdateForm,
+  buildCreatePayload,
   buildUpdatePayload,
 } from "./resource-form.ts";
 
@@ -43,13 +44,15 @@ function form(
 
 // --- assertSupportedCreateForm ---
 
-test("assertSupportedCreateForm acepta POST con widgets soportados (incluye password)", () => {
+test("assertSupportedCreateForm acepta POST con widgets soportados (incluye password, select y date)", () => {
   const f = form("POST", [
     field("name", "text"),
     field("email", "email"),
     field("password", "password"),
     field("bio", "textarea"),
     field("active", "switch"),
+    field("sex", "select"),
+    field("birth_date", "date"),
   ]);
   assert.doesNotThrow(() => assertSupportedCreateForm(f));
 });
@@ -95,12 +98,14 @@ test("assertSupportedCreateForm rechaza nombres de campo duplicados", () => {
 
 // --- assertSupportedUpdateForm ---
 
-test("assertSupportedUpdateForm acepta PATCH y PUT con widgets soportados", () => {
+test("assertSupportedUpdateForm acepta PATCH y PUT con widgets soportados (incluye select y date)", () => {
   const fields = [
     field("name", "text"),
     field("email", "email"),
     field("bio", "textarea"),
     field("active", "switch"),
+    field("sex", "select"),
+    field("birth_date", "date"),
   ];
   assert.doesNotThrow(() => assertSupportedUpdateForm(form("PATCH", fields)));
   assert.doesNotThrow(() => assertSupportedUpdateForm(form("PUT", fields)));
@@ -139,14 +144,46 @@ test("buildUpdatePayload excluye campos no editables (editable === false)", () =
   assert.equal("record_number" in payload, false);
 });
 
-test("buildUpdatePayload mapea switch->boolean, string->string y ausente->''", () => {
+test("buildUpdatePayload mapea switch->boolean, string->string y opcional vacío->null", () => {
   const fd = new FormData();
   fd.set("name", "Ana");
   fd.set("active", "on");
-  // 'phone' está declarado y es editable pero ausente del FormData.
+  // 'phone' está declarado y es editable pero ausente del FormData (opcional, vacío).
   const payload = buildUpdatePayload(
     [field("name", "text"), field("active", "switch"), field("phone", "text")],
     fd,
   );
-  assert.deepEqual(payload, { name: "Ana", active: true, phone: "" });
+  assert.deepEqual(payload, { name: "Ana", active: true, phone: null });
+});
+
+test("buildUpdatePayload conserva '' en un campo requerido vacío", () => {
+  const fd = new FormData();
+  // 'full_name' requerido pero vacío: se envía '' para que el backend lo valide (no null).
+  const payload = buildUpdatePayload([field("full_name", "text", { required: true })], fd);
+  assert.deepEqual(payload, { full_name: "" });
+});
+
+// --- buildCreatePayload ---
+
+test("buildCreatePayload incluye select/date y convierte opcionales vacíos a null", () => {
+  const fd = new FormData();
+  fd.set("full_name", "Ana López");
+  fd.set("sex", "female");
+  fd.set("birth_date", "1990-05-20");
+  // 'email' opcional y ausente -> null (evita 422 de EmailStr con cadena vacía).
+  const payload = buildCreatePayload(
+    [
+      field("full_name", "text", { required: true }),
+      field("sex", "select", { required: true }),
+      field("birth_date", "date", { required: true }),
+      field("email", "email"),
+    ],
+    fd,
+  );
+  assert.deepEqual(payload, {
+    full_name: "Ana López",
+    sex: "female",
+    birth_date: "1990-05-20",
+    email: null,
+  });
 });
