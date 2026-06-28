@@ -1,4 +1,6 @@
 import type { ResourceFormFieldCapability } from "@/core/api/contracts";
+import { RelationPickerField } from "@/components/resources/RelationPickerField";
+import { resolveRelationTarget } from "@/core/resources/relation-picker";
 
 type FieldErrors = Record<string, string[]>;
 
@@ -46,6 +48,23 @@ export function ResourceFormFields({
       {fields.map((field) => {
         const errors = fieldErrors[field.name] ?? [];
         const errorId = errors.length > 0 ? `${field.name}-error` : undefined;
+
+        // Campos FK (widget ``text`` cuyo nombre resuelve a un recurso destino): se
+        // reemplaza el input de UUID a mano por el selector de relación (buscar+elegir).
+        const relationTarget =
+          field.widget === "text" ? resolveRelationTarget(field.name) : null;
+        if (relationTarget) {
+          const initial = initialValues[field.name];
+          return (
+            <RelationPickerField
+              key={field.name}
+              field={field}
+              target={relationTarget}
+              initialValue={initial == null ? undefined : String(initial)}
+              errors={errors}
+            />
+          );
+        }
 
         if (field.widget === "switch") {
           return (
