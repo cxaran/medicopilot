@@ -42,6 +42,12 @@ import {
   buildClinicalActionPlan,
   type ClinicalActionPlan,
 } from "@/core/agent/approval-protocol";
+import {
+  buildRecallMessage,
+  recallIndicatorText,
+  selectRelevantMemories,
+} from "@/core/agent/memory-recall";
+import { listAgentMemories } from "@/core/agent-memories/agent-memories-client";
 import { browserApi } from "@/core/api/browser-client";
 import type { ResourceCatalog } from "@/core/api/contracts";
 import { isUiSpec, type UiSpec } from "@/core/agent/tools/ui-spec";
@@ -128,6 +134,11 @@ export function CopilotPanel() {
   // profundidad; FastAPI revalida igual). ``toolCatalog`` es la vista de procedencia/auditoría.
   const [toolCatalog, setToolCatalog] = useState<ToolCatalogEntry[]>([]);
   const creatableRef = useRef<Set<string>>(new Set());
+
+  // RECALL (P2): nº de memorias del médico inyectadas en el último turno, para el indicador
+  // de contexto. ``null`` = aún no hay turno con recall. Las memorias viajan como contexto NO
+  // confiable; nunca como instrucciones (ver memory-recall).
+  const [recalledCount, setRecalledCount] = useState<number | null>(null);
 
   const clientRef = useRef<AgentClient | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -368,7 +379,21 @@ export function CopilotPanel() {
     reader.readAsDataURL(file);
   };
 
-  const sendUserTurn = (text: string, image?: AttachedImage | null): void => {
+  // RECALL (P2): recupera las memorias del médico (owner-scoped, cookie del médico) y arma el
+  // bloque de contexto NO confiable. Si falla, no bloquea el turno: simplemente no se inyecta.
+  const recallMemoryMessage = async (): Promise<WireMessage | null> => {
+    try {
+      const memories = await listAgentMemories();
+      const selected = selectRelevantMemories(memories);
+      setRecalledCount(selected.length);
+      return buildRecallMessage(selected);
+    } catch {
+      setRecalledCount(0);
+      return null;
+    }
+  };
+
+  const sendUserTurn = async (text: string, image?: AttachedImage | null): Promise<void> => {
     if ((!text && !image) || status !== "connected" || isBusy) {
       return;
     }
@@ -397,11 +422,16 @@ export function CopilotPanel() {
     turnRef.current = { ...initialTurnState(), status: "running" };
     setTurn(turnRef.current);
 
+    // RECALL antes de que el modelo responda: las memorias se inyectan como un mensaje
+    // ``system`` delimitado al frente del contexto (datos, no instrucciones; ver memory-recall).
+    const recall = await recallMemoryMessage();
+    const outgoing = recall ? [recall, ...wireMessages] : wireMessages;
+
     clientRef.current?.startTurn({
       // El profileId es el id del modelo seleccionado (providerId/providerModelId); el
       // gateway lo resuelve contra su catálogo para arrendar la credencial correcta.
       profileId: selectedModel,
-      messages: wireMessages,
+      messages: outgoing,
       // Declara al modelo SOLO las tools efectivas: lecturas + escrituras permitidas por el
       // rol del médico (gating por permiso). FastAPI revalida en cada ejecución.
       tools: toWireToolDefinitions(effectiveTools(listTools(), creatableRef.current)),
@@ -414,7 +444,7 @@ export function CopilotPanel() {
     if (!text && !attachedImage) {
       return;
     }
-    sendUserTurn(text, attachedImage);
+    void sendUserTurn(text, attachedImage);
     setInput("");
     clearAttachedImage();
   };
@@ -423,7 +453,7 @@ export function CopilotPanel() {
   // conversación con el modelo. Respeta el principio borrador: si el modelo decide una
   // acción de escritura clínica, pasa por la aprobación de B8.
   const handleSendFollowup = (text: string): void => {
-    sendUserTurn(text.trim());
+    void sendUserTurn(text.trim());
   };
 
   const handleCancel = (): void => {
@@ -542,6 +572,16 @@ export function CopilotPanel() {
           )}
         </Card>
       </div>
+
+      {recalledCount !== null && (
+        <div
+          role="status"
+          className="flex items-center gap-2 rounded-[12px] border border-[var(--border2)] bg-[var(--panel2)] px-3.5 py-2 text-xs text-[var(--tx2)]"
+        >
+          <span aria-hidden="true">🧠</span>
+          <span>{recallIndicatorText(recalledCount)}</span>
+        </div>
+      )}
 
       <ToolCatalogPanel entries={toolCatalog} />
 

@@ -39,6 +39,10 @@ export interface ToolApprovalMeta {
   targetResource: string;
   // Resumen legible en español de lo que ocurriría si se aprueba.
   summarize: (args: Record<string, unknown>) => string;
+  // Escritura OWNER-SCOPED (sobre datos del propio médico, p. ej. sus memorias): no se gatea
+  // por el catálogo de recursos RBAC (no es un recurso global), pero SÍ pasa por la aprobación
+  // del médico como cualquier otra escritura. Sin esto, una escritura se gatea por rol.
+  ownerScoped?: boolean;
 }
 
 export interface ToolDefinition {
@@ -398,6 +402,57 @@ const TOOLS: ToolDefinition[] = [
     },
     execute: (args, ctx) =>
       ctx.api(`/api/v1/patient-clinical-items`, {
+        method: "POST",
+        body: args as Record<string, unknown>,
+      }),
+  },
+  {
+    // REMEMBER (P2): el agente PROPONE persistir una memoria del médico. Es una escritura
+    // OWNER-SCOPED (sobre las propias memorias del médico, no un recurso clínico RBAC), así
+    // que no se gatea por rol, pero SÍ pasa por el protocolo de aprobación (P1): nada se
+    // guarda sin que el médico confirme exactamente lo que se recordará. Se ejecuta contra el
+    // endpoint owner-only con la cookie del médico; el contenido se cifra en el backend.
+    name: "memory.remember",
+    description:
+      "Propone GUARDAR una memoria del médico (nota, preferencia, hecho clínico o " +
+      "recordatorio) para tenerla en cuenta en futuras conversaciones. Acción de escritura: " +
+      "requiere confirmación explícita del médico antes de guardarse. No guarda nada de forma " +
+      "autónoma; el médico revisa y aprueba qué se recuerda.",
+    kind: "write",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Título breve de la memoria." },
+        content: { type: "string", description: "Contenido a recordar (puede ser clínico)." },
+        kind: {
+          type: "string",
+          description: "Tipo de memoria.",
+          enum: ["nota", "preferencia", "hecho_clinico", "recordatorio"],
+        },
+        patient_id: {
+          type: "string",
+          description: "Id (UUID) del paciente relacionado (opcional).",
+          format: "uuid",
+        },
+        consultation_id: {
+          type: "string",
+          description: "Id (UUID) de la consulta relacionada (opcional).",
+          format: "uuid",
+        },
+      },
+      required: ["title", "content"],
+      additionalProperties: false,
+    },
+    approval: {
+      actionType: "remember_memory",
+      targetResource: "agent_memories",
+      ownerScoped: true,
+      summarize: (args) =>
+        `Guardar una memoria del médico (${String(args.kind ?? "nota")}) "` +
+        `${String(args.title ?? "—")}": ${String(args.content ?? "—")}.`,
+    },
+    execute: (args, ctx) =>
+      ctx.api(`/api/v1/users/me/agent-memories`, {
         method: "POST",
         body: args as Record<string, unknown>,
       }),

@@ -93,11 +93,25 @@ test("effectiveTools: excluye escrituras gateadas, conserva lecturas", () => {
   assert.ok(!names.includes("clinical.create_appointment_draft")); // gateada
 });
 
-test("effectiveTools: sin permisos de creación -> ninguna escritura, solo lecturas", () => {
+test("effectiveTools: sin permisos de creación -> solo lecturas y escrituras owner-scoped", () => {
   const tools = listTools();
   const effective = effectiveTools(tools, new Set());
-  assert.ok(effective.every((tool) => tool.kind === "read"));
+  const names = effective.map((tool) => tool.name);
+  // Las únicas escrituras que sobreviven sin permiso RBAC son las owner-scoped (memorias).
+  const writes = effective.filter((tool) => tool.kind === "write");
+  assert.ok(writes.every((tool) => tool.approval?.ownerScoped));
+  assert.ok(names.includes("memory.remember")); // owner-scoped: siempre disponible
+  assert.ok(!names.includes("clinical.create_consultation_draft")); // gateada por rol
   assert.ok(effective.length > 0);
+});
+
+test("buildToolCatalog: escritura owner-scoped (memorias) siempre declarada, sin permiso RBAC", () => {
+  const remember = getTool("memory.remember") as ToolDefinition;
+  const [entry] = buildToolCatalog([remember], new Set()); // sin permisos de creación
+  assert.equal(entry.kind, "write");
+  assert.equal(entry.status, "declared");
+  assert.equal(entry.source, "Memoria");
+  assert.equal(entry.reason, null);
 });
 
 // --- cada nueva tool de escritura enruta por el protocolo de aprobación (P1) ---

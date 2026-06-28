@@ -32,6 +32,7 @@ export interface ToolCatalogEntry {
 const SOURCE_BY_PREFIX: ReadonlyArray<readonly [string, string]> = [
   ["clinical.", "Clínica"],
   ["pubmed.", "Investigación"],
+  ["memory.", "Memoria"],
   ["ui.", "Interfaz"],
   ["sandbox.", "Utilidad"],
 ];
@@ -74,6 +75,11 @@ export function buildToolCatalog(
       return { name: tool.name, kind: "read", source, targetResource: null, status: "declared", reason: null };
     }
     const target = tool.approval?.targetResource ?? null;
+    // Escritura OWNER-SCOPED (p. ej. memorias del médico): no se gatea por el catálogo RBAC
+    // (no es un recurso global), siempre disponible para el dueño. Igual pasa por aprobación.
+    if (tool.approval?.ownerScoped) {
+      return { name: tool.name, kind: "write", source, targetResource: target, status: "declared", reason: null };
+    }
     if (target && creatable.has(target)) {
       return { name: tool.name, kind: "write", source, targetResource: target, status: "declared", reason: null };
     }
