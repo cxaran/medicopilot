@@ -4,6 +4,7 @@ import type {
   ClientMessage,
   ConnectionTicketResponse,
   ServerEvent,
+  ToolResultPayload,
   WireGeneration,
   WireMessage,
   WireTool,
@@ -174,6 +175,11 @@ export class AgentClient {
       message.tools = input.tools;
     }
     return this.send(message) ? requestId : null;
+  }
+
+  // B8: el navegador ejecuta la tool y devuelve el resultado, reanudando el turn.
+  sendToolResult(turnId: string, callId: string, result: ToolResultPayload): boolean {
+    return this.send({ type: "turn.tool_result", turn_id: turnId, call_id: callId, result });
   }
 
   cancelTurn(turnId?: string): boolean {

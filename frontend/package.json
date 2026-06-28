@@ -26,8 +26,9 @@
     "test:account-client": "node --no-warnings --import ./scripts/test-register.mjs --test src/core/auth/account-mutation-client.test.ts",
     "test:mutation-client": "node --no-warnings --import ./scripts/test-register.mjs --test src/core/resources/resource-mutation-client.test.ts",
     "test:agent-client": "node --no-warnings --import ./scripts/test-register.mjs --test src/core/agent/agent-client.test.ts",
+    "test:agent-tools": "node --no-warnings --import ./scripts/test-register.mjs --test src/core/agent/tools/tool-runner.test.ts",
     "test:e2e:bootstrap": "node scripts/run-e2e-bootstrap.mjs",
-    "check:canonical": "npm run check:api && npm run lint && npm run typecheck && npm run test:bootstrap && npm run test:actions && npm run test:public-auth && npm run test:filters && npm run test:forms && npm run test:api-error && npm run test:list-query && npm run test:request && npm run test:action-client && npm run test:public-auth-client && npm run test:bootstrap-client && npm run test:account-client && npm run test:mutation-client && npm run test:agent-client && npm run build",
+    "check:canonical": "npm run check:api && npm run lint && npm run typecheck && npm run test:bootstrap && npm run test:actions && npm run test:public-auth && npm run test:filters && npm run test:forms && npm run test:api-error && npm run test:list-query && npm run test:request && npm run test:action-client && npm run test:public-auth-client && npm run test:bootstrap-client && npm run test:account-client && npm run test:mutation-client && npm run test:agent-client && npm run test:agent-tools && npm run build",
     "generate:api": "node scripts/generate-openapi.mjs",
     "check:api": "node scripts/generate-openapi.mjs --check"
   },

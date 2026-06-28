@@ -18,12 +18,49 @@ import {
   type TurnState,
 } from "@/core/agent/turn-reducer";
 import type { ServerEvent, WireModel, WireProviderStatus } from "@/core/agent/protocol";
+import {
+  executeTool,
+  rejectedByUserResult,
+  resolveToolCall,
+} from "@/core/agent/tools/tool-runner";
+import { toWireToolDefinitions, type ToolDefinition } from "@/core/agent/tools/registry";
 
 interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   text: string;
   isError?: boolean;
+}
+
+type ToolCallStatus = "running" | "awaiting_approval" | "success" | "error" | "rejected";
+
+interface ToolCallView {
+  callId: string;
+  turnId: string;
+  name: string;
+  kind: "read" | "write";
+  argsText: string;
+  status: ToolCallStatus;
+  resultText?: string;
+  errorText?: string;
+}
+
+const TOOL_STATUS: Record<ToolCallStatus, { label: string; tone: BadgeTone }> = {
+  running: { label: "Ejecutando…", tone: "info" },
+  awaiting_approval: { label: "Requiere aprobación", tone: "warn" },
+  success: { label: "Completada", tone: "ok" },
+  error: { label: "Error", tone: "danger" },
+  rejected: { label: "Rechazada", tone: "neutral" },
+};
+
+function previewContent(value: unknown): string {
+  let text: string;
+  try {
+    text = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  } catch {
+    text = String(value);
+  }
+  return text.length > 800 ? `${text.slice(0, 800)}…` : text;
 }
 
 const STATUS_LABEL: Record<ConnectionStatus, string> = {
@@ -49,16 +86,32 @@ export function CopilotPanel() {
   const [selectedModel, setSelectedModel] = useState<string>("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [turn, setTurn] = useState<TurnState>(initialTurnState());
+  const [toolCalls, setToolCalls] = useState<ToolCallView[]>([]);
   const [input, setInput] = useState("");
 
   const clientRef = useRef<AgentClient | null>(null);
   const turnRef = useRef<TurnState>(initialTurnState());
   const idRef = useRef(0);
   const messagesRef = useRef<ChatMessage[]>([]);
+  // Escrituras pendientes de aprobación: callId -> tool+args+turn (no se ejecutan
+  // hasta que el médico confirme).
+  const pendingWritesRef = useRef<
+    Map<string, { tool: ToolDefinition; args: Record<string, unknown>; turnId: string }>
+  >(new Map());
 
   const nextId = (): string => {
     idRef.current += 1;
     return `m${idRef.current}`;
+  };
+
+  const upsertToolCall = (view: ToolCallView): void => {
+    setToolCalls((prev) => [...prev, view]);
+  };
+
+  const patchToolCall = (callId: string, patch: Partial<ToolCallView>): void => {
+    setToolCalls((prev) =>
+      prev.map((call) => (call.callId === callId ? { ...call, ...patch } : call)),
+    );
   };
 
   useEffect(() => {
@@ -98,6 +151,60 @@ export function CopilotPanel() {
       }
     };
 
+    // B8: el navegador es dueño de las tools. Al recibir tool_call.ready busca la tool,
+    // valida args y, si es 'read', la ejecuta contra FastAPI (cookie del médico) y
+    // devuelve turn.tool_result. Si es 'write', NO ejecuta: espera aprobación del médico.
+    const handleToolCall = (
+      turnId: string,
+      callId: string,
+      toolName: string,
+      args: unknown,
+    ): void => {
+      const resolved = resolveToolCall(toolName, args);
+      if (resolved.outcome !== "ready") {
+        const message = resolved.result.status === "error" ? resolved.result.message : "Error";
+        upsertToolCall({
+          callId,
+          turnId,
+          name: toolName,
+          kind: "read",
+          argsText: previewContent(args),
+          status: "error",
+          errorText: message,
+        });
+        clientRef.current?.sendToolResult(turnId, callId, resolved.result);
+        return;
+      }
+
+      const { tool, args: validArgs } = resolved;
+      const argsText = previewContent(validArgs);
+
+      if (tool.kind === "read") {
+        upsertToolCall({ callId, turnId, name: tool.name, kind: "read", argsText, status: "running" });
+        void executeTool(tool, validArgs).then((result) => {
+          patchToolCall(
+            callId,
+            result.status === "success"
+              ? { status: "success", resultText: previewContent(result.content) }
+              : { status: "error", errorText: result.message },
+          );
+          clientRef.current?.sendToolResult(turnId, callId, result);
+        });
+        return;
+      }
+
+      // Escritura: gated por confirmación explícita del médico (Aprobar / Rechazar).
+      pendingWritesRef.current.set(callId, { tool, args: validArgs, turnId });
+      upsertToolCall({
+        callId,
+        turnId,
+        name: tool.name,
+        kind: "write",
+        argsText,
+        status: "awaiting_approval",
+      });
+    };
+
     const onEvent = (event: ServerEvent): void => {
       if (event.type === "models.list.result") {
         setModels(event.models);
@@ -109,6 +216,11 @@ export function CopilotPanel() {
         return;
       }
       if (event.type === "rpc.error" || event.type === "protocol.error") {
+        return;
+      }
+      if (event.type === "turn.tool_call.ready") {
+        applyTurnEvent(event);
+        handleToolCall(event.turn_id, event.call_id, event.tool_name, event.arguments);
         return;
       }
       applyTurnEvent(event);
@@ -153,6 +265,8 @@ export function CopilotPanel() {
     clientRef.current?.startTurn({
       profileId: PROFILE_ID,
       messages: wireMessages,
+      // Declara al modelo las tools que el navegador puede ejecutar.
+      tools: toWireToolDefinitions(),
       generation: { max_output_tokens: 1024 },
     });
     setInput("");
@@ -160,6 +274,35 @@ export function CopilotPanel() {
 
   const handleCancel = (): void => {
     clientRef.current?.cancelTurn(turnRef.current.turnId ?? undefined);
+  };
+
+  const approveWrite = (callId: string): void => {
+    const pending = pendingWritesRef.current.get(callId);
+    if (!pending) {
+      return;
+    }
+    pendingWritesRef.current.delete(callId);
+    patchToolCall(callId, { status: "running" });
+    void executeTool(pending.tool, pending.args).then((result) => {
+      patchToolCall(
+        callId,
+        result.status === "success"
+          ? { status: "success", resultText: previewContent(result.content) }
+          : { status: "error", errorText: result.message },
+      );
+      clientRef.current?.sendToolResult(pending.turnId, callId, result);
+    });
+  };
+
+  const rejectWrite = (callId: string): void => {
+    const pending = pendingWritesRef.current.get(callId);
+    if (!pending) {
+      return;
+    }
+    pendingWritesRef.current.delete(callId);
+    const result = rejectedByUserResult();
+    patchToolCall(callId, { status: "rejected", errorText: result.message });
+    clientRef.current?.sendToolResult(pending.turnId, callId, result);
   };
 
   return (
@@ -247,25 +390,21 @@ export function CopilotPanel() {
             <MessageBubble key={message.id} message={message} />
           ))}
 
+          {toolCalls.map((call) => (
+            <ToolCallCard
+              key={call.callId}
+              call={call}
+              onApprove={() => approveWrite(call.callId)}
+              onReject={() => rejectWrite(call.callId)}
+            />
+          ))}
+
           {isBusy && (
             <div className="rounded-[12px] bg-[var(--panel2)] px-3.5 py-2.5">
               <div className="mb-1 text-xs font-semibold text-[var(--tx2)]">Asistente (borrador)</div>
               <p className="whitespace-pre-wrap text-sm text-[var(--tx)]">
                 {turn.assistantText || "Pensando…"}
               </p>
-              {turn.pendingToolCalls.length > 0 && (
-                <div className="mt-2 space-y-1">
-                  {turn.pendingToolCalls.map((call) => (
-                    <div key={call.callId} className="text-xs">
-                      <Badge tone="warn">Herramienta pendiente</Badge>{" "}
-                      <span className="text-[var(--tx2)]">
-                        El modelo pidió <code className="text-[var(--tx)]">{call.toolName}</code> (se
-                        ejecutará en una próxima versión).
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
             </div>
           )}
         </div>
@@ -319,6 +458,60 @@ function MessageBubble({ message }: Readonly<{ message: ChatMessage }>) {
         )}
         {message.text}
       </div>
+    </div>
+  );
+}
+
+function ToolCallCard({
+  call,
+  onApprove,
+  onReject,
+}: Readonly<{ call: ToolCallView; onApprove: () => void; onReject: () => void }>) {
+  const meta = TOOL_STATUS[call.status];
+  return (
+    <div className="rounded-[12px] border border-[var(--border2)] bg-[var(--bg2)] px-3.5 py-2.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge tone={call.kind === "write" ? "warn" : "accent"}>
+          {call.kind === "write" ? "Escritura" : "Lectura"}
+        </Badge>
+        <code className="text-sm font-semibold text-[var(--tx)]">{call.name}</code>
+        <Badge tone={meta.tone}>{meta.label}</Badge>
+      </div>
+
+      <pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-words text-xs text-[var(--tx2)]">
+        {call.argsText}
+      </pre>
+
+      {call.status === "awaiting_approval" && (
+        <div className="mt-2">
+          <p className="mb-2 text-xs text-[var(--tx2)]">
+            El modelo propone una acción de escritura (crea un borrador). Requiere tu confirmación
+            explícita.
+          </p>
+          <div className="flex gap-2">
+            <Button type="button" onClick={onApprove} className="shrink-0">
+              Aprobar
+            </Button>
+            <button
+              type="button"
+              onClick={onReject}
+              className="shrink-0 rounded-[11px] border border-[var(--border2)] px-[18px] py-2.5 text-sm font-semibold text-[var(--tx)] transition hover:bg-[var(--panel2)]"
+            >
+              Rechazar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {call.status === "success" && call.resultText && (
+        <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-[8px] bg-[var(--panel2)] p-2 text-xs text-[var(--tx)]">
+          {call.resultText}
+        </pre>
+      )}
+
+      {(call.status === "error" || call.status === "rejected") && call.errorText && (
+        <p className="mt-2 text-xs text-[var(--danger)]">{call.errorText}</p>
+      )}
     </div>
   );
 }

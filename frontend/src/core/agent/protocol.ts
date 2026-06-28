@@ -77,6 +77,10 @@ export interface WireGeneration {
   strict_json_schema?: boolean;
 }
 
+export type ToolResultPayload =
+  | { status: "success"; content: unknown }
+  | { status: "error"; code: string; message: string };
+
 export type ClientMessage =
   | {
       type: "turn.start";
@@ -86,6 +90,7 @@ export type ClientMessage =
       tools?: WireTool[];
       generation: WireGeneration;
     }
+  | { type: "turn.tool_result"; turn_id: string; call_id: string; result: ToolResultPayload }
   | { type: "models.list"; request_id: string; view?: "default" }
   | { type: "provider.status"; request_id: string }
   | { type: "agent.cancel_turn"; request_id: string; turn_id?: string };
