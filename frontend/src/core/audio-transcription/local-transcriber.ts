@@ -99,3 +99,40 @@ export async function transcribeLocally(options: LocalTranscribeOptions): Promis
     worker.terminate();
   }
 }
+
+/** Precarga (descarga + cachea en IndexedDB) los pesos del modelo, sin transcribir. La siguiente
+ *  transcripción arranca al instante desde la caché. Resuelve cuando el modelo está listo. */
+export async function preloadModelLocally(options: {
+  model: WhisperModel;
+  onProgress?: (progress: TranscriptionProgress) => void;
+  signal?: AbortSignal;
+}): Promise<void> {
+  const worker = createWorker();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const onAbort = () => {
+        worker.terminate();
+        reject(new Error("Precarga cancelada."));
+      };
+      options.signal?.addEventListener("abort", onAbort, { once: true });
+      worker.onmessage = (event: MessageEvent) => {
+        const message = event.data;
+        if (message?.type === "progress") {
+          options.onProgress?.({
+            stage: message.stage,
+            progress: message.progress,
+            file: message.file,
+          });
+        } else if (message?.type === "ready") {
+          resolve();
+        } else if (message?.type === "error") {
+          reject(new Error(message.message || "Error al precargar el modelo."));
+        }
+      };
+      worker.onerror = (event) => reject(new Error(event.message || "Error del worker."));
+      worker.postMessage({ type: "preload", model: options.model });
+    });
+  } finally {
+    worker.terminate();
+  }
+}

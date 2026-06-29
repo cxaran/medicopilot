@@ -3,6 +3,7 @@
 // importa DINÁMICAMENTE y sólo cuando el navegador lo soporta, de modo que ni transformers.js ni
 // el worker se cargan en SSR ni en los tests de node (donde el flujo cae directo al servidor).
 
+import { WHISPER_LANGUAGE } from "./panel-view";
 import {
   defaultWhisperModel,
   isLocalTranscriptionSupported,
@@ -51,7 +52,7 @@ export async function runAudioTranscript(
       const text = await transcribeLocally({
         audioUrl: downloadUrl(documentId),
         model,
-        language: "spanish",
+        language: WHISPER_LANGUAGE,
         onProgress: options.onProgress,
       });
       return { text, model };
@@ -61,4 +62,18 @@ export async function runAudioTranscript(
       return result;
     },
   });
+}
+
+/** Precarga el modelo Whisper en el dispositivo (caché de IndexedDB) para que la primera
+ *  transcripción real arranque al instante. No-op si el navegador no soporta el modo local. */
+export async function preloadModel(
+  model: WhisperModel = defaultWhisperModel(),
+  onProgress?: (progress: TranscriptionProgress) => void,
+): Promise<boolean> {
+  if (!localTranscriptionEnabled() || !isLocalTranscriptionSupported()) {
+    return false;
+  }
+  const { preloadModelLocally } = await import("./local-transcriber");
+  await preloadModelLocally({ model, onProgress });
+  return true;
 }

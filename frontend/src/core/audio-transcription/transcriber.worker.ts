@@ -28,8 +28,16 @@ interface TranscribeRequest {
   language?: string;
 }
 
+interface PreloadRequest {
+  type: "preload";
+  model: WhisperModel;
+}
+
+type WorkerIn = TranscribeRequest | PreloadRequest;
+
 type WorkerOut =
   | { type: "progress"; stage: "download" | "transcribe"; progress?: number; file?: string }
+  | { type: "ready" }
   | { type: "result"; text: string }
   | { type: "error"; message: string };
 
@@ -64,9 +72,22 @@ async function getPipeline(model: WhisperModel): Promise<AutomaticSpeechRecognit
   return cached;
 }
 
-ctx.onmessage = async (event: MessageEvent<TranscribeRequest>) => {
+ctx.onmessage = async (event: MessageEvent<WorkerIn>) => {
   const data = event.data;
-  if (!data || data.type !== "transcribe") {
+  if (!data) {
+    return;
+  }
+  // Precarga: calienta (y cachea en IndexedDB) los pesos del modelo sin transcribir.
+  if (data.type === "preload") {
+    try {
+      await getPipeline(data.model);
+      post({ type: "ready" });
+    } catch (error) {
+      post({ type: "error", message: error instanceof Error ? error.message : "error desconocido" });
+    }
+    return;
+  }
+  if (data.type !== "transcribe") {
     return;
   }
   try {

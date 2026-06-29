@@ -6,7 +6,7 @@
 import { useCallback, useRef, useState } from "react";
 
 import { browserApi } from "@/core/api/browser-client";
-import { runAudioTranscript } from "./runtime";
+import { preloadModel, runAudioTranscript } from "./runtime";
 import {
   defaultWhisperModel,
   isLocalTranscriptionSupported,
@@ -15,13 +15,15 @@ import {
 } from "./support";
 import type { TranscriptionOutcome, TranscriptionProgress, WhisperModel } from "./types";
 
-export type TranscriptionStatus = "idle" | "running" | "done" | "error";
+export type TranscriptionStatus = "idle" | "running" | "preloading" | "done" | "error";
 
 export interface UseLocalTranscription {
   status: TranscriptionStatus;
   progress: TranscriptionProgress | null;
   outcome: TranscriptionOutcome | null;
   error: string | null;
+  /** True si el modelo se precargó en esta sesión (la siguiente corrida es instantánea). */
+  preloaded: boolean;
   /** Soporte de navegador-local (worker + Web Audio). */
   localSupported: boolean;
   /** WebGPU disponible (informativo; si no, se usa WASM). */
@@ -32,6 +34,7 @@ export interface UseLocalTranscription {
     documentId: string,
     options?: { model?: WhisperModel; forceServer?: boolean },
   ) => Promise<TranscriptionOutcome | null>;
+  preload: (model?: WhisperModel) => Promise<void>;
   reset: () => void;
 }
 
@@ -40,6 +43,7 @@ export function useLocalTranscription(): UseLocalTranscription {
   const [progress, setProgress] = useState<TranscriptionProgress | null>(null);
   const [outcome, setOutcome] = useState<TranscriptionOutcome | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [preloaded, setPreloaded] = useState(false);
   const runningRef = useRef(false);
 
   const transcribe = useCallback(
@@ -76,6 +80,28 @@ export function useLocalTranscription(): UseLocalTranscription {
     [],
   );
 
+  const preload = useCallback(async (model?: WhisperModel) => {
+    if (runningRef.current) {
+      return;
+    }
+    runningRef.current = true;
+    setStatus("preloading");
+    setProgress(null);
+    setError(null);
+    try {
+      const ok = await preloadModel(model ?? defaultWhisperModel(), setProgress);
+      if (ok) {
+        setPreloaded(true);
+      }
+      setStatus("idle");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al precargar el modelo.");
+      setStatus("error");
+    } finally {
+      runningRef.current = false;
+    }
+  }, []);
+
   const reset = useCallback(() => {
     setStatus("idle");
     setProgress(null);
@@ -88,10 +114,12 @@ export function useLocalTranscription(): UseLocalTranscription {
     progress,
     outcome,
     error,
+    preloaded,
     localSupported: isLocalTranscriptionSupported(),
     webgpu: isWebGpuAvailable(),
     localEnabled: localTranscriptionEnabled(),
     transcribe,
+    preload,
     reset,
   };
 }

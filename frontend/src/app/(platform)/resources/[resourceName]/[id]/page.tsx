@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { AudioTranscriptionPanel } from "@/components/audio/AudioTranscriptionPanel";
 import { ResourceDetailFields } from "@/components/resources/ResourceDetailFields";
 import { ResourceRowActions } from "@/components/resources/ResourceRowActions";
+import { shouldShowAudioTranscription } from "@/core/audio-transcription/panel-view";
 import { requireSession } from "@/core/auth/session";
 import { getResourceCapability } from "@/core/resources/capabilities-client";
 import { fillPlaceholder } from "@/core/resources/item-reference";
@@ -107,6 +109,17 @@ export default async function ResourceDetailPage({ params }: PageProps) {
       <section className="rounded-lg border border-slate-200 bg-white p-6">
         <ResourceDetailFields fields={fields} values={detail} />
       </section>
+
+      {/* Documento de AUDIO: transcripción LOCAL en el navegador (el audio no sale del
+          dispositivo). El texto es un borrador que el médico revisa y puede usar para una nota. */}
+      {shouldShowAudioTranscription(resourceName, detail) ? (
+        <section className="rounded-lg border border-slate-200 bg-white p-6">
+          <h2 className="mb-3 text-sm font-semibold text-slate-900">
+            Transcribir audio (en tu dispositivo)
+          </h2>
+          <AudioTranscriptionPanel clinicalDocumentId={id} />
+        </section>
+      ) : null}
     </div>
   );
 }
