@@ -79,6 +79,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/agent/templates/{template_id}/prefill": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Open Template Prefill
+         * @description Valida y resuelve una propuesta de apertura de plantilla con prellenado. READ-ONLY.
+         *
+         *     No persiste nada: valida ``template_id``/modo/campos contra el catálogo + RBAC y devuelve el
+         *     plan que el frontend renderiza PRELLENADO; la aceptación del médico va por la ruta P1.
+         */
+        post: operations["open_template_prefill_api_v1_agent_templates__template_id__prefill_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/internal/agent/credential-lease": {
         parameters: {
             query?: never;
@@ -5329,6 +5352,136 @@ export interface components {
             total: number;
         };
         /**
+         * OpenTemplateRequest
+         * @description Lo que el agente PROPONE al abrir una plantilla (paso 3 de la UI híbrida).
+         *
+         *     Es una propuesta para PRELLENAR un formulario registrado; NO guarda nada. La plataforma valida
+         *     contra el catálogo + RBAC, descarta campos que no existan en el esquema (no inventa) y deja que
+         *     el médico revise/edite/apruebe por la ruta P1.
+         */
+        OpenTemplateRequest: {
+            /**
+             * Mode
+             * @description Modo de apertura: create | edit | review.
+             */
+            mode: string;
+            /**
+             * Prefilled
+             * @description Valores en los que el agente confía (se prellenan para revisión).
+             */
+            prefilled?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Suggested
+             * @description Valores de menor confianza (se muestran marcados como sugerencia).
+             */
+            suggested?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Source Fragments
+             * @description Fragmento de origen (transcripción/fuente) que respalda cada campo.
+             */
+            source_fragments?: {
+                [key: string]: string;
+            };
+            /**
+             * Source Overall
+             * @description Fragmento de origen general que respalda la propuesta (trazabilidad).
+             */
+            source_overall?: string | null;
+            /**
+             * Allowed Actions
+             * @description Acciones que el agente sugiere habilitar tras la revisión (se filtran por RBAC).
+             */
+            allowed_actions?: string[];
+        };
+        /**
+         * OpenTemplateResolved
+         * @description Plan resuelto y validado para abrir una plantilla PRELLENADA (read-only, nada guardado).
+         *
+         *     El frontend resuelve ``resource``/``mode`` al formulario registrado (capability) y lo renderiza
+         *     con ``values`` como valores iniciales, marcando los campos sugeridos y a confirmar y mostrando
+         *     los fragmentos de origen. La aceptación del médico se enruta por la ruta P1 existente.
+         */
+        OpenTemplateResolved: {
+            /**
+             * Template Id
+             * @description Id de la plantilla (recurso del registry).
+             */
+            template_id: string;
+            /**
+             * Resource
+             * @description Recurso destino.
+             */
+            resource: string;
+            /**
+             * Label
+             * @description Etiqueta legible en español.
+             */
+            label: string;
+            /**
+             * Mode
+             * @description Modo resuelto: create | edit | review.
+             */
+            mode: string;
+            /**
+             * Method
+             * @description Método HTTP del envío tras aprobación (POST/PATCH/GET).
+             */
+            method: string;
+            /**
+             * Url Template
+             * @description Ruta (o plantilla de ruta) del envío tras aprobación.
+             */
+            url_template: string;
+            /**
+             * Values
+             * @description Valores aceptados (prefilled+suggested) SÓLO de campos del esquema.
+             */
+            values?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Prefilled Fields
+             * @description Campos prellenados (alta confianza).
+             */
+            prefilled_fields?: string[];
+            /**
+             * Suggested Fields
+             * @description Campos sugeridos (menor confianza; a revisar).
+             */
+            suggested_fields?: string[];
+            /**
+             * Fields Requiring Confirmation
+             * @description Campos obligatorios que el médico debe confirmar.
+             */
+            fields_requiring_confirmation?: string[];
+            /**
+             * Dropped Fields
+             * @description Campos propuestos que NO existen en el esquema: se descartan (no se inventan).
+             */
+            dropped_fields?: string[];
+            /**
+             * Source Fragments
+             * @description Fragmentos de origen, sólo de campos aceptados.
+             */
+            source_fragments?: {
+                [key: string]: string;
+            };
+            /**
+             * Source Overall
+             * @description Fragmento de origen general (trazabilidad).
+             */
+            source_overall?: string | null;
+            /**
+             * Allowed Actions
+             * @description Acciones permitidas tras la revisión (filtradas por RBAC).
+             */
+            allowed_actions?: string[];
+        };
+        /**
          * OptionsSourceType
          * @enum {string}
          */
@@ -7884,6 +8037,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentTemplate"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    open_template_prefill_api_v1_agent_templates__template_id__prefill_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                template_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OpenTemplateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenTemplateResolved"];
                 };
             };
             /** @description Validation Error */

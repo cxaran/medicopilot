@@ -16,9 +16,34 @@ from typing import Optional
 from pydantic import BaseModel
 
 from backend.app.resources.projection import _form_fields
-from backend.app.resources.registry import RESOURCE_REGISTRY, ResourceDefinition
-from backend.app.schemas.agent_template import AgentTemplate, AgentTemplatePrefill
+from backend.app.resources.registry import (
+    RESOURCE_REGISTRY,
+    ResourceDefinition,
+    get_resource,
+)
+from backend.app.schemas.agent_template import (
+    AgentTemplate,
+    AgentTemplatePrefill,
+    OpenTemplateRequest,
+    OpenTemplateResolved,
+)
 from backend.app.schemas.user import SessionUser
+
+_VALID_MODES = ("create", "edit", "review")
+
+
+class TemplateResolutionError(Exception):
+    """Error de resolución de una plantilla, con código y estado HTTP para el endpoint.
+
+    Nombra siempre el motivo (plantilla desconocida/prohibida, modo inválido) para que el agente
+    pida o elija una plantilla válida, en vez de inventar una.
+    """
+
+    def __init__(self, status_code: int, code: str, message: str) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.code = code
+        self.message = message
 
 
 def _prefill_contract(schema: Optional[type[BaseModel]]) -> AgentTemplatePrefill:
@@ -94,3 +119,118 @@ def build_template_catalog(user: SessionUser) -> list[AgentTemplate]:
         if template is not None:
             catalog.append(template)
     return catalog
+
+
+def _mode_schema(
+    definition: ResourceDefinition, mode: str
+) -> Optional[type[BaseModel]]:
+    """Esquema de escritura del modo (create/edit). ``review`` no prellena -> None."""
+    if mode == "create":
+        return definition.create_schema
+    if mode == "edit":
+        return definition.update_schema
+    return None
+
+
+def resolve_open_template(
+    user: SessionUser, template_id: str, request: OpenTemplateRequest
+) -> OpenTemplateResolved:
+    """Valida y resuelve una propuesta de apertura de plantilla con prellenado. READ-ONLY.
+
+    Reglas (nunca inventa ni guarda):
+      - ``template_id`` debe existir en el catálogo del usuario (RBAC) -> si no, error NOMBRÁNDOLO.
+      - ``mode`` debe estar entre los modos permitidos de la plantilla.
+      - Sólo se aceptan campos que existan en el esquema del modo; los demás se DESCARTAN
+        (``dropped_fields``), no se persisten ni se inventan.
+      - ``allowed_actions`` se intersecta con las acciones permitidas por RBAC.
+    """
+    if request.mode not in _VALID_MODES:
+        raise TemplateResolutionError(
+            422, "invalid_mode", f"Modo inválido: '{request.mode}'."
+        )
+
+    definition = get_resource(template_id)
+    # Mismo 404 para inexistente y no legible (no revela el catálogo), nombrando el id.
+    if definition is None or not definition.read_permission.check(user):
+        raise TemplateResolutionError(
+            404, "template_not_found",
+            f"Plantilla no encontrada o no disponible: '{template_id}'.",
+        )
+
+    template = _build_template(definition, user)
+    if template is None:
+        raise TemplateResolutionError(
+            403, "template_forbidden",
+            f"La plantilla '{template_id}' no está disponible para tu rol.",
+        )
+
+    if request.mode not in template.modes:
+        raise TemplateResolutionError(
+            422, "mode_not_allowed",
+            f"Modo '{request.mode}' no permitido para la plantilla '{template_id}' "
+            f"(permitidos: {', '.join(template.modes)}).",
+        )
+
+    # Campos válidos del esquema del modo (vacío en review: no se prellena).
+    schema = _mode_schema(definition, request.mode)
+    fields = _form_fields(schema) if schema is not None else []
+    valid_names = {field.name for field in fields}
+    required_names = [field.name for field in fields if field.required]
+
+    # Partición: prefilled tiene prioridad sobre suggested para un mismo campo.
+    values: dict[str, object] = {}
+    prefilled_fields: list[str] = []
+    suggested_fields: list[str] = []
+    dropped: list[str] = []
+
+    for name, value in request.prefilled.items():
+        if name in valid_names:
+            values[name] = value
+            prefilled_fields.append(name)
+        else:
+            dropped.append(name)
+    for name, value in request.suggested.items():
+        if name not in valid_names:
+            dropped.append(name)
+            continue
+        if name in values:
+            continue  # ya prellenado (prefilled gana); no se duplica
+        values[name] = value
+        suggested_fields.append(name)
+
+    # Fragmentos de origen: sólo de campos aceptados (trazabilidad sin ruido).
+    accepted = set(values)
+    source_fragments = {
+        name: frag for name, frag in request.source_fragments.items() if name in accepted
+    }
+    # Acciones: si el agente sugiere algunas, se intersectan con las permitidas por RBAC; si no
+    # sugiere ninguna, se devuelven TODAS las que el usuario puede ejecutar en la plantilla.
+    if request.allowed_actions:
+        allowed_actions = [a for a in request.allowed_actions if a in template.actions]
+    else:
+        allowed_actions = list(template.actions)
+
+    if request.mode == "create":
+        method, url_template = "POST", definition.api_path
+    elif request.mode == "edit":
+        method, url_template = "PATCH", f"{definition.api_path}/{{id}}"
+    else:
+        method = "GET"
+        url_template = definition.detail_url_template or definition.api_path
+
+    return OpenTemplateResolved(
+        template_id=template_id,
+        resource=definition.name,
+        label=definition.label,
+        mode=request.mode,
+        method=method,
+        url_template=url_template,
+        values=values,
+        prefilled_fields=prefilled_fields,
+        suggested_fields=suggested_fields,
+        fields_requiring_confirmation=required_names,
+        dropped_fields=dropped,
+        source_fragments=source_fragments,
+        source_overall=request.source_overall,
+        allowed_actions=allowed_actions,
+    )

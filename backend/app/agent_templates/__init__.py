@@ -6,6 +6,14 @@ sugeribles y obligatorios, reflejados del esquema ya declarado) y las acciones p
 duplica esquemas ni define modelos nuevos; nunca muta.
 """
 
-from backend.app.agent_templates.catalog import build_template_catalog
+from backend.app.agent_templates.catalog import (
+    TemplateResolutionError,
+    build_template_catalog,
+    resolve_open_template,
+)
 
-__all__ = ["build_template_catalog"]
+__all__ = [
+    "TemplateResolutionError",
+    "build_template_catalog",
+    "resolve_open_template",
+]

@@ -1973,6 +1973,65 @@ const TOOLS: ToolDefinition[] = [
     execute: (_args, ctx) => ctx.api(`/api/v1/agent/templates`),
   },
   {
+    // UI HÍBRIDA (paso 3): una vez elegida una plantilla REGISTRADA (con clinical.list_templates),
+    // proponer abrirla PRELLENADA. El agente emite valores de alta confianza (prefilled) y de
+    // menor confianza (suggested), más los fragmentos de origen que respaldan cada valor. La
+    // plataforma valida contra el catálogo + RBAC, DESCARTA campos que no existan en el esquema
+    // (no inventa), renderiza el formulario registrado prellenado y enruta la aceptación del
+    // médico por la ruta P1. NADA se guarda automáticamente: el médico revisa/edita/aprueba.
+    name: "clinical.open_template",
+    description:
+      "Propone ABRIR una plantilla registrada PRELLENADA (paso posterior a clinical.list_templates). " +
+      "Indica template_id (id del catálogo), mode (create/edit/review), prefilled (valores de alta " +
+      "confianza), suggested (valores de menor confianza, se marcan como sugerencia) y " +
+      "source_fragments (el fragmento de origen que respalda cada campo, para trazabilidad). Sólo " +
+      "se aceptan campos que existan en el esquema de la plantilla; los demás se descartan (no " +
+      "inventes campos ni plantillas). NO guarda nada: la plataforma muestra el formulario " +
+      "prellenado y el médico revisa/edita/aprueba por la ruta de aprobación. Si template_id es " +
+      "desconocido o no está permitido, se rechaza nombrándolo: pide o elige una plantilla válida.",
+    kind: "read",
+    inputSchema: {
+      type: "object",
+      properties: {
+        template_id: { type: "string", description: "Id de la plantilla (del catálogo)." },
+        mode: {
+          type: "string",
+          description: "Modo de apertura.",
+          enum: ["create", "edit", "review"],
+        },
+        prefilled: {
+          type: "object",
+          description: "Valores de alta confianza por campo (se prellenan).",
+          additionalProperties: true,
+        },
+        suggested: {
+          type: "object",
+          description: "Valores de menor confianza por campo (se marcan como sugerencia).",
+          additionalProperties: true,
+        },
+        source_fragments: {
+          type: "object",
+          description: "Fragmento de origen (transcripción/fuente) que respalda cada campo.",
+          additionalProperties: true,
+        },
+        source_overall: {
+          type: "string",
+          description: "Fragmento de origen general que respalda la propuesta (opcional).",
+        },
+      },
+      required: ["template_id", "mode"],
+      additionalProperties: false,
+    },
+    execute: (args, ctx) => {
+      const id = encodeURIComponent(String(args.template_id));
+      const body: Record<string, unknown> = { mode: args.mode };
+      for (const key of ["prefilled", "suggested", "source_fragments", "source_overall"]) {
+        if (args[key] !== undefined) body[key] = args[key];
+      }
+      return ctx.api(`/api/v1/agent/templates/${id}/prefill`, { method: "POST", body });
+    },
+  },
+  {
     // CONVERSACIÓN→EXPEDIENTE (casos 116/117/119/123): proponer el ALTA de un paciente como
     // BORRADOR P1 con campos prellenados desde lo extraído. NUNCA autocrea: el alta pasa por la
     // aprobación del médico. ANTES de crear, internamente DEDUPLICA (llama a la búsqueda de 0113):
