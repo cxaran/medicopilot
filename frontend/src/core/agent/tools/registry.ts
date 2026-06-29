@@ -21,6 +21,11 @@ import {
   type ButtonsInput,
 } from "./button-actions";
 import {
+  buildCloseChecklist,
+  type CloseChecklistInput,
+  type CloseChecklistSpec,
+} from "./close-checklist";
+import {
   searchTools,
   describeTools,
   type ToolDiscoveryContext,
@@ -3009,6 +3014,103 @@ const TOOLS: ToolDefinition[] = [
           typeof args.confirm_prompt === "string"
             ? args.confirm_prompt
             : "Plan de tareas de seguimiento revisado:",
+      };
+      if (typeof args.title === "string") spec.title = args.title;
+      return spec;
+    },
+  },
+  {
+    // CHECKLIST DE CIERRE DE CONSULTA (MP-CTRL-0131): cierra el flujo post-consulta. Tras revisar las
+    // acciones detectadas (0120) y los planes de tareas (0129) y guardarlas como borrador, el agente
+    // emite los ítems de cierre que evaluó y esta tool renderiza la CHECKLIST + el RESUMEN consolidado
+    // (guardado/pendiente/descartado). Es ORQUESTACIÓN read-only: valida cada ítem contra el contrato
+    // (recurso desconocido/sin acceso = bloqueado con motivo), clasifica el estado de forma
+    // determinista (sin asumir 'hecho') y calcula si la consulta está LISTA PARA CERRAR. NO cierra ni
+    // firma nada: firmar la nota y cerrar la consulta siguen por el camino de aprobación P1. El médico
+    // confirma; nada se cierra de forma autónoma.
+    name: "ui.review_close_checklist",
+    description:
+      "Renderiza la CHECKLIST DE CIERRE de la consulta para revisarla antes de firmar la nota y " +
+      "cerrar. Indica items: lista de { id, label, status? (done|pending|not_applicable), " +
+      "requirement? (required|recommended|optional), detail?, source_fragment?, related_resource? }, " +
+      "y opcional consultation_id/patient_id y actions_summary { saved, pending, discarded, blocked } " +
+      "(conteos del cierre de acciones ya confirmado). La plataforma valida cada ítem contra el " +
+      "contrato (un recurso desconocido o sin acceso queda bloqueado con motivo), clasifica el estado " +
+      "sin asumir 'hecho' (ausencia = pendiente) y calcula si la consulta está lista para cerrar " +
+      "(ningún requerido pendiente). NO cierra ni firma nada: el médico revisa y al confirmar firma la " +
+      "nota y cierra la consulta por el camino de aprobación habitual (P1). Solo lectura.",
+    kind: "read",
+    inputSchema: PASSTHROUGH_SCHEMA,
+    wireSchema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Título del panel (opcional)." },
+        consultation_id: { type: "string", description: "Consulta a cerrar (opcional)." },
+        patient_id: { type: "string", description: "Paciente de la consulta (opcional)." },
+        confirm_label: { type: "string", description: "Etiqueta del botón de confirmación." },
+        confirm_prompt: { type: "string", description: "Encabezado del mensaje de cierre." },
+        actions_summary: {
+          type: "object",
+          description: "Conteos del cierre de acciones ya confirmado (para el resumen consolidado).",
+          properties: {
+            saved: { type: "number" },
+            pending: { type: "number" },
+            discarded: { type: "number" },
+            blocked: { type: "number" },
+          },
+          additionalProperties: false,
+        },
+        items: {
+          type: "array",
+          description: "Ítems de cierre a revisar.",
+          items: {
+            type: "object",
+            properties: {
+              id: { type: "string", description: "Id estable del ítem." },
+              label: { type: "string", description: "Texto del ítem de cierre." },
+              status: {
+                type: "string",
+                description: "Estado propuesto.",
+                enum: ["done", "pending", "not_applicable"],
+              },
+              requirement: {
+                type: "string",
+                description: "Nivel de exigencia.",
+                enum: ["required", "recommended", "optional"],
+              },
+              detail: { type: "string", description: "Detalle/ayuda del ítem." },
+              source_fragment: { type: "string", description: "Fragmento de origen." },
+              related_resource: {
+                type: "string",
+                description: "Recurso relacionado (se valida contra el contrato).",
+              },
+            },
+            required: ["id", "label"],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ["items"],
+      additionalProperties: false,
+    },
+    execute: async (args, ctx) => {
+      const catalog = await ctx.api<readonly CatalogResourceLike[]>(`/api/v1/resources`);
+      const result = buildCloseChecklist(
+        args as unknown as CloseChecklistInput,
+        reviewContextFromCatalog(catalog),
+      );
+      if (!result.ok) {
+        throw new ToolExecutionError("invalid_close_checklist", result.error);
+      }
+      const spec: CloseChecklistSpec = {
+        kind: "close_checklist",
+        checklist: result.checklist,
+        confirm_label:
+          typeof args.confirm_label === "string" ? args.confirm_label : "Confirmar revisión de cierre",
+        confirm_prompt:
+          typeof args.confirm_prompt === "string"
+            ? args.confirm_prompt
+            : "Checklist de cierre de la consulta revisada:",
       };
       if (typeof args.title === "string") spec.title = args.title;
       return spec;

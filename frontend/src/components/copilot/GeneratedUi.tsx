@@ -37,6 +37,15 @@ import {
   type TaskPlanEntry,
   type TaskPlanSpec,
 } from "@/core/agent/tools/task-plan";
+import {
+  applyChecklistStatus,
+  buildCloseChecklistSubmission,
+  isReadyToClose,
+  summarizeChecklist,
+  type ChecklistEntry,
+  type ChecklistStatus,
+  type CloseChecklistSpec,
+} from "@/core/agent/tools/close-checklist";
 
 // Render seguro de UI generada por el modelo (B9, Parte B): specs declarativas mapeadas a
 // componentes React con los primitivos R2. NUNCA HTML/JS crudo del modelo.
@@ -63,6 +72,9 @@ export function GeneratedUi({
   }
   if (spec.kind === "task_plan") {
     return <TaskPlanPanel spec={spec} onSendFollowup={onSendFollowup} />;
+  }
+  if (spec.kind === "close_checklist") {
+    return <CloseChecklistPanel spec={spec} onSendFollowup={onSendFollowup} />;
   }
   return <ButtonsView spec={spec} onAction={(action) => onSendFollowup(buttonActionToMessage(action))} />;
 }
@@ -849,6 +861,139 @@ function TaskCard({
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+// CHECKLIST DE CIERRE de consulta (MP-CTRL-0131). Cierra el flujo post-consulta: el médico revisa los
+// ítems de cierre (puede marcarlos hecho / no aplica / pendiente; los bloqueados quedan fijos con su
+// motivo), ve el resumen consolidado (guardado/pendiente/descartado de las acciones) y si no quedan
+// requeridos pendientes puede confirmar. Al confirmar se envía un seguimiento que recuerda firmar la
+// nota y cerrar la consulta por el camino P1 habitual; NADA se cierra ni se firma por sí mismo.
+type ChecklistDecision = Exclude<ChecklistStatus, "blocked">;
+
+const CHECKLIST_STATUS_LABEL: Record<ChecklistStatus, string> = {
+  done: "Hecho",
+  pending: "Pendiente",
+  not_applicable: "No aplica",
+  blocked: "Bloqueado",
+};
+
+const CHECKLIST_DECISION_OPTIONS: { value: ChecklistDecision; label: string }[] = [
+  { value: "done", label: "Hecho" },
+  { value: "pending", label: "Pendiente" },
+  { value: "not_applicable", label: "No aplica" },
+];
+
+const REQUIREMENT_LABEL: Record<ChecklistEntry["requirement"], string> = {
+  required: "Requerido",
+  recommended: "Recomendado",
+  optional: "Opcional",
+};
+
+function CloseChecklistPanel({
+  spec,
+  onSendFollowup,
+}: Readonly<{ spec: CloseChecklistSpec; onSendFollowup: (text: string) => void }>) {
+  const [overrides, setOverrides] = useState<Record<string, ChecklistDecision>>({});
+
+  const resolved: ChecklistEntry[] = spec.checklist.entries.map((entry) => {
+    if (entry.status === "blocked") return entry; // bloqueados no cambian
+    const override = overrides[entry.id];
+    return override ? applyChecklistStatus(entry, override) : entry;
+  });
+  const summary = summarizeChecklist(resolved);
+  const ready = isReadyToClose(resolved);
+  const actions = spec.checklist.actions_summary;
+
+  const setStatus = (id: string, status: ChecklistDecision): void =>
+    setOverrides((prev) => ({ ...prev, [id]: status }));
+
+  return (
+    <div className="flex flex-col gap-3">
+      {spec.title && <div className="text-sm font-semibold text-[var(--tx)]">{spec.title}</div>}
+
+      {actions && (
+        <div className="rounded-[10px] border border-[var(--border2)] bg-[var(--bg2)] px-3 py-2 text-xs text-[var(--tx2)]">
+          Acciones: {actions.saved} guardadas · {actions.pending} pendientes · {actions.discarded}{" "}
+          descartadas · {actions.blocked} bloqueadas
+        </div>
+      )}
+
+      <div
+        className={`rounded-[10px] border px-3 py-2 text-xs ${
+          ready
+            ? "border-[var(--border2)] text-[var(--tx2)]"
+            : "border-[var(--danger)] text-[var(--danger)]"
+        }`}
+      >
+        Cierre: {summary.done} hecho · {summary.pending} pendiente · {summary.not_applicable} no aplica
+        {summary.blocked > 0 ? ` · ${summary.blocked} bloqueado` : ""}
+        {ready
+          ? " — sin requeridos pendientes."
+          : ` — ${summary.required_pending} requerido(s) por resolver.`}
+      </div>
+
+      <div className="flex flex-col gap-2">
+        {resolved.map((entry) => {
+          const blocked = entry.status === "blocked";
+          return (
+            <div
+              key={entry.id}
+              className={`flex flex-col gap-1 rounded-[10px] border p-2 ${
+                blocked ? "border-[var(--danger)]" : "border-[var(--border2)]"
+              }`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-medium text-[var(--tx)]">{entry.label}</span>
+                <span className="text-[10px] text-[var(--tx2)]">
+                  {REQUIREMENT_LABEL[entry.requirement]}
+                </span>
+              </div>
+              {entry.detail && <p className="text-[11px] text-[var(--tx2)]">{entry.detail}</p>}
+              {entry.source_fragment && (
+                <p className="text-[11px] italic text-[var(--tx2)]">«{entry.source_fragment}»</p>
+              )}
+              {blocked ? (
+                <div className="text-[11px] text-[var(--danger)]">
+                  {CHECKLIST_STATUS_LABEL.blocked}: {entry.reason}
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <Select
+                    value={entry.status}
+                    onChange={(event) => setStatus(entry.id, event.target.value as ChecklistDecision)}
+                  >
+                    {CHECKLIST_DECISION_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <div>
+        <Button
+          type="button"
+          onClick={() =>
+            onSendFollowup(
+              buildCloseChecklistSubmission(spec.confirm_prompt, {
+                ...spec.checklist,
+                entries: resolved,
+                summary,
+                ready_to_close: ready,
+              }),
+            )
+          }
+        >
+          {spec.confirm_label}
+        </Button>
+      </div>
     </div>
   );
 }

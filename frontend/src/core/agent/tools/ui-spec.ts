@@ -62,11 +62,13 @@ export interface ButtonsSpec {
 }
 
 // La spec de UI DINÁMICA en lista blanca (MP-CTRL-0117), el panel de CIERRE post-transcripción
-// (MP-CTRL-0120) y el PLAN DE TAREAS revisable (MP-CTRL-0129) se integran a la unión: se validan en
-// su propio módulo y se pintan dentro de `GeneratedUi`, sin un renderizador paralelo.
+// (MP-CTRL-0120), el PLAN DE TAREAS revisable (MP-CTRL-0129) y la CHECKLIST DE CIERRE (MP-CTRL-0131)
+// se integran a la unión: se validan en su propio módulo y se pintan dentro de `GeneratedUi`, sin un
+// renderizador paralelo.
 import type { DynamicFormSpec } from "./dynamic-form";
 import type { DetectedActionsSpec } from "./detected-actions";
 import type { TaskPlanSpec } from "./task-plan";
+import type { CloseChecklistSpec } from "./close-checklist";
 
 export type UiSpec =
   | FormSpec
@@ -74,7 +76,8 @@ export type UiSpec =
   | ButtonsSpec
   | DynamicFormSpec
   | DetectedActionsSpec
-  | TaskPlanSpec;
+  | TaskPlanSpec
+  | CloseChecklistSpec;
 
 export type ParseResult<T> = { ok: true; spec: T } | { ok: false; error: string };
 
@@ -89,7 +92,8 @@ export function isUiSpec(value: unknown): value is UiSpec {
     kind === "buttons" ||
     kind === "dynamic_form" ||
     kind === "detected_actions" ||
-    kind === "task_plan"
+    kind === "task_plan" ||
+    kind === "close_checklist"
   );
 }
 
