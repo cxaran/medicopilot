@@ -138,6 +138,33 @@ describe("discoverModels", () => {
     const { adapter } = adapterWith([jsonResponse({}, 404)], "codex_responses");
     expect(await adapter.discoverModels(lease)).toEqual([]);
   });
+
+  it("codex_responses: descubre EN VIVO los slugs desde /models?client_version y mapea capacidades", async () => {
+    const calls: Captured[] = [];
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(input), init: init ?? {} });
+      return jsonResponse({
+        models: [
+          { slug: "gpt-5.5", context_window: 272000, input_modalities: ["text", "image"], supports_parallel_tool_calls: true, supports_reasoning_summaries: true },
+          { slug: "gpt-5.4-mini", context_window: 272000, input_modalities: ["text"], supports_parallel_tool_calls: true }
+        ]
+      });
+    }) as unknown as typeof fetch;
+    const adapter = new OpenAIProviderAdapter({ baseUrl: BASE_URL, apiFlavor: "codex_responses", providerId: "openai_codex", fetchImpl });
+    const oauthLease: ProviderCredentialLease = { ...lease, accountId: "acct_1" };
+    const models = await adapter.discoverModels(oauthLease);
+
+    expect(models.map((m) => m.id)).toEqual(["openai_codex/gpt-5.5", "openai_codex/gpt-5.4-mini"]);
+    expect(calls[0]?.url).toContain("/models?client_version=");
+    // El discovery manda el header de cuenta y NO es el /models estándar de OpenAI.
+    expect((calls[0]?.init.headers as Record<string, string>)["chatgpt-account-id"]).toBe("acct_1");
+    const top = models[0]!;
+    expect(top.capabilities.contextWindowTokens).toBe(272000);
+    expect(top.capabilities.inputModalities.has("image")).toBe(true);
+    expect(top.capabilities.reasoning.support).toBe("supported");
+    expect(top.route.providerId).toBe("openai_codex");
+    expect(top.route.protocol).toBe("openai_codex");
+  });
 });
 
 // --- verifyCredential ---
@@ -248,7 +275,8 @@ describe("startTurn codex_responses", () => {
     const { adapter, calls } = adapterWith(
       [
         sseResponse([
-          JSON.stringify({ type: "response.output_item.done", item: { type: "function_call", call_id: "fc_1", name: "clinical.list_patients", arguments: '{"limit":3}' } })
+          // Codex devuelve el nombre SANEADO (sin punto) porque así se lo enviamos.
+          JSON.stringify({ type: "response.output_item.done", item: { type: "function_call", call_id: "fc_1", name: "clinical_list_patients", arguments: '{"limit":3}' } })
         ]),
         sseResponse([
           JSON.stringify({ type: "response.output_text.delta", delta: "Hecho" }),
@@ -264,8 +292,11 @@ describe("startTurn codex_responses", () => {
     const ready = events.find((e) => e.type === "tool_call.ready") as
       | { type: "tool_call.ready"; call: { callId: string; name: string; arguments: unknown }; continuationState: unknown }
       | undefined;
+    // El nombre se recupera al ORIGINAL (con punto) para que el navegador ejecute la tool.
     expect(ready?.call.name).toBe("clinical.list_patients");
     expect(ready?.call.arguments).toEqual({ limit: 3 });
+    // Lo enviado a Codex va SANEADO (sin punto), que es lo que el Responses API exige.
+    expect(JSON.parse(String(calls[0]?.init.body)).tools[0].name).toBe("clinical_list_patients");
 
     const toolResult: ToolCallResult = { callId: "fc_1", result: { status: "success", content: "ok" } };
     const resumed = await collect(
@@ -277,6 +308,51 @@ describe("startTurn codex_responses", () => {
     const out = resumeBody.input.find((i: { type: string }) => i.type === "function_call_output");
     expect(out.call_id).toBe("fc_1");
     expect(resumeBody.input.some((i: { type: string }) => i.type === "function_call")).toBe(true);
+  });
+
+  it("envía headers Codex (chatgpt-account-id, originator, OpenAI-Beta, session_id) y store:false", async () => {
+    const { adapter, calls } = adapterWith(
+      [
+        sseResponse([
+          JSON.stringify({ type: "response.completed", response: { usage: { input_tokens: 1, output_tokens: 1 } } })
+        ])
+      ],
+      "codex_responses"
+    );
+    const model = createOpenAIModel({ baseUrl: BASE_URL, modelId: "gpt-5-codex", apiFlavor: "codex_responses" });
+    const oauthLease: ProviderCredentialLease = { ...lease, accountId: "acct_123" };
+    // El prompt de sistema debe ir como `instructions`, no como item de input.
+    const messages: CanonicalMessage[] = [
+      { role: "system", content: [{ type: "text", text: "Eres un copiloto clínico." }] },
+      { role: "user", content: [{ type: "text", text: "Hola" }] }
+    ];
+    await collect(
+      adapter.startTurn({ turnId: "t1", model, credential: oauthLease, messages, tools: [], options, signal: new AbortController().signal })
+    );
+    const headers = calls[0]?.init.headers as Record<string, string>;
+    expect(headers.authorization).toBe(`Bearer ${SECRET}`);
+    expect(headers["chatgpt-account-id"]).toBe("acct_123");
+    expect(headers.originator).toBe("codex_cli_rs");
+    expect(headers["OpenAI-Beta"]).toBe("responses=experimental");
+    expect(typeof headers.session_id).toBe("string");
+    const body = JSON.parse(String(calls[0]?.init.body));
+    expect(body.store).toBe(false);
+    expect(body.instructions).toBe("Eres un copiloto clínico.");
+    // El sistema NO debe duplicarse como item de input.
+    expect(body.input.some((i: { role?: string }) => i.role === "system")).toBe(false);
+  });
+
+  it("omite chatgpt-account-id cuando el lease no trae cuenta (API key)", async () => {
+    const { adapter, calls } = adapterWith(
+      [sseResponse([JSON.stringify({ type: "response.completed", response: { usage: {} } })])],
+      "codex_responses"
+    );
+    const model = createOpenAIModel({ baseUrl: BASE_URL, modelId: "gpt-5-codex", apiFlavor: "codex_responses" });
+    await collect(
+      adapter.startTurn({ turnId: "t1", model, credential: lease, messages: userMessage, tools: [], options, signal: new AbortController().signal })
+    );
+    const headers = calls[0]?.init.headers as Record<string, string>;
+    expect("chatgpt-account-id" in headers).toBe(false);
   });
 
   it("response.failed en el stream lanza GatewayError", async () => {

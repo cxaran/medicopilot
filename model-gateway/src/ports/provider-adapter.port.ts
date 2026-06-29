@@ -8,6 +8,9 @@ export interface ProviderCredentialLease {
   leaseId: string;
   secret: string;
   expiresAt: Date;
+  // Id de cuenta ChatGPT (solo credenciales OAuth/Codex). El adaptador OpenAI lo manda como
+  // header ``chatgpt-account-id`` en el flavor codex_responses. Ausente para API keys.
+  accountId?: string;
 }
 
 export interface CredentialVerification {

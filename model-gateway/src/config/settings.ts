@@ -12,6 +12,11 @@ export interface GatewaySettings {
   maxToolsPerTurn: number;
   maxToolResultBytes: number;
   toolResultTimeoutMs: number;
+  // Proveedor FAKE (dev/tests): adaptador y modelo sintéticos, sin red ni credenciales,
+  // usados para fijar el contrato del protocolo en los tests. DESACTIVADO por defecto: no
+  // debe aparecer como proveedor ni modelo en runtime (dev ni producción). Opt-in explícito
+  // con GATEWAY_FAKE_ENABLED=true.
+  fakeEnabled?: boolean | undefined;
   devTicket: string;
   // MG-002: secreto HS256 compartido con FastAPI (AGENT_GATEWAY_TICKET_SECRET) para
   // verificar el JWT de connection-ticket. Si está vacío, solo opera el dev-ticket.
@@ -32,14 +37,19 @@ export interface GatewaySettings {
   opencodeGoEnabled?: boolean | undefined;
   opencodeGoBaseUrl?: string | undefined;
   opencodeGoDefaultModel?: string | undefined;
-  // OpenAI / Codex (P6, opt-in): un provider id "openai" con dos auth shapes (API key vs
-  // OAuth ChatGPT Plus). apiFlavor elige la familia de cable: "chat_completions" (API key,
-  // default) o "codex_responses" (app-server Responses de la suscripción). La credencial NO
-  // se configura aquí: llega por arriendo (B4/B10). Opcionales para no obligar a los tests.
+  // OpenAI API key (P6, opt-in): provider id "openai", familia chat/completions contra
+  // api.openai.com. La key llega por arriendo (B4/B3), no se configura aquí.
   openaiEnabled?: boolean | undefined;
   openaiBaseUrl?: string | undefined;
   openaiDefaultModel?: string | undefined;
-  openaiApiFlavor?: string | undefined;
+  // Codex / suscripción ChatGPT (opt-in, INDEPENDIENTE de la API key): provider id
+  // "openai_codex", app-server Responses contra chatgpt.com/backend-api/codex. Arrienda la
+  // credencial OAuth (B10). Ambos pueden estar activos a la vez. clientVersion: gating del
+  // discovery /models de la suscripción.
+  openaiCodexEnabled?: boolean | undefined;
+  openaiCodexBaseUrl?: string | undefined;
+  openaiCodexDefaultModel?: string | undefined;
+  openaiCodexClientVersion?: string | undefined;
   // Anthropic (opt-in): familia de cable Messages API (distinta a OpenAI). La API key NO se
   // configura aquí (llega por arriendo de B4/B3, cifrada por usuario). Solo se registra el
   // proveedor anthropic si está habilitado. Opcionales para no obligar a los tests.
@@ -106,6 +116,7 @@ export function loadSettings(): GatewaySettings {
     maxToolsPerTurn: numberFromEnv("GATEWAY_MAX_TOOLS_PER_TURN", 24),
     maxToolResultBytes: numberFromEnv("GATEWAY_MAX_TOOL_RESULT_BYTES", 64 * 1024),
     toolResultTimeoutMs: numberFromEnv("GATEWAY_TOOL_RESULT_TIMEOUT_MS", 30_000),
+    fakeEnabled: process.env.GATEWAY_FAKE_ENABLED === "true",
     devTicket: process.env.GATEWAY_DEV_TICKET ?? "dev-ticket",
     agentTicketSecret: process.env.GATEWAY_AGENT_TICKET_SECRET ?? "",
     backendInternalUrl: process.env.GATEWAY_BACKEND_INTERNAL_URL || undefined,
@@ -120,14 +131,18 @@ export function loadSettings(): GatewaySettings {
     opencodeGoEnabled: process.env.GATEWAY_OPENCODE_GO_ENABLED === "true",
     opencodeGoBaseUrl: process.env.GATEWAY_OPENCODE_GO_BASE_URL ?? "https://opencode.ai/zen/go/v1",
     opencodeGoDefaultModel: process.env.GATEWAY_OPENCODE_GO_DEFAULT_MODEL ?? "qwen3.7-plus",
-    // OpenAI / Codex (opt-in). Para API key: flavor chat_completions + base https://api.openai.com/v1.
-    // Para ChatGPT Plus (OAuth/Codex): flavor codex_responses + base del backend de ChatGPT
-    // (se confirma en el e2e en vivo). El modelo por defecto se usa como fila curada cuando el
-    // proveedor no expone /models (caso Codex).
+    // OpenAI API key (opt-in): provider id "openai", chat_completions contra api.openai.com.
+    // El discovery /models lista en vivo los modelos de la cuenta.
     openaiEnabled: process.env.GATEWAY_OPENAI_ENABLED === "true",
     openaiBaseUrl: process.env.GATEWAY_OPENAI_BASE_URL ?? "https://api.openai.com/v1",
-    openaiDefaultModel: process.env.GATEWAY_OPENAI_DEFAULT_MODEL ?? "gpt-5-codex",
-    openaiApiFlavor: process.env.GATEWAY_OPENAI_API_FLAVOR ?? "chat_completions",
+    openaiDefaultModel: process.env.GATEWAY_OPENAI_DEFAULT_MODEL ?? "gpt-4o-mini",
+    // Codex / suscripción ChatGPT (opt-in, independiente): provider id "openai_codex" contra
+    // chatgpt.com/backend-api/codex. Discovery en vivo vía /models?client_version=…; el modelo
+    // por defecto es solo fila curada de fallback. gpt-5.5 es el frontier vigente (jun-2026).
+    openaiCodexEnabled: process.env.GATEWAY_OPENAI_CODEX_ENABLED === "true",
+    openaiCodexBaseUrl: process.env.GATEWAY_OPENAI_CODEX_BASE_URL ?? "https://chatgpt.com/backend-api/codex",
+    openaiCodexDefaultModel: process.env.GATEWAY_OPENAI_CODEX_DEFAULT_MODEL ?? "gpt-5.5",
+    openaiCodexClientVersion: process.env.GATEWAY_OPENAI_CODEX_CLIENT_VERSION ?? "1.0.0",
     // Anthropic (opt-in). La key llega por arriendo; el modelo por defecto se registra como
     // fila curada (capacidades por mapa documentado) y el discovery añade los reales de /v1/models.
     anthropicEnabled: process.env.GATEWAY_ANTHROPIC_ENABLED === "true",

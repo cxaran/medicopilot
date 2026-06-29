@@ -62,14 +62,19 @@ def lease_credential(
     _require_internal_auth(x_internal_auth)
     limit_internal_lease(request)
 
-    credential = session.exec(
-        select(AiProviderCredential).where(
-            AiProviderCredential.user_id == payload.user_id,
-            AiProviderCredential.provider == payload.provider,
-            AiProviderCredential.is_active.is_(True),
-            AiProviderCredential.deleted_at.is_(None),
+    query = select(AiProviderCredential).where(
+        AiProviderCredential.user_id == payload.user_id,
+        AiProviderCredential.provider == payload.provider,
+        AiProviderCredential.is_active.is_(True),
+        AiProviderCredential.deleted_at.is_(None),
+    )
+    # Si el gateway especifica el tipo (api_key vs oauth), se arrienda EXACTAMENTE esa
+    # credencial: así "openai" (API key) y "openai_codex" (OAuth) no se pisan entre sí.
+    if payload.credential_type is not None:
+        query = query.where(
+            AiProviderCredential.credential_type == payload.credential_type
         )
-    ).first()
+    credential = session.exec(query).first()
     if credential is None:
         api_error(
             status.HTTP_404_NOT_FOUND,
@@ -79,6 +84,7 @@ def lease_credential(
 
     lease_id = uuid.uuid4()
     ttl_expires_at = utc_now() + timedelta(seconds=settings.agent_gateway_lease_ttl_seconds)
+    account_id: str | None = None
 
     if credential.credential_type == AiCredentialType.OAUTH:
         # Credencial OAuth (ChatGPT Plus/Codex): el "secreto" arrendado es el ACCESS
@@ -99,6 +105,9 @@ def lease_credential(
                 "La conexión OAuth no tiene un access token disponible.",
             )
         secret = access
+        # La cuenta ChatGPT (no secreta) viaja al Gateway para el header chatgpt-account-id.
+        profile_account = fresh_profile.get("account_id")
+        account_id = profile_account if isinstance(profile_account, str) else None
         # El arriendo no debe sobrevivir al access token: se toma el menor vencimiento.
         token_expires_at = profile_expires_at(fresh_profile)
         expires_at = (
@@ -127,4 +136,5 @@ def lease_credential(
         secret=secret,
         expires_at=expires_at,
         default_model=credential.default_model,
+        account_id=account_id,
     )

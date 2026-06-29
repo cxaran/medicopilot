@@ -15,7 +15,7 @@ import {
 } from "../openai-compat/chat.js";
 import type { GenerationOptions } from "../../application/capabilities/capability-negotiator.js";
 import type { CanonicalMessage } from "../../domain/message.js";
-import type { ModelDescriptor } from "../../domain/model.js";
+import type { ModelDescriptor, ProviderProtocol } from "../../domain/model.js";
 import type { ModelToolDefinition } from "../../domain/tool.js";
 import type { TurnUsage } from "../../domain/usage.js";
 import type {
@@ -47,13 +47,36 @@ import type {
  */
 
 export const OPENAI_PROVIDER_ID = "openai";
+// Codex/suscripción ChatGPT vive bajo un provider id PROPIO ("openai_codex") para arrendar
+// la credencial OAuth (vs la API key de "openai") y poder ofrecer AMBOS a la vez.
+export const OPENAI_CODEX_PROVIDER_ID = "openai_codex";
+export type OpenAIProviderId = "openai" | "openai_codex";
 export type OpenAIApiFlavor = "chat_completions" | "codex_responses";
+
+// Originator por defecto del flujo Codex (debe coincidir con el del backend FastAPI que
+// genera el authorize). El backend de ChatGPT correlaciona el header con el cliente OAuth.
+const DEFAULT_CODEX_ORIGINATOR = "codex_cli_rs";
+// El discovery de Codex filtra modelos por versión del cliente; un valor alto devuelve el
+// catálogo completo que la cuenta puede usar. Configurable por si el gating cambia.
+const DEFAULT_CODEX_CLIENT_VERSION = "1.0.0";
+// El backend de ChatGPT puede exigir ``instructions`` no vacío (400 "Instructions are not
+// valid." si falta). En turnos reales llega el system prompt del agente; este es el fallback.
+const DEFAULT_CODEX_INSTRUCTIONS = "Eres un copiloto clínico. Toda salida es un borrador que el médico revisa y aprueba.";
 
 export interface OpenAIProviderOptions {
   baseUrl: string;
   // Familia de cable. Default: chat_completions (OpenAI API key). Para ChatGPT Plus/Codex
   // (OAuth) se usa codex_responses contra el base URL del backend de ChatGPT.
   apiFlavor?: OpenAIApiFlavor;
+  // Solo flavor codex_responses: identifica el cliente Codex suplantado en el header
+  // ``originator``. Default ``codex_cli_rs``.
+  originator?: string;
+  // Solo flavor codex_responses: el discovery /models exige ``client_version`` (gating por
+  // versión del cliente). Default ``1.0.0`` (alto, para recibir el catálogo completo).
+  codexClientVersion?: string;
+  // Provider id con el que se registra/arrienda: "openai" (API key) u "openai_codex"
+  // (suscripción). Determina la clave del registry y el route.providerId de los modelos.
+  providerId?: OpenAIProviderId;
   fetchImpl?: typeof fetch;
 }
 
@@ -90,6 +113,16 @@ interface OpenAIModelRow {
   supports_tools?: boolean;
   supports_reasoning?: boolean;
   modalities?: string[];
+}
+
+// Fila del discovery de Codex (/models?client_version=…). Solo los campos que mapeamos.
+interface CodexModelRow {
+  slug: string;
+  context_window?: number;
+  max_context_window?: number;
+  input_modalities?: string[];
+  supports_parallel_tool_calls?: boolean;
+  supports_reasoning_summaries?: boolean;
 }
 
 // --- Tipos de cable Responses (Codex app-server; parcial). -------------------------
@@ -135,6 +168,14 @@ interface CodexContinuationState {
   input: ResponsesInputItem[];
   tools: ResponsesTool[];
   options: GenerationOptions;
+  // El prompt de sistema va en el campo top-level `instructions` (no como item de input) en el
+  // backend de ChatGPT; se conserva para reemitirlo idéntico en la reanudación.
+  instructions: string | null;
+  // Correlación de la sesión Codex; estable a lo largo del turno (start + resumes).
+  sessionId: string;
+  // Mapa nombre_saneado → nombre_original de tools. El Responses de Codex exige nombres
+  // ^[a-zA-Z0-9_-]+$ (sin punto), pero el navegador ejecuta por el nombre original.
+  nameMap: Record<string, string>;
 }
 
 type OpenAIContinuationState = OpenAICompatChatContinuation | CodexContinuationState;
@@ -149,15 +190,43 @@ function isOpenAIContinuationState(state: unknown): state is OpenAIContinuationS
 }
 
 export class OpenAIProviderAdapter implements ProviderAdapter {
-  readonly protocol = "openai" as const;
+  // Clave del registry = provider id ("openai" u "openai_codex"). El "wire" sigue siendo la
+  // familia OpenAI (route.protocol = "openai"); este campo solo distingue qué credencial se
+  // arrienda y bajo qué id se ofrecen los modelos.
+  readonly protocol: ProviderProtocol;
+  private readonly providerId: OpenAIProviderId;
   private readonly baseUrl: string;
   private readonly apiFlavor: OpenAIApiFlavor;
+  private readonly originator: string;
+  private readonly codexClientVersion: string;
   private readonly fetchImpl: typeof fetch;
 
   constructor(options: OpenAIProviderOptions) {
+    this.providerId = options.providerId ?? "openai";
+    this.protocol = this.providerId;
     this.baseUrl = options.baseUrl.replace(/\/+$/, "");
     this.apiFlavor = options.apiFlavor ?? "chat_completions";
+    this.originator = options.originator ?? DEFAULT_CODEX_ORIGINATOR;
+    this.codexClientVersion = options.codexClientVersion ?? DEFAULT_CODEX_CLIENT_VERSION;
     this.fetchImpl = options.fetchImpl ?? fetch;
+  }
+
+  /**
+   * Discovery EN VIVO para la suscripción ChatGPT: GET /models?client_version=… devuelve
+   * ``{models:[{slug, context_window, input_modalities, …}]}`` con los modelos REALES que la
+   * cuenta puede usar (varían por plan). Best-effort: si falla, [] y se conserva lo curado.
+   */
+  private async discoverCodexModels(credential: ProviderCredentialLease): Promise<ModelDescriptor[]> {
+    const url = `${this.baseUrl}/models?client_version=${encodeURIComponent(this.codexClientVersion)}`;
+    const response = await this.fetchImpl(url, { method: "GET", headers: this.codexBaseHeaders(credential) });
+    if (!response.ok) {
+      return [];
+    }
+    const payload = (await response.json()) as { models?: CodexModelRow[] } | null;
+    const rows = Array.isArray(payload?.models) ? payload.models : [];
+    return rows
+      .filter((row) => typeof row.slug === "string" && row.slug.length > 0)
+      .map((row) => createCodexModel({ baseUrl: this.baseUrl, row, providerId: this.providerId }));
   }
 
   async verifyCredential(credential: ProviderCredentialLease): Promise<CredentialVerification> {
@@ -181,16 +250,16 @@ export class OpenAIProviderAdapter implements ProviderAdapter {
   }
 
   async discoverModels(credential: ProviderCredentialLease): Promise<ModelDescriptor[]> {
+    // Codex/suscripción ChatGPT: el listado vive en /models?client_version=… (NO el /models
+    // estándar de OpenAI) y devuelve {models:[{slug, context_window, …}]} con metadatos ricos.
+    if (this.apiFlavor === "codex_responses") {
+      return this.discoverCodexModels(credential);
+    }
     const response = await this.fetchImpl(`${this.baseUrl}/models`, {
       method: "GET",
       headers: this.authHeaders(credential)
     });
     if (!response.ok) {
-      // Codex/Responses (suscripción) suele NO exponer /models: el modelo se ofrece por
-      // catálogo curado (lo registra el container con su id documentado). No es un error.
-      if (this.apiFlavor === "codex_responses") {
-        return [];
-      }
       throw new GatewayError(
         "PROVIDER_DISCOVERY_FAILED",
         `OpenAI model discovery failed with status ${response.status}`
@@ -199,19 +268,29 @@ export class OpenAIProviderAdapter implements ProviderAdapter {
     const payload = (await response.json()) as { data?: OpenAIModelRow[] } | null;
     const rows = Array.isArray(payload?.data) ? payload.data : [];
     return rows.map((row) =>
-      createOpenAIModel({ baseUrl: this.baseUrl, modelId: row.id, row, apiFlavor: this.apiFlavor })
+      createOpenAIModel({
+        baseUrl: this.baseUrl,
+        modelId: row.id,
+        row,
+        apiFlavor: this.apiFlavor,
+        providerId: this.providerId
+      })
     );
   }
 
   async *startTurn(input: ProviderTurnInput): AsyncIterable<ProviderEvent> {
     input.signal.throwIfAborted();
     if (this.apiFlavor === "codex_responses") {
+      const { instructions, input: items } = splitResponsesInput(input.messages);
       yield* this.runCodexResponses({
         model: input.model,
         credential: input.credential,
-        input: toResponsesInput(input.messages),
+        instructions,
+        input: items,
         tools: toResponsesTools(input.tools),
+        nameMap: buildCodexToolNameMap(input.tools),
         options: input.options,
+        sessionId: createId("sess"),
         signal: input.signal
       });
       return;
@@ -247,9 +326,12 @@ export class OpenAIProviderAdapter implements ProviderAdapter {
       yield* this.runCodexResponses({
         model: input.model,
         credential: input.credential,
+        instructions: state.instructions,
         input: [...state.input, ...outputs],
         tools: state.tools,
+        nameMap: state.nameMap,
         options: state.options,
+        sessionId: state.sessionId,
         signal: input.signal
       });
       return;
@@ -279,14 +361,38 @@ export class OpenAIProviderAdapter implements ProviderAdapter {
     return { authorization: `Bearer ${credential.secret}` };
   }
 
+  /**
+   * Headers base del backend de ChatGPT (auth + cuenta + originator + OpenAI-Beta). Comunes a
+   * GET /models y POST /responses. ``chatgpt-account-id`` solo si el lease trae la cuenta OAuth.
+   */
+  private codexBaseHeaders(credential: ProviderCredentialLease): Record<string, string> {
+    const headers: Record<string, string> = {
+      ...this.authHeaders(credential),
+      originator: this.originator,
+      "OpenAI-Beta": "responses=experimental"
+    };
+    if (credential.accountId) {
+      headers["chatgpt-account-id"] = credential.accountId;
+    }
+    return headers;
+  }
+
+  /** Headers para POST /responses: base + content-type + session_id del turno. */
+  private codexHeaders(credential: ProviderCredentialLease, sessionId: string): Record<string, string> {
+    return { "content-type": "application/json", ...this.codexBaseHeaders(credential), session_id: sessionId };
+  }
+
   // --- Responses (Codex app-server / suscripción ChatGPT Plus). --------------------
 
   private async *runCodexResponses(params: {
     model: ModelDescriptor;
     credential: ProviderCredentialLease;
+    instructions: string | null;
     input: ResponsesInputItem[];
     tools: ResponsesTool[];
+    nameMap: Record<string, string>;
     options: GenerationOptions;
+    sessionId: string;
     signal: AbortSignal;
   }): AsyncGenerator<ProviderEvent> {
     const compat = params.model.capabilities.compat;
@@ -294,8 +400,13 @@ export class OpenAIProviderAdapter implements ProviderAdapter {
       model: params.model.route.providerModelId,
       input: params.input,
       stream: true,
-      max_output_tokens: params.options.maxOutputTokens
+      // El backend de ChatGPT exige modo SIN estado (no persiste la conversación server-side).
+      // NO acepta ``max_output_tokens`` (responde 400 "Unsupported parameter"); se omite.
+      store: false
     };
+    // Prompt de sistema como `instructions` top-level (forma del backend de ChatGPT), no como
+    // item de input. Obligatorio y no vacío: si el turno no trae sistema, va el fallback.
+    body.instructions = params.instructions ?? DEFAULT_CODEX_INSTRUCTIONS;
     if (params.tools.length > 0) {
       body.tools = params.tools;
       body.tool_choice = "auto";
@@ -312,7 +423,7 @@ export class OpenAIProviderAdapter implements ProviderAdapter {
 
     const response = await this.fetchImpl(`${this.baseUrl}/responses`, {
       method: "POST",
-      headers: { "content-type": "application/json", ...this.authHeaders(params.credential) },
+      headers: this.codexHeaders(params.credential, params.sessionId),
       body: JSON.stringify(body),
       signal: params.signal
     });
@@ -403,12 +514,20 @@ export class OpenAIProviderAdapter implements ProviderAdapter {
         flavor: "codex_responses",
         input: [...params.input, ...assistantItems],
         tools: params.tools,
-        options: params.options
+        options: params.options,
+        instructions: params.instructions,
+        sessionId: params.sessionId,
+        nameMap: params.nameMap
       };
       yield {
         type: "tool_call.ready",
         continuationState,
-        call: { callId: first.callId, name: first.name, arguments: safeParseJson(first.args) }
+        // El navegador ejecuta por el nombre ORIGINAL (con punto); Codex usó el saneado.
+        call: {
+          callId: first.callId,
+          name: params.nameMap[first.name] ?? first.name,
+          arguments: safeParseJson(first.args)
+        }
       };
       return;
     }
@@ -440,7 +559,9 @@ export function createOpenAIModel(input: {
   modelId: string;
   row?: OpenAIModelRow;
   apiFlavor?: OpenAIApiFlavor;
+  providerId?: OpenAIProviderId;
 }): ModelDescriptor {
+  const providerId = input.providerId ?? OPENAI_PROVIDER_ID;
   const row = input.row;
   const baseUrl = input.baseUrl.replace(/\/+$/, "");
   const supportsTools = row?.supports_tools ?? true;
@@ -457,12 +578,14 @@ export function createOpenAIModel(input: {
   const maxOutput = row?.max_output_tokens ?? row?.max_tokens ?? null;
 
   return {
-    id: `${OPENAI_PROVIDER_ID}/${input.modelId}`,
+    id: `${providerId}/${input.modelId}`,
     label: row?.name ?? input.modelId,
     route: {
-      providerId: OPENAI_PROVIDER_ID,
+      providerId,
       providerModelId: input.modelId,
-      protocol: "openai",
+      // protocol = providerId: es la CLAVE del registry con que StartTurn/ResumeTurn resuelven
+      // el adaptador. "openai" y "openai_codex" comparten familia de razonamiento (reasoning.ts).
+      protocol: providerId,
       endpointBaseUrl: baseUrl
     },
     capabilities: {
@@ -504,7 +627,100 @@ export function createOpenAIModel(input: {
   };
 }
 
+/**
+ * Construye un ModelDescriptor desde una fila del discovery de Codex (/models?client_version=…).
+ * Mapea SOLO lo que el proveedor reporta; lo no informado queda null/unknown (sin inventar).
+ */
+export function createCodexModel(input: {
+  baseUrl: string;
+  row: CodexModelRow;
+  providerId?: OpenAIProviderId;
+}): ModelDescriptor {
+  const providerId = input.providerId ?? OPENAI_CODEX_PROVIDER_ID;
+  const baseUrl = input.baseUrl.replace(/\/+$/, "");
+  const row = input.row;
+  const inputModalities = new Set<"text" | "image" | "audio" | "video" | "file">(["text"]);
+  if (Array.isArray(row.input_modalities) && row.input_modalities.includes("image")) {
+    inputModalities.add("image");
+  }
+  const contextWindow = row.context_window ?? row.max_context_window ?? null;
+
+  return {
+    id: `${providerId}/${row.slug}`,
+    label: row.slug,
+    route: {
+      providerId,
+      providerModelId: row.slug,
+      // protocol = providerId: clave del registry (StartTurn/ResumeTurn). Ver createOpenAIModel.
+      protocol: providerId,
+      endpointBaseUrl: baseUrl
+    },
+    capabilities: {
+      streaming: "supported",
+      inputModalities,
+      outputModalities: new Set(["text"]),
+      toolCalling: {
+        support: "supported",
+        strictSchema: "unknown",
+        parallelCalls: row.supports_parallel_tool_calls ? "supported" : "unknown"
+      },
+      structuredOutput: { jsonObject: "supported", jsonSchema: "unknown", strictSchema: "unknown" },
+      reasoning: {
+        // Los modelos de Codex razonan; el resumen se reporta vía supports_reasoning_summaries.
+        support: "supported",
+        allowedEfforts: ["low", "medium", "high"],
+        summaryOutput: row.supports_reasoning_summaries ? "supported" : "unknown"
+      },
+      promptCaching: { read: "unknown", write: "unknown" },
+      tokenCounting: { exact: "unsupported", estimated: "supported" },
+      contextWindowTokens: contextWindow,
+      effectiveContextTokens: null,
+      // El backend de ChatGPT rechaza max_output_tokens; no hay tope declarado.
+      maxOutputTokens: null,
+      compat: {
+        supportsTools: true,
+        supportsReasoningEffort: true,
+        thinkingFormat: "openai_reasoning_effort",
+        supportsStrictMode: false,
+        // Codex/Responses no emite usage incremental fiable en el stream.
+        supportsUsageInStreaming: false,
+        supportsEagerToolInputStreaming: true
+      }
+    },
+    source: "discovered",
+    metadataRevision: null,
+    deprecatedAt: null
+  };
+}
+
 // --- Helpers de mapeo del flavor Responses (Codex). --------------------------------
+
+/**
+ * Separa los mensajes para el backend de ChatGPT: el texto de los mensajes de sistema va al
+ * campo top-level ``instructions``; el resto se mapea como items de ``input``. Si no hay
+ * sistema, ``instructions`` es null y se omite.
+ */
+function splitResponsesInput(
+  messages: CanonicalMessage[]
+): { instructions: string | null; input: ResponsesInputItem[] } {
+  const systemTexts: string[] = [];
+  const rest: CanonicalMessage[] = [];
+  for (const message of messages) {
+    if (message.role === "system") {
+      for (const part of message.content) {
+        if (part.type === "text") {
+          systemTexts.push(part.text);
+        }
+      }
+    } else {
+      rest.push(message);
+    }
+  }
+  return {
+    instructions: systemTexts.length > 0 ? systemTexts.join("\n\n") : null,
+    input: toResponsesInput(rest)
+  };
+}
 
 function toResponsesInput(messages: CanonicalMessage[]): ResponsesInputItem[] {
   return messages.map((message) => {
@@ -522,10 +738,25 @@ function toResponsesInput(messages: CanonicalMessage[]): ResponsesInputItem[] {
   });
 }
 
+// El Responses de Codex exige nombres de function ^[a-zA-Z0-9_-]+$ (NO admite el punto de
+// nuestros namespaces, p. ej. "clinical.search_patients"). Se sanea el punto y cualquier otro
+// carácter inválido a "_"; el mapa inverso recupera el nombre original para ejecutar la tool.
+function sanitizeCodexToolName(name: string): string {
+  return name.replace(/[^a-zA-Z0-9_-]/g, "_");
+}
+
+function buildCodexToolNameMap(tools: ModelToolDefinition[]): Record<string, string> {
+  const map: Record<string, string> = {};
+  for (const tool of tools) {
+    map[sanitizeCodexToolName(tool.name)] = tool.name;
+  }
+  return map;
+}
+
 function toResponsesTools(tools: ModelToolDefinition[]): ResponsesTool[] {
   return tools.map((tool) => ({
     type: "function",
-    name: tool.name,
+    name: sanitizeCodexToolName(tool.name),
     description: tool.description,
     parameters: tool.inputSchema
   }));

@@ -124,6 +124,9 @@ interface ChatMessage {
   text: string;
   image?: AttachedImage;
   isError?: boolean;
+  // Resumen de razonamiento del turno (proveedores con thinking). Se muestra colapsado
+  // bajo la respuesta del asistente, como en OpenClaw.
+  reasoning?: string;
 }
 
 type ToolCallStatus = "running" | "awaiting_approval" | "success" | "error" | "rejected";
@@ -422,7 +425,13 @@ export function CopilotPanel() {
         if (next.assistantText.trim()) {
           setMessages((prev) => [
             ...prev,
-            { id: nextId(), role: "assistant", text: next.assistantText },
+            {
+              id: nextId(),
+              role: "assistant",
+              text: next.assistantText,
+              // Conserva el razonamiento (si lo hubo) para mostrarlo colapsado bajo la respuesta.
+              ...(next.reasoningText.trim() ? { reasoning: next.reasoningText } : {}),
+            },
           ]);
         }
         // Usage REPORTADO por el gateway: es el conteo real de tokens de entrada del turno.
@@ -1106,9 +1115,12 @@ export function CopilotPanel() {
           {isBusy && (
             <div className="rounded-[12px] bg-[var(--panel2)] px-3.5 py-2.5">
               <div className="mb-1 text-xs font-semibold text-[var(--tx2)]">Asistente (borrador)</div>
-              <p className="whitespace-pre-wrap text-sm text-[var(--tx)]">
-                {turn.assistantText || "Pensando…"}
-              </p>
+              {turn.reasoningText && <ReasoningPanel reasoning={turn.reasoningText} live />}
+              {turn.assistantText ? (
+                <p className="whitespace-pre-wrap text-sm text-[var(--tx)]">{turn.assistantText}</p>
+              ) : turn.reasoningText ? null : (
+                <p className="text-sm text-[var(--tx2)]">Pensando…</p>
+              )}
             </div>
           )}
         </div>
@@ -1345,6 +1357,30 @@ function ToolCatalogPanel({ entries }: Readonly<{ entries: ToolCatalogEntry[] }>
   );
 }
 
+/**
+ * Panel colapsable del "proceso de pensamiento" (resumen de razonamiento). Patrón OpenClaw:
+ * mientras el modelo razona se ve abierto ("Razonando…"); ya respondido queda colapsado bajo
+ * la respuesta. Funciona con cualquier proveedor que emita reasoning (Codex, Anthropic, Gemini…).
+ */
+function ReasoningPanel({
+  reasoning,
+  live = false,
+}: Readonly<{ reasoning: string; live?: boolean }>) {
+  return (
+    <details open={live} className="mb-2 rounded-[10px] border border-[var(--border)] bg-[var(--bg2)]">
+      <summary className="flex cursor-pointer select-none items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-[var(--tx2)]">
+        <span aria-hidden>🧠</span>
+        <span className={live ? "animate-pulse" : undefined}>
+          {live ? "Razonando…" : "Ver razonamiento"}
+        </span>
+      </summary>
+      <div className="border-t border-[var(--border)] px-3 py-2">
+        <p className="whitespace-pre-wrap text-xs leading-relaxed text-[var(--tx2)]">{reasoning}</p>
+      </div>
+    </details>
+  );
+}
+
 function MessageBubble({ message }: Readonly<{ message: ChatMessage }>) {
   const isUser = message.role === "user";
   return (
@@ -1361,6 +1397,7 @@ function MessageBubble({ message }: Readonly<{ message: ChatMessage }>) {
         {!isUser && (
           <div className="mb-1 text-xs font-semibold text-[var(--tx2)]">Asistente (borrador)</div>
         )}
+        {!isUser && message.reasoning && <ReasoningPanel reasoning={message.reasoning} />}
         {message.image && (
           <>
             {/* eslint-disable-next-line @next/next/no-img-element */}

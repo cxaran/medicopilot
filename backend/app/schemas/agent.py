@@ -4,7 +4,7 @@ from typing import Optional
 
 from pydantic import Field
 
-from backend.app.models.enums import AiProvider
+from backend.app.models.enums import AiCredentialType, AiProvider
 from backend.app.schemas.base import ApiSchema, ApiWriteSchema
 
 
@@ -24,6 +24,10 @@ class CredentialLeaseRequest(ApiWriteSchema):
 
     user_id: uuid.UUID
     provider: AiProvider
+    # Desambigua cuando el usuario tiene MÁS de una credencial para el mismo provider (p. ej.
+    # OpenAI con API key Y OAuth de ChatGPT): el gateway pide la que corresponde al provider id
+    # que enruta (openai → api_key, openai_codex → oauth). None = cualquiera activa (compat).
+    credential_type: Optional[AiCredentialType] = None
 
 
 class CredentialLeaseResponse(ApiSchema):
@@ -37,6 +41,9 @@ class CredentialLeaseResponse(ApiSchema):
     secret: str
     expires_at: datetime
     default_model: Optional[str] = None
+    # Id de cuenta ChatGPT: solo se rellena para credenciales OAuth/Codex (el Gateway lo
+    # envía como header chatgpt-account-id). None para API keys. NO es secreto.
+    account_id: Optional[str] = None
 
 
 class OAuthStartResponse(ApiSchema):

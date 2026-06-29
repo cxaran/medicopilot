@@ -115,6 +115,53 @@ describe("HttpControlPlaneClient", () => {
     });
   });
 
+  it("openai_codex arrienda el provider 'openai' con credential_type 'oauth'", async () => {
+    const { client, calls, browserSessions } = build(
+      () => new Response(JSON.stringify({ lease_id: "l", secret: "s", expires_at: new Date().toISOString() }), { status: 200, headers: { "content-type": "application/json" } })
+    );
+    const session = browserSessions.create("user-cdx", "ref");
+    const authorization = await client.authorizeTurn({ browserSessionId: session.id, profileId: "openai_codex/gpt-5.5" });
+    await client.leaseCredential({ authorization, purpose: "model_turn" });
+    expect(JSON.parse(String(calls[0]!.init.body))).toEqual({
+      user_id: "user-cdx",
+      provider: "openai",
+      credential_type: "oauth"
+    });
+  });
+
+  it("openai (API key) arrienda el provider 'openai' con credential_type 'api_key'", async () => {
+    const { client, calls, browserSessions } = build(
+      () => new Response(JSON.stringify({ lease_id: "l", secret: "s", expires_at: new Date().toISOString() }), { status: 200, headers: { "content-type": "application/json" } })
+    );
+    const session = browserSessions.create("user-key", "ref");
+    const authorization = await client.authorizeTurn({ browserSessionId: session.id, profileId: "openai/gpt-4o" });
+    await client.leaseCredential({ authorization, purpose: "model_turn" });
+    expect(JSON.parse(String(calls[0]!.init.body))).toEqual({
+      user_id: "user-key",
+      provider: "openai",
+      credential_type: "api_key"
+    });
+  });
+
+  it("leaseCredential mapea account_id (credencial OAuth/Codex) a accountId", async () => {
+    const expiresAt = new Date(Date.now() + 120_000).toISOString();
+    const { client, sessionId } = build(
+      () =>
+        new Response(
+          JSON.stringify({
+            lease_id: "lease-oauth",
+            secret: "oauth-access-token",
+            expires_at: expiresAt,
+            account_id: "acct_999"
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        )
+    );
+    const authorization = await authorize(client, sessionId);
+    const lease = await client.leaseCredential({ authorization, purpose: "model_turn" });
+    expect(lease.accountId).toBe("acct_999");
+  });
+
   it("404 sin credencial -> GatewayError sin filtrar el secreto interno", async () => {
     const { client, sessionId } = build(
       () => new Response(JSON.stringify({ code: "credential_not_found" }), { status: 404 })

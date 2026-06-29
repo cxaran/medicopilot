@@ -10,11 +10,20 @@ export interface HttpControlPlaneOptions {
   fetchImpl?: typeof fetch;
 }
 
+// Mapa provider id del gateway → (provider, credential_type) del backend. Solo los ids que
+// NO son 1:1 con el backend; el resto usa el provider id tal cual sin credential_type.
+const PROVIDER_LEASE_MAP: Record<string, { provider: string; credentialType?: string }> = {
+  openai: { provider: "openai", credentialType: "api_key" },
+  openai_codex: { provider: "openai", credentialType: "oauth" }
+};
+
 interface CredentialLeaseResponse {
   lease_id: string;
   secret: string;
   expires_at: string;
   default_model?: string | null;
+  // Id de cuenta ChatGPT: solo lo devuelve el backend para credenciales OAuth/Codex.
+  account_id?: string | null;
 }
 
 /**
@@ -126,9 +135,17 @@ export class HttpControlPlaneClient implements ControlPlanePort {
     return this.mapLease((await response.json()) as CredentialLeaseResponse);
   }
 
-  private async postLease(userId: string, provider: string): Promise<Response> {
+  private async postLease(userId: string, providerId: string): Promise<Response> {
     const base = this.options.backendInternalUrl.replace(/\/+$/, "");
     const url = `${base}/api/v1/internal/agent/credential-lease`;
+    // Mapea el provider id del gateway al (provider, credential_type) del backend. "openai" y
+    // "openai_codex" comparten el provider de backend "openai" pero distinta credencial (API
+    // key vs OAuth): así ambos coexisten sin ambigüedad en el arriendo. El resto va 1:1.
+    const mapped = PROVIDER_LEASE_MAP[providerId] ?? { provider: providerId };
+    const body: Record<string, string> = { user_id: userId, provider: mapped.provider };
+    if (mapped.credentialType) {
+      body.credential_type = mapped.credentialType;
+    }
     try {
       return await this.fetchImpl(url, {
         method: "POST",
@@ -136,7 +153,7 @@ export class HttpControlPlaneClient implements ControlPlanePort {
           "content-type": "application/json",
           "x-internal-auth": this.options.backendInternalSecret
         },
-        body: JSON.stringify({ user_id: userId, provider })
+        body: JSON.stringify(body)
       });
     } catch {
       // No se incluye el error original para no arriesgar fugas de secreto/URL.
@@ -145,11 +162,17 @@ export class HttpControlPlaneClient implements ControlPlanePort {
   }
 
   private mapLease(data: CredentialLeaseResponse): ProviderCredentialLease {
-    return {
+    const lease: ProviderCredentialLease = {
       leaseId: data.lease_id,
       secret: data.secret,
       expiresAt: new Date(data.expires_at)
     };
+    // Solo se agrega cuando el backend lo provee (credenciales OAuth/Codex); para API keys
+    // queda ausente y el adaptador no emite el header chatgpt-account-id.
+    if (data.account_id) {
+      lease.accountId = data.account_id;
+    }
+    return lease;
   }
 
   async releaseCredentialLease(): Promise<void> {

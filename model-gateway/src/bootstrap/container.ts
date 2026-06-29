@@ -11,11 +11,7 @@ import {
   createOpencodeModel,
   OPENCODE_GO_PROVIDER_ID
 } from "../providers/opencode/adapter.js";
-import {
-  OpenAIProviderAdapter,
-  createOpenAIModel,
-  type OpenAIApiFlavor
-} from "../providers/openai/adapter.js";
+import { OpenAIProviderAdapter, createOpenAIModel } from "../providers/openai/adapter.js";
 import { AnthropicProviderAdapter, createAnthropicModel } from "../providers/anthropic/adapter.js";
 import { GeminiProviderAdapter, createGeminiModel } from "../providers/gemini/adapter.js";
 import { OpenRouterProviderAdapter, createOpenRouterModel } from "../providers/openrouter/adapter.js";
@@ -48,19 +44,26 @@ export interface GatewayContainer {
 export function createContainer(settings = loadSettings()): GatewayContainer {
   const browserSessions = new InMemoryBrowserSessionStore();
 
-  // B5: primer proveedor real. El catálogo combina el fake (dev) + un modelo curado de
-  // opencode; el registry expone ambos protocolos.
+  // B5: primer proveedor real. opencode es el catálogo base; el registry expone su protocolo.
   const opencodeAdapter = new OpencodeProviderAdapter({ baseUrl: settings.opencodeBaseUrl });
   const opencodeModel = createOpencodeModel({
     baseUrl: settings.opencodeBaseUrl,
     modelId: settings.opencodeDefaultModel
   });
 
+  const adapters: ProviderAdapter[] = [opencodeAdapter];
+  const catalogModels = [opencodeModel];
+
+  // Proveedor FAKE: SOLO dev/tests y solo si se habilita explícitamente (GATEWAY_FAKE_ENABLED).
+  // No debe figurar como proveedor ni modelo en runtime (dev/producción).
+  if (settings.fakeEnabled) {
+    adapters.unshift(new FakeProviderAdapter());
+    catalogModels.unshift(createFakeModel());
+  }
+
   // OpenCode Go (opt-in): mismo adaptador OpenAI-compatible, otro base URL y provider id
   // (opencode_go) para que el arriendo busque la credencial Go correcta. La misma key
   // opencode sirve, pero contra el endpoint Go.
-  const adapters: ProviderAdapter[] = [new FakeProviderAdapter(), opencodeAdapter];
-  const catalogModels = [createFakeModel(), opencodeModel];
   if (settings.opencodeGoEnabled && settings.opencodeGoBaseUrl) {
     const opencodeGoAdapter = new OpencodeProviderAdapter({
       baseUrl: settings.opencodeGoBaseUrl,
@@ -75,23 +78,42 @@ export function createContainer(settings = loadSettings()): GatewayContainer {
     catalogModels.push(opencodeGoModel);
   }
 
-  // OpenAI / Codex (P6, opt-in). Mismo provider id "openai" para ambas auth shapes; el
-  // arriendo (B4/B10) entrega el Bearer correcto (API key o access token OAuth). El flavor
-  // elige la familia de cable. El modelo por defecto se registra como fila curada (útil
-  // cuando el proveedor no expone /models, p. ej. Codex/suscripción); el discovery añade los
-  // reales cuando sí hay /models.
+  // OpenAI API key (P6, opt-in). Provider id "openai", chat_completions contra api.openai.com.
+  // El discovery /models lista en vivo; el modelo por defecto es fila curada de fallback.
   if (settings.openaiEnabled && settings.openaiBaseUrl) {
     const openaiAdapter = new OpenAIProviderAdapter({
       baseUrl: settings.openaiBaseUrl,
-      apiFlavor: (settings.openaiApiFlavor as OpenAIApiFlavor) ?? "chat_completions"
+      apiFlavor: "chat_completions",
+      providerId: "openai"
     });
     const openaiModel = createOpenAIModel({
       baseUrl: settings.openaiBaseUrl,
-      modelId: settings.openaiDefaultModel ?? "gpt-5-codex",
-      apiFlavor: (settings.openaiApiFlavor as OpenAIApiFlavor) ?? "chat_completions"
+      modelId: settings.openaiDefaultModel ?? "gpt-4o-mini",
+      apiFlavor: "chat_completions",
+      providerId: "openai"
     });
     adapters.push(openaiAdapter);
     catalogModels.push(openaiModel);
+  }
+
+  // Codex / suscripción ChatGPT (opt-in, INDEPENDIENTE de la API key). Provider id propio
+  // "openai_codex" para arrendar la credencial OAuth (vs la API key de "openai") → ambos
+  // coexisten. Discovery en vivo vía /models?client_version=…; el default es fila curada.
+  if (settings.openaiCodexEnabled && settings.openaiCodexBaseUrl) {
+    const codexAdapter = new OpenAIProviderAdapter({
+      baseUrl: settings.openaiCodexBaseUrl,
+      apiFlavor: "codex_responses",
+      providerId: "openai_codex",
+      codexClientVersion: settings.openaiCodexClientVersion ?? "1.0.0"
+    });
+    const codexModel = createOpenAIModel({
+      baseUrl: settings.openaiCodexBaseUrl,
+      modelId: settings.openaiCodexDefaultModel ?? "gpt-5.5",
+      apiFlavor: "codex_responses",
+      providerId: "openai_codex"
+    });
+    adapters.push(codexAdapter);
+    catalogModels.push(codexModel);
   }
 
   // Anthropic (opt-in). FAMILIA DE CABLE distinta (Messages API): demuestra que el gateway

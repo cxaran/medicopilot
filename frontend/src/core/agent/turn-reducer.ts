@@ -19,6 +19,9 @@ export interface TurnState {
   turnId: string | null;
   // Texto del asistente acumulado desde delta+snapshot del gateway.
   assistantText: string;
+  // Resumen de razonamiento ("pensamiento") acumulado de los eventos turn.reasoning.summary.
+  // Lo emiten todos los proveedores con reasoning (Codex, Anthropic thinking, Gemini, etc.).
+  reasoningText: string;
   pendingToolCalls: PendingToolCall[];
   usage: TurnUsage | null;
   // ``details`` conserva la metadata del error del proveedor (p. ej. ``providerStatus``)
@@ -31,6 +34,7 @@ export function initialTurnState(): TurnState {
     status: "idle",
     turnId: null,
     assistantText: "",
+    reasoningText: "",
     pendingToolCalls: [],
     usage: null,
     error: null,
@@ -85,6 +89,14 @@ export function reduceTurnEvent(state: TurnState, event: ServerEvent): TurnState
         ],
       };
 
+    case "turn.reasoning.summary":
+      return {
+        ...state,
+        status: state.status === "idle" ? "running" : state.status,
+        turnId: state.turnId ?? event.turn_id,
+        reasoningText: state.reasoningText + event.summary,
+      };
+
     case "turn.completed":
       return { ...state, status: "completed", usage: event.usage };
 
@@ -99,7 +111,7 @@ export function reduceTurnEvent(state: TurnState, event: ServerEvent): TurnState
       };
 
     default:
-      // reasoning.summary y eventos de RPC no alteran el estado del turn.
+      // Los eventos de RPC (tool discovery, etc.) no alteran el estado del turn.
       return state;
   }
 }

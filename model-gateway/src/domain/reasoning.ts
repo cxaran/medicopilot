@@ -61,6 +61,7 @@ export function nativeReasoningEffort(
   }
   switch (protocol) {
     case "openai":
+    case "openai_codex":
     case "opencode_zen":
     case "opencode_go":
     case "openai_responses":
