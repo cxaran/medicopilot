@@ -18,6 +18,14 @@ import {
   type DynamicFormSpec,
   type DynamicWidget,
 } from "@/core/agent/tools/dynamic-form";
+import {
+  applyDecision,
+  buildCloseOutSubmission,
+  summarize,
+  type CloseOutDisposition,
+  type CloseOutEntry,
+  type DetectedActionsSpec,
+} from "@/core/agent/tools/detected-actions";
 
 // Render seguro de UI generada por el modelo (B9, Parte B): specs declarativas mapeadas a
 // componentes React con los primitivos R2. NUNCA HTML/JS crudo del modelo.
@@ -38,6 +46,9 @@ export function GeneratedUi({
         onSubmit={(values) => onSendFollowup(buildDynamicFormSubmission(spec, values))}
       />
     );
+  }
+  if (spec.kind === "detected_actions") {
+    return <DetectedActionsPanel spec={spec} onSendFollowup={onSendFollowup} />;
   }
   return <ButtonsView spec={spec} onAction={(action) => onSendFollowup(buttonActionToMessage(action))} />;
 }
@@ -386,6 +397,251 @@ function DynamicInput({
       onChange={(event) => setValue(widget.name, event.target.value)}
     />
   );
+}
+
+// Panel de CIERRE post-transcripción (MP-CTRL-0120). Lista las acciones detectadas con su origen y
+// diff, deja al médico aceptar/editar/rechazar cada una (las bloqueadas quedan fijas con su motivo),
+// muestra el resumen de cierre y, al confirmar, envía un seguimiento para que el agente proceda
+// ACCIÓN POR ACCIÓN por la aprobación P1. No escribe nada por sí mismo.
+type CloseOutDecision = "save_draft" | "pending" | "discarded";
+
+const DISPOSITION_LABEL: Record<CloseOutDisposition, string> = {
+  save_draft: "Guardar como borrador",
+  pending: "Pendiente de confirmación",
+  discarded: "Descartar",
+  blocked: "Bloqueada",
+};
+
+const DECISION_OPTIONS: { value: CloseOutDecision; label: string }[] = [
+  { value: "save_draft", label: "Aceptar (guardar borrador)" },
+  { value: "pending", label: "Dejar pendiente" },
+  { value: "discarded", label: "Rechazar" },
+];
+
+interface EntryOverride {
+  decision: CloseOutDecision;
+  edited?: Record<string, string>;
+  editing?: boolean;
+}
+
+function DetectedActionsPanel({
+  spec,
+  onSendFollowup,
+}: Readonly<{ spec: DetectedActionsSpec; onSendFollowup: (text: string) => void }>) {
+  const [overrides, setOverrides] = useState<Record<string, EntryOverride>>({});
+
+  const resolved: CloseOutEntry[] = spec.plan.entries.map((entry) => {
+    if (entry.disposition === "blocked") return entry; // bloqueadas no cambian
+    const override = overrides[entry.id];
+    if (!override) return entry;
+    return applyDecision(entry, override.decision, override.edited);
+  });
+  const summary = summarize(resolved);
+
+  const setDecision = (id: string, decision: CloseOutDecision): void =>
+    setOverrides((prev) => ({ ...prev, [id]: { ...prev[id], decision } }));
+
+  const toggleEditing = (id: string): void =>
+    setOverrides((prev) => {
+      const current = prev[id] ?? { decision: "save_draft" as CloseOutDecision };
+      return { ...prev, [id]: { ...current, editing: !current.editing } };
+    });
+
+  const setField = (entry: CloseOutEntry, field: string, value: string): void =>
+    setOverrides((prev) => {
+      const current = prev[entry.id] ?? { decision: "save_draft" as CloseOutDecision };
+      const base: Record<string, string> = current.edited ?? stringifyValues(entry.values);
+      return {
+        ...prev,
+        [entry.id]: { ...current, decision: "save_draft", edited: { ...base, [field]: value } },
+      };
+    });
+
+  const clinical = resolved.filter((entry) => entry.category === "clinical");
+  const administrative = resolved.filter((entry) => entry.category === "administrative");
+
+  return (
+    <div className="flex flex-col gap-3">
+      {spec.title && <div className="text-sm font-semibold text-[var(--tx)]">{spec.title}</div>}
+
+      <div className="rounded-[10px] border border-[var(--border2)] bg-[var(--bg2)] px-3 py-2 text-xs text-[var(--tx2)]">
+        Cierre: {summary.save_draft} a guardar · {summary.pending} pendientes · {summary.discarded}{" "}
+        descartadas · {summary.blocked} bloqueadas
+      </div>
+
+      <ActionGroup
+        title="Clínicas"
+        entries={clinical}
+        overrides={overrides}
+        onDecision={setDecision}
+        onToggleEditing={toggleEditing}
+        onField={setField}
+      />
+      <ActionGroup
+        title="Administrativas"
+        entries={administrative}
+        overrides={overrides}
+        onDecision={setDecision}
+        onToggleEditing={toggleEditing}
+        onField={setField}
+      />
+
+      <div>
+        <Button
+          type="button"
+          onClick={() => onSendFollowup(buildCloseOutSubmission(spec.confirm_prompt, resolved))}
+        >
+          {spec.confirm_label}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function stringifyValues(values: Record<string, unknown>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [field, value] of Object.entries(values)) {
+    out[field] = typeof value === "string" ? value : value == null ? "" : JSON.stringify(value);
+  }
+  return out;
+}
+
+function ActionGroup({
+  title,
+  entries,
+  overrides,
+  onDecision,
+  onToggleEditing,
+  onField,
+}: Readonly<{
+  title: string;
+  entries: CloseOutEntry[];
+  overrides: Record<string, EntryOverride>;
+  onDecision: (id: string, decision: CloseOutDecision) => void;
+  onToggleEditing: (id: string) => void;
+  onField: (entry: CloseOutEntry, field: string, value: string) => void;
+}>) {
+  if (entries.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-2">
+      <span className="text-xs font-semibold text-[var(--tx2)]">{title}</span>
+      {entries.map((entry) => (
+        <ActionCard
+          key={entry.id}
+          entry={entry}
+          override={overrides[entry.id]}
+          onDecision={onDecision}
+          onToggleEditing={onToggleEditing}
+          onField={onField}
+        />
+      ))}
+    </div>
+  );
+}
+
+function ActionCard({
+  entry,
+  override,
+  onDecision,
+  onToggleEditing,
+  onField,
+}: Readonly<{
+  entry: CloseOutEntry;
+  override: EntryOverride | undefined;
+  onDecision: (id: string, decision: CloseOutDecision) => void;
+  onToggleEditing: (id: string) => void;
+  onField: (entry: CloseOutEntry, field: string, value: string) => void;
+}>) {
+  const blocked = entry.disposition === "blocked";
+  const editing = override?.editing ?? false;
+  const decision: CloseOutDecision = blocked
+    ? "discarded"
+    : override?.decision ?? (entry.disposition === "save_draft" ? "save_draft" : entry.disposition === "discarded" ? "discarded" : "pending");
+
+  return (
+    <div
+      className={`flex flex-col gap-1 rounded-[10px] border p-2 ${
+        blocked ? "border-[var(--danger)]" : "border-[var(--border2)]"
+      }`}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs font-medium text-[var(--tx)]">{entry.label}</span>
+        <span className="text-[10px] text-[var(--tx2)]">{entry.target_resource}</span>
+      </div>
+
+      {entry.source_fragment && (
+        <p className="text-[11px] italic text-[var(--tx2)]">«{entry.source_fragment}»</p>
+      )}
+
+      {blocked ? (
+        <div className="text-[11px] text-[var(--danger)]">
+          {DISPOSITION_LABEL.blocked}: {entry.reason}
+        </div>
+      ) : (
+        <>
+          <div className="text-[11px] text-[var(--tx2)]">
+            {entry.diff.length === 0
+              ? "Sin cambios respecto al expediente."
+              : entry.diff
+                  .map((d) =>
+                    d.change === "added"
+                      ? `+ ${d.field}: ${renderValue(d.after)}`
+                      : `~ ${d.field}: ${renderValue(d.before)} → ${renderValue(d.after)}`,
+                  )
+                  .join("  ·  ")}
+          </div>
+          {entry.dropped_fields.length > 0 && (
+            <div className="text-[11px] text-[var(--tx2)]">
+              Campos ignorados (fuera del esquema): {entry.dropped_fields.join(", ")}
+            </div>
+          )}
+
+          {editing && (
+            <div className="flex flex-col gap-1 rounded-[8px] border border-[var(--border2)] p-2">
+              {Object.entries(entry.values).map(([field, value]) => (
+                <label key={field} className="flex flex-col gap-0.5 text-[11px] text-[var(--tx2)]">
+                  <span>{field}</span>
+                  <Input
+                    value={
+                      override?.edited?.[field] ??
+                      (typeof value === "string" ? value : value == null ? "" : JSON.stringify(value))
+                    }
+                    onChange={(event) => onField(entry, field, event.target.value)}
+                  />
+                </label>
+              ))}
+            </div>
+          )}
+
+          <div className="flex items-center gap-2">
+            <Select
+              value={decision}
+              onChange={(event) => onDecision(entry.id, event.target.value as CloseOutDecision)}
+            >
+              {DECISION_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </Select>
+            <button
+              type="button"
+              className="text-[11px] text-[var(--accent)] underline"
+              onClick={() => onToggleEditing(entry.id)}
+            >
+              {editing ? "Cerrar edición" : "Editar"}
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function renderValue(value: unknown): string {
+  if (value === undefined || value === null) return "—";
+  if (typeof value === "string") return value;
+  return JSON.stringify(value);
 }
 
 function ButtonsView({

@@ -49,11 +49,13 @@ export interface ButtonsSpec {
   buttons: ButtonSpec[];
 }
 
-// La spec de UI DINÁMICA en lista blanca (MP-CTRL-0117) se integra a la unión: se valida en su
-// propio módulo y se pinta dentro de `GeneratedUi`, sin un renderizador paralelo.
+// La spec de UI DINÁMICA en lista blanca (MP-CTRL-0117) y el panel de CIERRE post-transcripción
+// (MP-CTRL-0120) se integran a la unión: se validan en su propio módulo y se pintan dentro de
+// `GeneratedUi`, sin un renderizador paralelo.
 import type { DynamicFormSpec } from "./dynamic-form";
+import type { DetectedActionsSpec } from "./detected-actions";
 
-export type UiSpec = FormSpec | ChartSpec | ButtonsSpec | DynamicFormSpec;
+export type UiSpec = FormSpec | ChartSpec | ButtonsSpec | DynamicFormSpec | DetectedActionsSpec;
 
 export type ParseResult<T> = { ok: true; spec: T } | { ok: false; error: string };
 
@@ -62,7 +64,13 @@ export function isUiSpec(value: unknown): value is UiSpec {
     return false;
   }
   const kind = (value as { kind?: unknown }).kind;
-  return kind === "form" || kind === "chart" || kind === "buttons" || kind === "dynamic_form";
+  return (
+    kind === "form" ||
+    kind === "chart" ||
+    kind === "buttons" ||
+    kind === "dynamic_form" ||
+    kind === "detected_actions"
+  );
 }
 
 const MAX_FIELDS = 30;

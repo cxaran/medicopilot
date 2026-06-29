@@ -7,6 +7,13 @@ import { browserSandboxRunner, type SandboxRunner } from "./sandbox";
 import { parseButtonsSpec, parseChartSpec, parseFormSpec } from "./ui-spec";
 import { validateDynamicForm } from "./dynamic-form";
 import {
+  buildCloseOutPlan,
+  reviewContextFromCatalog,
+  type CatalogResourceLike,
+  type DetectedActionsInput,
+  type DetectedActionsSpec,
+} from "./detected-actions";
+import {
   searchTools,
   describeTools,
   type ToolDiscoveryContext,
@@ -2778,6 +2785,106 @@ const TOOLS: ToolDefinition[] = [
         throw new ToolExecutionError("invalid_ui_spec", parsed.error);
       }
       return parsed.spec;
+    },
+  },
+  {
+    // CIERRE CONSCIENTE POST-TRANSCRIPCIÓN (MP-CTRL-0120): tras procesar una consulta, el agente
+    // emite el CONJUNTO de acciones que detectó (altas/diagnósticos/recetas/tareas/plantillas) y
+    // esta tool renderiza un PANEL para que el médico las revise TODAS juntas (aceptar/editar/
+    // rechazar) y vea el resumen de cierre (borrador/pendiente/descartado/bloqueado) + el diff
+    // contra el expediente ANTES de escribir nada. Es ORQUESTACIÓN read-only sobre el camino P1:
+    // valida cada acción contra el catálogo + RBAC (las desconocidas/sin permiso quedan BLOQUEADAS
+    // con motivo, no se descartan en silencio) y NO guarda nada. Al confirmar, el agente procede
+    // acción por acción con la tool de escritura de cada una (cada guardado pasa por la aprobación
+    // P1; nunca una escritura en lote). La extracción que produce las acciones es del agente.
+    name: "ui.review_detected_actions",
+    description:
+      "Renderiza el PANEL de cierre post-consulta para revisar juntas las acciones detectadas " +
+      "(borradores propuestos). Indica actions: lista de { id, type (create_consultation|" +
+      "create_diagnosis|create_prescription|open_template:<id>|create_task|...), target_resource, " +
+      "template_id?, proposed_values, edited_values?, current_values?, source_fragment, status " +
+      "(pending|accepted|edited|rejected) }, y opcional patient_id/consultation_id. La plataforma " +
+      "valida cada acción contra el catálogo + permisos (las no permitidas/desconocidas quedan " +
+      "bloqueadas con motivo, no se inventan), calcula el diff contra el expediente y arma el " +
+      "resumen de cierre. NO guarda nada: el médico revisa y al confirmar tú procedes acción por " +
+      "acción con la tool de escritura de cada una (cada guardado requiere aprobación P1). Solo lectura.",
+    kind: "read",
+    inputSchema: PASSTHROUGH_SCHEMA,
+    wireSchema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Título del panel (opcional)." },
+        patient_id: { type: "string", description: "Paciente del cierre (opcional, para el diff)." },
+        consultation_id: { type: "string", description: "Consulta del cierre (opcional)." },
+        confirm_label: { type: "string", description: "Etiqueta del botón de confirmación." },
+        confirm_prompt: { type: "string", description: "Encabezado del mensaje de cierre." },
+        actions: {
+          type: "array",
+          description: "Acciones detectadas a revisar.",
+          items: {
+            type: "object",
+            properties: {
+              id: { type: "string", description: "Id estable de la acción." },
+              type: {
+                type: "string",
+                description: "Tipo de acción (create_*, open_template:<id>, ...).",
+              },
+              label: { type: "string", description: "Etiqueta legible de la acción." },
+              target_resource: { type: "string", description: "Recurso destino." },
+              template_id: { type: "string", description: "Id de plantilla (si aplica)." },
+              proposed_values: {
+                type: "object",
+                description: "Valores propuestos por campo.",
+                additionalProperties: true,
+              },
+              edited_values: {
+                type: "object",
+                description: "Valores editados por el médico (si status = edited).",
+                additionalProperties: true,
+              },
+              current_values: {
+                type: "object",
+                description: "Estado actual del expediente para el diff (vacío en altas).",
+                additionalProperties: true,
+              },
+              source_fragment: { type: "string", description: "Fragmento de origen." },
+              status: {
+                type: "string",
+                description: "Estado propuesto.",
+                enum: ["pending", "accepted", "edited", "rejected"],
+              },
+              category: {
+                type: "string",
+                description: "Categoría (si se omite, se infiere).",
+                enum: ["clinical", "administrative"],
+              },
+            },
+            required: ["id", "type", "target_resource"],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ["actions"],
+      additionalProperties: false,
+    },
+    execute: async (args, ctx) => {
+      const catalog = await ctx.api<readonly CatalogResourceLike[]>(`/api/v1/resources`);
+      const result = buildCloseOutPlan(args as unknown as DetectedActionsInput, reviewContextFromCatalog(catalog));
+      if (!result.ok) {
+        throw new ToolExecutionError("invalid_detected_actions", result.error);
+      }
+      const spec: DetectedActionsSpec = {
+        kind: "detected_actions",
+        plan: result.plan,
+        confirm_label:
+          typeof args.confirm_label === "string" ? args.confirm_label : "Confirmar cierre",
+        confirm_prompt:
+          typeof args.confirm_prompt === "string"
+            ? args.confirm_prompt
+            : "Cierre de la consulta revisado:",
+      };
+      if (typeof args.title === "string") spec.title = args.title;
+      return spec;
     },
   },
 ];
