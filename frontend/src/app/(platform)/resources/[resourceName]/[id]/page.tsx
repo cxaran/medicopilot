@@ -70,6 +70,15 @@ export default async function ResourceDetailPage({ params }: PageProps) {
           <h1 className="text-xl font-semibold text-slate-900">Detalle</h1>
         </div>
         <div className="flex flex-wrap items-center gap-3">
+          {/* Receta: acceso a la vista de impresión SÓLO LECTURA (no emite/finaliza; eso es P1). */}
+          {resourceName === "prescriptions" ? (
+            <Link
+              href={`/recetas/${encodeURIComponent(id)}/imprimir`}
+              className="text-sm font-medium text-slate-700 underline-offset-2 hover:text-slate-900 hover:underline"
+            >
+              Imprimir receta
+            </Link>
+          ) : null}
           {editEnabled ? (
             <Link
               href={`${base}/edit`}
