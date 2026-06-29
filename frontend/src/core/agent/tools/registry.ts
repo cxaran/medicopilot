@@ -498,24 +498,28 @@ const TOOLS: ToolDefinition[] = [
     },
   },
   {
-    // F-MEDIOS fase 2: transcripción de un documento de AUDIO de consulta. La transcripción
-    // la produce un proveedor STT configurable en el servidor; si no hay proveedor, responde
-    // 'no disponible' y NUNCA se inventa un texto. La transcripción es un BORRADOR NO
-    // CONFIABLE que el médico edita.
+    // F-MEDIOS fase 2b: transcripción de un documento de AUDIO de consulta. POR DEFECTO corre
+    // EN EL NAVEGADOR (Whisper local con transformers.js): el audio NO sale del dispositivo del
+    // médico (confidencialidad del PHI). Si el navegador no lo soporta o está deshabilitado, cae
+    // al proveedor STT del servidor (fase 2). Si tampoco hay proveedor, responde 'no disponible'
+    // y NUNCA se inventa texto. La transcripción es un BORRADOR NO CONFIABLE que el médico edita.
     //
     // COMPOSICIÓN sugerida para una nota de consulta a partir de audio (nada se guarda solo):
     //   1) Identifica/sube el audio como documento clínico (document_type 'audio').
     //   2) clinical.get_audio_transcript(clinical_document_id) -> obtén el texto. Si
-    //      available=false, dilo ('no disponible') y NO inventes una nota.
+    //      available=false, dilo ('no disponible') y NO inventes una nota. Si source es
+    //      'browser-local', puedes aclarar que el audio no salió del dispositivo.
     //   3) Propón clinical.create_consultation_draft FUNDAMENTADO en la transcripción (P1):
     //      el médico revisa y completa el borrador; trátalo como texto no confiable.
     name: "clinical.get_audio_transcript",
     description:
       "Devuelve la transcripción de un documento de AUDIO de consulta: {available, transcript, " +
-      "provider}. Si available=false (sin proveedor configurado o error), transcript es null y " +
-      "debes decir 'no disponible' SIN inventar texto. La transcripción es un borrador NO " +
-      "confiable que el médico edita; úsala para proponer una clinical.create_consultation_draft " +
-      "fundamentada en ella (cada nota es un borrador que el médico aprueba). Solo lectura.",
+      "source, model, provider, notes}. POR DEFECTO transcribe EN EL NAVEGADOR (Whisper local): " +
+      "el audio no se envía a terceros (source='browser-local'). Si el navegador no lo soporta, " +
+      "cae al proveedor del servidor (source='server'). Si available=false, di 'no disponible' " +
+      "SIN inventar texto. La transcripción es un borrador NO confiable que el médico edita; " +
+      "úsala para proponer una clinical.create_consultation_draft fundamentada en ella (cada nota " +
+      "es un borrador que el médico aprueba). Solo lectura.",
     kind: "read",
     inputSchema: {
       type: "object",
@@ -529,9 +533,10 @@ const TOOLS: ToolDefinition[] = [
       required: ["clinical_document_id"],
       additionalProperties: false,
     },
-    execute: (args, ctx) => {
-      const id = encodeURIComponent(String(args.clinical_document_id));
-      return ctx.api(`/api/v1/clinical-documents/${id}/transcript`);
+    execute: async (args, ctx) => {
+      const id = String(args.clinical_document_id);
+      const { runAudioTranscript } = await import("@/core/audio-transcription/runtime");
+      return runAudioTranscript(id, ctx);
     },
   },
   {
