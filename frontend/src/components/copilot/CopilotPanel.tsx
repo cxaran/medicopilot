@@ -208,7 +208,18 @@ function reconnectBadge(
   }
 }
 
-export function CopilotPanel() {
+export function CopilotPanel({
+  activeContext: controlledContext,
+  onActiveContextChange,
+  hideContextPicker = false,
+}: Readonly<{
+  // Contexto clínico activo CONTROLADO por el host (p. ej. el shell chat-first: paciente=chat).
+  // Si se omite (uso independiente en /copilot), el panel lo gestiona internamente como antes.
+  activeContext?: ActiveClinicalContext | null;
+  onActiveContextChange?: (context: ActiveClinicalContext | null) => void;
+  // Oculta el selector interno cuando el host ya ofrece la selección de paciente (evita duplicarlo).
+  hideContextPicker?: boolean;
+}> = {}) {
   const [status, setStatus] = useState<ConnectionStatus>("idle");
   // Estado de la máquina de reconexión (resiliencia del WS). Se refleja en la UI; el ref es la
   // fuente de verdad para los callbacks/temporizadores (closures con deps vacías).
@@ -251,7 +262,17 @@ export function CopilotPanel() {
   // CONTEXTO CLÍNICO ACTIVO: paciente (y consulta opcional) sobre los que asiste el copiloto.
   // Acota el recall (P2) y se SURFACEA en el turno y el chip indicador. Sólo fija el ámbito (no
   // carga PHI del expediente). Ref para usarlo en los handlers del turno (closures con deps vacías).
-  const [activeContext, setActiveContext] = useState<ActiveClinicalContext | null>(null);
+  // Controlado o no: si el host pasa ``activeContext`` (aunque sea null), manda; si no, estado
+  // interno (comportamiento original de /copilot intacto).
+  const isContextControlled = controlledContext !== undefined;
+  const [internalContext, setInternalContext] = useState<ActiveClinicalContext | null>(null);
+  const activeContext = isContextControlled ? controlledContext : internalContext;
+  const setActiveContext = (next: ActiveClinicalContext | null): void => {
+    if (!isContextControlled) {
+      setInternalContext(next);
+    }
+    onActiveContextChange?.(next);
+  };
   const activeContextRef = useRef<ActiveClinicalContext | null>(null);
 
   // CONTEXTO (P3): contabilidad usado/presupuesto para el indicador, y aviso de compactación.
@@ -1062,7 +1083,9 @@ export function CopilotPanel() {
         </Card>
       </div>
 
-      <ActiveContextPicker context={activeContext} onChange={setActiveContext} />
+      {!hideContextPicker && (
+        <ActiveContextPicker context={activeContext} onChange={setActiveContext} />
+      )}
 
       {activeContext && (
         <div
