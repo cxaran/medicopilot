@@ -15,6 +15,7 @@ BACKEND_CANONICAL_TEST_MODULES = (
     "backend.tests.test_error_contract",
     "backend.tests.test_query_postgres",
     "backend.tests.test_security_catalog",
+    "backend.tests.test_role_profiles",
     "backend.tests.test_admin_survival",
     "backend.tests.test_session_invalidation",
     "backend.tests.test_admin_relation_mutations",

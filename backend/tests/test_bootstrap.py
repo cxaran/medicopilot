@@ -39,6 +39,10 @@ from backend.app.models import Base  # noqa: E402
 from backend.app.models.setup import PlatformSetup  # noqa: E402
 from backend.app.models.user import Role, RoleAccess, User, UserRole  # noqa: E402
 from backend.app.security.catalog import declared_permissions  # noqa: E402
+from backend.app.security.role_profiles import (  # noqa: E402
+    CLINICAL_ROLE_NAME,
+    clinical_role_permissions,
+)
 
 
 class BootstrapInitialDataTest(unittest.TestCase):
@@ -71,18 +75,36 @@ class BootstrapInitialDataTest(unittest.TestCase):
             roles = session.exec(select(Role)).all()
             user_roles = session.exec(select(UserRole)).all()
             accesses = session.exec(select(RoleAccess)).all()
+            clinical_role = session.exec(
+                select(Role).where(Role.name == CLINICAL_ROLE_NAME)
+            ).one()
+            clinical_accesses = {
+                access.access
+                for access in session.exec(
+                    select(RoleAccess).where(RoleAccess.role_id == clinical_role.id)
+                ).all()
+            }
             setup = session.get(PlatformSetup, 1)
 
         self.assertEqual(len(users), 1)
         self.assertEqual(users[0].email, "admin@example.com")
         self.assertTrue(users[0].is_active)
 
-        self.assertEqual({role.name for role in roles}, {"Administrador", "Usuario"})
-        self.assertEqual(len(user_roles), 1)
-        self.assertEqual(len(accesses), len(permissions))
+        # El seed crea el admin (todos los permisos), el rol base y el rol clínico por defecto.
+        self.assertEqual(
+            {role.name for role in roles}, {"Administrador", "Usuario", CLINICAL_ROLE_NAME}
+        )
+        self.assertEqual(len(user_roles), 1)  # sólo el admin se asigna al usuario inicial
+        # Admin = todos los permisos declarados; clínico = su perfil curado.
+        self.assertEqual(len(accesses), len(permissions) + len(clinical_role_permissions()))
         self.assertEqual({access.access for access in accesses}, permissions)
         self.assertTrue(all(access.is_active for access in accesses))
+        # El rol clínico por defecto PUEDE crear pacientes (el hueco de MP-CTRL-0119).
+        self.assertEqual(clinical_accesses, clinical_role_permissions())
+        self.assertIn("patients:create", clinical_accesses)
+        self.assertIn("patients:read", clinical_accesses)
         self.assertIsNotNone(setup)
+        assert setup is not None  # narrowing para el type-checker
         self.assertEqual(setup.status, "completed")
         self.assertEqual(setup.completion_origin, "legacy")
         self.assertIsNotNone(setup.system_admin_role_id)

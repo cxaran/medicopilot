@@ -114,6 +114,35 @@ test("buildToolCatalog: escritura owner-scoped (memorias) siempre declarada, sin
   assert.equal(entry.reason, null);
 });
 
+// --- REGRESIÓN MP-CTRL-0119: la tool de alta de paciente debe surfacearse al rol clínico ---
+
+test("buildToolCatalog: create_patient_draft NO se gatea cuando 'patients' es creable", () => {
+  const tool = getTool("clinical.create_patient_draft") as ToolDefinition;
+  assert.ok(tool, "falta clinical.create_patient_draft");
+  assert.equal(tool.approval?.targetResource, "patients");
+  const [entry] = buildToolCatalog([tool], new Set(["patients"]));
+  assert.equal(entry.status, "declared"); // declarable (sin descubrimiento a escala)
+  assert.notEqual(entry.status, "gated_out");
+  assert.equal(entry.reason, null);
+});
+
+test("buildToolCatalog: create_patient_draft SÍ se gatea si 'patients' no es creable (la causa raíz)", () => {
+  const tool = getTool("clinical.create_patient_draft") as ToolDefinition;
+  const [entry] = buildToolCatalog([tool], new Set()); // rol sin patients:create
+  assert.equal(entry.status, "gated_out");
+  assert.match(entry.reason ?? "", /patients/);
+});
+
+test("create_patient_draft es buscable/declarable para el rol clínico (no excluida de searchable)", () => {
+  // Con 'patients' creable, la tool sobrevive a effectiveTools -> entra al set 'searchable' de
+  // tool_search; sin él quedaba fuera y el agente no podía hallarla (síntoma reportado en vivo).
+  const tools = listTools();
+  const withPatients = effectiveTools(tools, new Set(["patients"])).map((t) => t.name);
+  assert.ok(withPatients.includes("clinical.create_patient_draft"));
+  const without = effectiveTools(tools, new Set()).map((t) => t.name);
+  assert.ok(!without.includes("clinical.create_patient_draft"));
+});
+
 // --- cada nueva tool de escritura enruta por el protocolo de aprobación (P1) ---
 
 test("cada nueva tool de escritura es write, declara approval y produce un plan canónico", () => {

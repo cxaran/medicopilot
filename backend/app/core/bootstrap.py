@@ -6,6 +6,11 @@ from backend.app.core.settings import settings
 from backend.app.bootstrap.service import mark_platform_setup_completed_from_seed
 from backend.app.models.user import Role, RoleAccess, User, UserRole
 from backend.app.security.catalog import declared_permissions
+from backend.app.security.role_profiles import (
+    CLINICAL_ROLE_DESCRIPTION,
+    CLINICAL_ROLE_NAME,
+    clinical_role_permissions,
+)
 
 
 def _get_or_create_role(session: Session, *, name: str, description: str) -> Role:
@@ -86,7 +91,15 @@ def bootstrap_initial_data() -> None:
             name=settings.bootstrap_user_role_name,
             description="Rol base para usuarios autenticados sin permisos administrativos.",
         )
+        # Rol CLÍNICO por defecto: deja la plataforma lista para que un médico opere el copiloto
+        # (incluye patients:create, para que el alta de paciente se ofrezca; ver MP-CTRL-0119).
+        clinical_role = _get_or_create_role(
+            session,
+            name=CLINICAL_ROLE_NAME,
+            description=CLINICAL_ROLE_DESCRIPTION,
+        )
         _sync_role_permissions(session, admin_role, permissions)
+        _sync_role_permissions(session, clinical_role, clinical_role_permissions())
 
         admin_user = _get_or_create_admin_user(session)
         _ensure_user_role(session, user=admin_user, role=admin_role)
