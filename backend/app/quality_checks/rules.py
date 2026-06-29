@@ -18,19 +18,31 @@ regla verifica dosis y frecuencia (las dos presentes en el modelo); la "vía" no
 no existir en el esquema (no se inventa un campo).
 """
 
-from typing import Optional
+from collections import defaultdict
+from typing import Optional, Sequence
 
 from backend.app.models.consultation import Consultation
 from backend.app.models.enums import ConsultationStatus
 from backend.app.models.lab_result import LabResult
 from backend.app.models.prescription import PrescriptionItem
 from backend.app.models.vital_sign import VitalSign
-from backend.app.quality_checks.base import Bound, QualityFlag, Severity
+from backend.app.quality_checks.base import (
+    Bound,
+    QualityFlag,
+    ResolvedDrug,
+    Severity,
+    normalize_text,
+)
 
 RULE_VITALS_OUT_OF_RANGE = "vitals_out_of_physiologic_range"
 RULE_LAB_VALUE_NON_PHYSICAL = "lab_value_non_physical"
 RULE_CONSULTATION_NOTE_INCOMPLETE = "consultation_note_incomplete"
 RULE_PRESCRIPTION_ITEM_INCOMPLETE = "prescription_item_incomplete"
+RULE_DRUG_ALLERGY = "drug_allergy_cross_check"
+RULE_DUPLICATE_MEDICATION = "duplicate_active_medication"
+
+# Marcador especial de origen cuando el cruce fármaco-alergia no puede ejecutarse.
+DRUG_ALLERGY_UNAVAILABLE_REF = "drug_allergy:no_disponible"
 
 # Rangos fisiológicos de PLAUSIBILIDAD (no de normalidad): valores fuera de estos límites son
 # prácticamente incompatibles con un registro humano vivo y suelen indicar un error de captura
@@ -191,6 +203,101 @@ def check_prescription_item(item: PrescriptionItem) -> list[QualityFlag]:
                     ),
                     source_ref=f"prescription_item:{item.id}.{field}",
                     threshold_cited=_RX_CITATION,
+                )
+            )
+    return flags
+
+
+_DRUG_ALLERGY_UNAVAILABLE_MSG = (
+    "Cruce fármaco-alergia NO disponible: no hay fuente de farmacología (MCP) configurada o no "
+    "respondió. No se concluye ausencia de alergias; verifícalo manualmente."
+)
+_DRUG_ALLERGY_CITATION = (
+    "Coincidencia por ingrediente/clase resuelta por la fuente de farmacología configurada."
+)
+
+
+def check_drug_allergy(
+    medications: Sequence[ResolvedDrug],
+    allergies: Sequence[ResolvedDrug],
+    *,
+    source_available: bool,
+) -> list[QualityFlag]:
+    """Marca un medicamento prescrito que coincide con una alergia documentada del paciente.
+
+    La coincidencia es por INGREDIENTE o CLASE ya resueltos por la fuente de farmacología
+    (no hay tabla de fármacos en esta lógica). Si la fuente NO está disponible, devuelve un
+    ÚNICO marcador 'no disponible' (severidad info): NUNCA inventa una coincidencia ni concluye
+    ausencia de alergias. Sólo marca solapamientos REALES resueltos; cita lo coincidente.
+    """
+    if not source_available:
+        return [
+            QualityFlag(
+                rule_id=RULE_DRUG_ALLERGY,
+                severity=Severity.INFO,
+                message_es=_DRUG_ALLERGY_UNAVAILABLE_MSG,
+                source_ref=DRUG_ALLERGY_UNAVAILABLE_REF,
+                threshold_cited=None,
+            )
+        ]
+    flags: list[QualityFlag] = []
+    for med in medications:
+        for allergy in allergies:
+            matched = sorted(
+                (med.ingredients & allergy.ingredients) | (med.classes & allergy.classes)
+            )
+            if matched:
+                matched_str = ", ".join(matched)
+                flags.append(
+                    QualityFlag(
+                        rule_id=RULE_DRUG_ALLERGY,
+                        severity=Severity.WARNING,
+                        message_es=(
+                            f"El medicamento '{med.label}' coincide con una alergia documentada "
+                            f"del paciente ('{allergy.label}') por: {matched_str}."
+                        ),
+                        source_ref=f"{med.ref}|{allergy.ref}:{matched_str}",
+                        threshold_cited=_DRUG_ALLERGY_CITATION,
+                    )
+                )
+    return flags
+
+
+_DUPLICATE_CITATION = (
+    "Mismo medicamento (por nombre normalizado) en más de una indicación activa."
+)
+
+
+def check_duplicate_medications(
+    active_items: Sequence[tuple[str, str]],
+) -> list[QualityFlag]:
+    """Marca un medicamento que aparece más de una vez entre las indicaciones ACTIVAS.
+
+    ``active_items`` es una secuencia de (ref, nombre). La coincidencia es por nombre
+    normalizado (minúsculas/sin acentos): un subconjunto CONSERVADOR de 'mismo ingrediente'
+    que no requiere fuente externa y no inventa nada. El orden es estable.
+    """
+    groups: dict[str, list[tuple[str, str]]] = defaultdict(list)
+    for ref, name in active_items:
+        key = normalize_text(name or "")
+        if key:
+            groups[key].append((ref, name))
+    flags: list[QualityFlag] = []
+    for key in sorted(groups):
+        members = groups[key]
+        if len(members) >= 2:
+            label = members[0][1]
+            refs = ", ".join(ref for ref, _ in members)
+            flags.append(
+                QualityFlag(
+                    rule_id=RULE_DUPLICATE_MEDICATION,
+                    severity=Severity.WARNING,
+                    message_es=(
+                        f"El medicamento '{label}' aparece {len(members)} veces en las "
+                        f"indicaciones activas del paciente; revisa una posible duplicidad."
+                    ),
+                    source_ref=refs,
+                    threshold_cited=_DUPLICATE_CITATION,
                 )
             )
     return flags

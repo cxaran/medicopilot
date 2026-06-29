@@ -1051,24 +1051,36 @@ const TOOLS: ToolDefinition[] = [
     },
   },
   {
-    // NUEVO CLUSTER — Verificaciones de calidad/seguridad clínica (fase 1). SÓLO LECTURA:
+    // NUEVO CLUSTER — Verificaciones de calidad/seguridad clínica (fases 1-2). SÓLO LECTURA:
     // FastAPI exige quality_checks:read. Ejecuta reglas DETERMINISTAS sobre datos existentes y
     // devuelve banderas que el médico REVISA; no corrige ni escribe nada.
     //
+    // Reglas: (f1) signos vitales fuera de rango fisiológico, lab imposible, nota SOAP incompleta
+    // en borrador, medicamento sin dosis/frecuencia; (f2) cruce FÁRMACO-ALERGIA (medicamento que
+    // coincide con una alergia documentada por ingrediente/clase) y MEDICAMENTOS DUPLICADOS
+    // activos. El cruce fármaco-alergia se resuelve con la fuente de farmacología configurada; si
+    // no está disponible, devuelve una bandera con source_ref 'drug_allergy:no_disponible'
+    // (severidad info): NO concluye ausencia de alergias — adviértelo y sugiere verificar a mano.
+    //
     // COMPOSICIÓN (presenta las banderas como SUGERENCIAS de revisión, NUNCA como correcciones):
     //   1) clinical.run_quality_checks(target_type, target_id) sobre la consulta/receta/paciente.
-    //   2) Presenta las banderas como "posibles problemas para tu revisión" citando el umbral de
-    //      cada una (threshold_cited). El médico decide qué hacer; el agente NO actúa sobre ellas
-    //      (no corrige valores, no firma, no edita). Si flags está vacío, dilo sin afirmar que el
-    //      expediente es perfecto: sólo que estas reglas no marcaron nada.
+    //   2) Presenta las banderas como "posibles problemas para tu revisión" citando el umbral/
+    //      criterio de cada una (threshold_cited) y lo coincidente en el cruce fármaco-alergia
+    //      (source_ref). El médico decide; el agente NO actúa sobre ellas (no corrige, no firma,
+    //      no edita). Si flags está vacío, dilo sin afirmar que el expediente es perfecto: sólo
+    //      que estas reglas no marcaron nada. Si aparece 'drug_allergy:no_disponible', aclara que
+    //      el cruce fármaco-alergia NO pudo ejecutarse (no es una confirmación de seguridad).
     name: "clinical.run_quality_checks",
     description:
       "Ejecuta verificaciones DETERMINISTAS de calidad/seguridad sobre una consulta, receta o " +
-      "paciente y devuelve POSIBLES PROBLEMAS para la revisión del médico (signos vitales fuera " +
+      "paciente y devuelve POSIBLES PROBLEMAS para la revisión del médico: signos vitales fuera " +
       "de rango fisiológico, valores de laboratorio imposibles, nota SOAP incompleta antes de " +
-      "firmar, medicamentos sin dosis/frecuencia). SÓLO LECTURA: no corrige, no escribe ni firma " +
-      "nada. Cada bandera trae regla, severidad, mensaje, el origen (registro/campo) y el umbral " +
-      "citado. Preséntalas como sugerencias a revisar, NUNCA como correcciones automáticas; el " +
+      "firmar, medicamentos sin dosis/frecuencia, CRUCE FÁRMACO-ALERGIA (medicamento que coincide " +
+      "con una alergia documentada) y MEDICAMENTOS DUPLICADOS activos. SÓLO LECTURA: no corrige, " +
+      "no escribe ni firma nada. Cada bandera trae regla, severidad, mensaje, el origen (registro/" +
+      "campo) y el umbral/criterio citado. Si la fuente de farmacología no está disponible, el " +
+      "cruce fármaco-alergia devuelve 'drug_allergy:no_disponible' (no concluye ausencia de " +
+      "alergias). Preséntalas como sugerencias a revisar, NUNCA como correcciones automáticas; el " +
       "médico decide. Devuelve {target_type, target_id, flags, flag_count}.",
     kind: "read",
     inputSchema: {

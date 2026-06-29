@@ -103,6 +103,69 @@ test("run_quality_checks: propaga el 403 del servidor (RBAC quality_checks:read)
   assert.equal(result.status, "error");
 });
 
+test("run_quality_checks (fase 2): pasa por banderas de fármaco-alergia y duplicidad", async (t) => {
+  const body = {
+    target_type: "consultation",
+    target_id: "11111111-1111-1111-1111-111111111111",
+    flags: [
+      {
+        rule_id: "drug_allergy_cross_check",
+        severity: "warning",
+        message: "El medicamento 'Ibuprofeno 400 mg' coincide con una alergia documentada...",
+        source_ref: "prescription_item:a|patient_clinical_item:b:aine",
+        threshold_cited: "Coincidencia por ingrediente/clase resuelta por la fuente de farmacología configurada.",
+      },
+      {
+        rule_id: "duplicate_active_medication",
+        severity: "warning",
+        message: "El medicamento 'Paracetamol' aparece 2 veces...",
+        source_ref: "prescription_item:c, prescription_item:d",
+        threshold_cited: "Mismo medicamento (por nombre normalizado) en más de una indicación activa.",
+      },
+    ],
+    flag_count: 2,
+  };
+  t.mock.method(globalThis, "fetch", async () => jsonResponse(200, body));
+  const resolved = resolveToolCall("clinical.run_quality_checks", {
+    target_type: "consultation", target_id: "11111111-1111-1111-1111-111111111111",
+  });
+  assert.equal(resolved.outcome, "ready");
+  if (resolved.outcome !== "ready") throw new Error("no ready");
+  const result = await executeTool(resolved.tool, resolved.args);
+  assert.equal(result.status, "success");
+  if (result.status === "success") assert.deepEqual(result.content, body);
+});
+
+test("run_quality_checks (fase 2): refleja el marcador 'no disponible' del cruce fármaco-alergia", async (t) => {
+  const body = {
+    target_type: "patient",
+    target_id: "11111111-1111-1111-1111-111111111111",
+    flags: [
+      {
+        rule_id: "drug_allergy_cross_check",
+        severity: "info",
+        message: "Cruce fármaco-alergia NO disponible: no hay fuente de farmacología (MCP)...",
+        source_ref: "drug_allergy:no_disponible",
+        threshold_cited: null,
+      },
+    ],
+    flag_count: 1,
+  };
+  t.mock.method(globalThis, "fetch", async () => jsonResponse(200, body));
+  const resolved = resolveToolCall("clinical.run_quality_checks", {
+    target_type: "patient", target_id: "11111111-1111-1111-1111-111111111111",
+  });
+  assert.equal(resolved.outcome, "ready");
+  if (resolved.outcome !== "ready") throw new Error("no ready");
+  const result = await executeTool(resolved.tool, resolved.args);
+  assert.equal(result.status, "success");
+  if (result.status === "success") {
+    const flag = (result.content as typeof body).flags[0];
+    assert.equal(flag.source_ref, "drug_allergy:no_disponible");
+    assert.equal(flag.severity, "info");
+  }
+});
+
 test("run_quality_checks: es lectura, no se gatea por rol en cliente", () => {
   const tools = listTools();
   const catalog = buildToolCatalog(tools, new Set<string>());

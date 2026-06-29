@@ -50,6 +50,10 @@ x-backend-environment: &backend-environment
   # PRUEBA, no es STT real). Un proveedor real se enchufa cambiando SOLO esta URL por el
   # endpoint HTTP del proveedor (contrato: POST audio -> JSON {"text": ...}).
   STT_PROVIDER_URL: stub://canned
+  # Fuente de farmacología para el cruce fármaco-alergia (quality_checks fase 2). En QA se usa
+  # el STUB local (resuelve un puñado de fármacos de PRUEBA), igual que el STT. Vaciar esta
+  # variable hace que el cruce reporte 'no disponible' (las demás reglas siguen corriendo).
+  PHARMA_MCP_SERVER_URL: stub://pharma
   # Límites generosos para no interferir con los flujos manuales del navegador QA.
   RATE_LIMIT_LOGIN_IP: "100/900"
   RATE_LIMIT_LOGIN_IDENTITY: "100/900"

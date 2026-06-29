@@ -172,6 +172,19 @@ class Settings(BaseSettings):
     stt_api_key: SecretStr | None = None
     stt_timeout_seconds: float = 60.0
 
+    # Fuente de FARMACOLOGÍA para el cruce fármaco-alergia de las verificaciones de
+    # calidad/seguridad (cluster quality_checks, fase 2). CONFIGURABLE y SWAPPABLE igual que
+    # el STT/PubMed: resuelve un nombre de fármaco o alérgeno a sus ingredientes/clases. Si NO
+    # hay URL configurada o no responde, el cruce fármaco-alergia reporta "no disponible"
+    # (NUNCA inventa una coincidencia ni concluye ausencia de alergias). Contrato:
+    # POST <url> JSON {"name": "<fármaco|alérgeno>"} -> {"ingredients": [...], "classes": [...]}
+    # (en minúsculas, normalizado). Para pruebas/QA se admite el esquema sentinela ``stub://``
+    # que resuelve un PUÑADO de fármacos de PRUEBA; un servidor real (p. ej. el MCP de
+    # farmacología) se enchufa cambiando SOLO esta URL. La API key, si la hay, es sensible.
+    pharma_mcp_server_url: str | None = None
+    pharma_mcp_api_key: SecretStr | None = None
+    pharma_mcp_timeout_seconds: float = 10.0
+
     @model_validator(mode="after")
     def _validate_agent_gateway_ticket_ttl(self) -> Self:
         if not (60 <= self.agent_gateway_ticket_ttl_seconds <= 120):

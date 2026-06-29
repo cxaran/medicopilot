@@ -10,14 +10,24 @@ No hay persistencia en la fase 1: las verificaciones se computan al vuelo y se d
 se guarda nada (por eso no hay modelo de BD ni migración).
 """
 
-from backend.app.quality_checks.base import QualityFlag, Severity
+from backend.app.quality_checks.base import QualityFlag, ResolvedDrug, Severity
+from backend.app.quality_checks.pharmacology import (
+    PharmaResolution,
+    pharmacology_source_available,
+    resolve_pharmacology,
+)
 from backend.app.quality_checks.rules import (
+    DRUG_ALLERGY_UNAVAILABLE_REF,
     RULE_CONSULTATION_NOTE_INCOMPLETE,
+    RULE_DRUG_ALLERGY,
+    RULE_DUPLICATE_MEDICATION,
     RULE_LAB_VALUE_NON_PHYSICAL,
     RULE_PRESCRIPTION_ITEM_INCOMPLETE,
     RULE_VITALS_OUT_OF_RANGE,
     VITAL_BOUNDS,
     check_consultation_note,
+    check_drug_allergy,
+    check_duplicate_medications,
     check_lab_result,
     check_prescription_item,
     check_vital_sign,
@@ -25,13 +35,22 @@ from backend.app.quality_checks.rules import (
 
 __all__ = [
     "QualityFlag",
+    "ResolvedDrug",
     "Severity",
+    "PharmaResolution",
+    "pharmacology_source_available",
+    "resolve_pharmacology",
+    "DRUG_ALLERGY_UNAVAILABLE_REF",
     "RULE_CONSULTATION_NOTE_INCOMPLETE",
+    "RULE_DRUG_ALLERGY",
+    "RULE_DUPLICATE_MEDICATION",
     "RULE_LAB_VALUE_NON_PHYSICAL",
     "RULE_PRESCRIPTION_ITEM_INCOMPLETE",
     "RULE_VITALS_OUT_OF_RANGE",
     "VITAL_BOUNDS",
     "check_consultation_note",
+    "check_drug_allergy",
+    "check_duplicate_medications",
     "check_lab_result",
     "check_prescription_item",
     "check_vital_sign",

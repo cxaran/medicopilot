@@ -51,23 +51,37 @@ from backend.app.auth.auth_dependencies import get_current_user  # noqa: E402
 from backend.app.core.database import get_db  # noqa: E402
 from backend.app.main import app  # noqa: E402
 from backend.app.models import Base  # noqa: E402
+from backend.app.core.settings import settings  # noqa: E402
 from backend.app.models.consultation import Consultation  # noqa: E402
 from backend.app.models.doctor import Doctor  # noqa: E402
-from backend.app.models.enums import ConsultationStatus, Sex  # noqa: E402
+from backend.app.models.enums import (  # noqa: E402
+    ClinicalItemStatus,
+    ConsultationStatus,
+    PatientClinicalItemType,
+    Sex,
+)
 from backend.app.models.lab_result import LabResult  # noqa: E402
 from backend.app.models.patient import Patient  # noqa: E402
+from backend.app.models.patient_clinical_item import PatientClinicalItem  # noqa: E402
 from backend.app.models.prescription import Prescription, PrescriptionItem  # noqa: E402
 from backend.app.models.user import User  # noqa: E402
 from backend.app.models.vital_sign import VitalSign  # noqa: E402
 from backend.app.quality_checks import (  # noqa: E402
+    DRUG_ALLERGY_UNAVAILABLE_REF,
     RULE_CONSULTATION_NOTE_INCOMPLETE,
+    RULE_DRUG_ALLERGY,
+    RULE_DUPLICATE_MEDICATION,
     RULE_LAB_VALUE_NON_PHYSICAL,
     RULE_PRESCRIPTION_ITEM_INCOMPLETE,
     RULE_VITALS_OUT_OF_RANGE,
+    ResolvedDrug,
     check_consultation_note,
+    check_drug_allergy,
+    check_duplicate_medications,
     check_lab_result,
     check_prescription_item,
     check_vital_sign,
+    resolve_pharmacology,
 )
 from backend.app.schemas.user import SessionUser  # noqa: E402
 from backend.app.security.catalog import declared_permissions  # noqa: E402
@@ -172,6 +186,67 @@ class QualityRulesUnitTest(unittest.TestCase):
         )
         self.assertEqual(check_prescription_item(complete), [])
 
+    # --- fase 2: cruce fármaco-alergia + duplicidad ---
+
+    def test_drug_allergy_fires_on_overlap_and_silent_when_disjoint(self) -> None:
+        med = ResolvedDrug(ref="prescription_item:1", label="Ibuprofeno 400 mg",
+                           ingredients=frozenset({"ibuprofeno"}), classes=frozenset({"aine"}))
+        allergy_match = ResolvedDrug(ref="patient_clinical_item:1", label="AINEs",
+                                     classes=frozenset({"aine"}))
+        flags = check_drug_allergy([med], [allergy_match], source_available=True)
+        self.assertEqual({f.rule_id for f in flags}, {RULE_DRUG_ALLERGY})
+        self.assertEqual(flags[0].severity.value, "warning")
+        self.assertIn("aine", flags[0].source_ref)  # cita lo coincidente
+        self.assertTrue(flags[0].threshold_cited)
+
+        allergy_other = ResolvedDrug(ref="patient_clinical_item:2", label="Penicilina",
+                                     ingredients=frozenset({"penicilina"}),
+                                     classes=frozenset({"penicilina"}))
+        self.assertEqual(check_drug_allergy([med], [allergy_other], source_available=True), [])
+
+    def test_drug_allergy_reports_no_disponible_when_source_unavailable(self) -> None:
+        med = ResolvedDrug(ref="prescription_item:1", label="X")
+        allergy = ResolvedDrug(ref="patient_clinical_item:1", label="Y")
+        flags = check_drug_allergy([med], [allergy], source_available=False)
+        self.assertEqual(len(flags), 1)
+        self.assertEqual(flags[0].rule_id, RULE_DRUG_ALLERGY)
+        self.assertEqual(flags[0].severity.value, "info")
+        self.assertEqual(flags[0].source_ref, DRUG_ALLERGY_UNAVAILABLE_REF)
+        # Nunca fabrica una coincidencia ni concluye ausencia.
+        self.assertIn("no disponible", flags[0].message_es.lower())
+
+    def test_duplicate_medications_fires_on_dup_and_silent_on_unique(self) -> None:
+        dup = check_duplicate_medications([
+            ("prescription_item:1", "Paracetamol"),
+            ("prescription_item:2", "paracetamol"),  # mismo nombre normalizado
+        ])
+        self.assertEqual({f.rule_id for f in dup}, {RULE_DUPLICATE_MEDICATION})
+        self.assertIn("prescription_item:1", dup[0].source_ref)
+        self.assertIn("prescription_item:2", dup[0].source_ref)
+
+        unique = check_duplicate_medications([
+            ("prescription_item:1", "Paracetamol"),
+            ("prescription_item:2", "Ibuprofeno"),
+        ])
+        self.assertEqual(unique, [])
+
+    def test_pharmacology_resolver_stub_and_unconfigured(self) -> None:
+        original = settings.pharma_mcp_server_url
+        try:
+            settings.pharma_mcp_server_url = "stub://pharma"
+            res = resolve_pharmacology("Ibuprofeno 400 mg")
+            self.assertTrue(res.available)
+            self.assertIn("aine", res.classes)  # resuelve clase del stub
+            # No cubierto por el stub -> disponible pero sin coincidencias (no es 'no disponible').
+            none = resolve_pharmacology("Fármaco Inexistente XYZ")
+            self.assertTrue(none.available)
+            self.assertEqual(none.ingredients, frozenset())
+            settings.pharma_mcp_server_url = None
+            off = resolve_pharmacology("Ibuprofeno")
+            self.assertFalse(off.available)  # sin fuente -> no disponible
+        finally:
+            settings.pharma_mcp_server_url = original
+
 
 @unittest.skipUnless(
     _is_test_url(_TEST_PG_URL),
@@ -236,6 +311,39 @@ class QualityChecksRoutesTest(unittest.TestCase):
                                   measured_at=datetime(2026, 2, 1, 10, 5),
                                   systolic_bp=120, diastolic_bp=80,
                                   temperature_c=Decimal("36.7"), heart_rate_bpm=72))
+            session.flush()
+
+            # --- fase 2: paciente con ALERGIA documentada + receta que coincide y duplica ---
+            cls.patient2_id = uuid.uuid4()
+            cls.pharma_consultation_id = uuid.uuid4()
+            cls.pharma_rx_id = uuid.uuid4()
+            session.add(Patient(id=cls.patient2_id, full_name="Paciente Alergia",
+                                birth_date=date(1990, 5, 5), sex=Sex.FEMALE))
+            session.flush()
+            # Alergia activa a Ibuprofeno (el stub la resuelve a clase 'aine').
+            session.add(PatientClinicalItem(
+                id=uuid.uuid4(), patient_id=cls.patient2_id,
+                item_type=PatientClinicalItemType.ALLERGY, title="Ibuprofeno",
+                status=ClinicalItemStatus.ACTIVE))
+            session.add(Consultation(id=cls.pharma_consultation_id, patient_id=cls.patient2_id,
+                                     attending_doctor_id=cls.doctor_id,
+                                     consulted_at=datetime(2026, 3, 1, 10, 0),
+                                     reason_for_visit="Dolor", status=ConsultationStatus.DRAFT,
+                                     current_illness="x", physical_examination="x",
+                                     clinical_assessment="x", treatment="x"))
+            session.add(Prescription(id=cls.pharma_rx_id,
+                                     consultation_id=cls.pharma_consultation_id))
+            session.flush()
+            # Medicamento que coincide con la alergia (Ibuprofeno) + DUPLICIDAD de Paracetamol.
+            session.add(PrescriptionItem(id=uuid.uuid4(), prescription_id=cls.pharma_rx_id,
+                                         position=1, medication_name="Ibuprofeno 400 mg",
+                                         dose="400 mg", frequency="cada 8 h"))
+            session.add(PrescriptionItem(id=uuid.uuid4(), prescription_id=cls.pharma_rx_id,
+                                         position=2, medication_name="Paracetamol",
+                                         dose="500 mg", frequency="cada 8 h"))
+            session.add(PrescriptionItem(id=uuid.uuid4(), prescription_id=cls.pharma_rx_id,
+                                         position=3, medication_name="paracetamol",
+                                         dose="500 mg", frequency="cada 12 h"))
             session.commit()
 
     @classmethod
@@ -245,6 +353,7 @@ class QualityChecksRoutesTest(unittest.TestCase):
             session.execute(delete(Prescription))
             session.execute(delete(VitalSign))
             session.execute(delete(LabResult))
+            session.execute(delete(PatientClinicalItem))
             session.execute(delete(Consultation))
             session.execute(delete(Doctor))
             session.execute(delete(Patient))
@@ -327,6 +436,62 @@ class QualityChecksRoutesTest(unittest.TestCase):
     def test_requires_quality_checks_read_permission(self) -> None:
         self._as("consultations:read")
         self.assertEqual(self._check("consultation", self.bad_consultation_id).status_code, 403)
+
+    def _with_pharma_stub(self) -> None:
+        original = settings.pharma_mcp_server_url
+        settings.pharma_mcp_server_url = "stub://pharma"
+        self.addCleanup(setattr, settings, "pharma_mcp_server_url", original)
+
+    def _without_pharma(self) -> None:
+        original = settings.pharma_mcp_server_url
+        settings.pharma_mcp_server_url = None
+        self.addCleanup(setattr, settings, "pharma_mcp_server_url", original)
+
+    def test_drug_allergy_flag_with_stub_source(self) -> None:
+        self._with_pharma_stub()
+        body = self._check("consultation", self.pharma_consultation_id).json()
+        allergy_flags = [f for f in body["flags"] if f["rule_id"] == RULE_DRUG_ALLERGY]
+        self.assertEqual(len(allergy_flags), 1, body["flags"])
+        flag = allergy_flags[0]
+        self.assertEqual(flag["severity"], "warning")
+        self.assertIn("Ibuprofeno", flag["message"])
+        self.assertTrue(flag["threshold_cited"])
+        # Cita lo coincidente (ingrediente/clase) en el origen.
+        self.assertIn("aine", flag["source_ref"])
+        self.assertNotEqual(flag["source_ref"], DRUG_ALLERGY_UNAVAILABLE_REF)
+
+    def test_drug_allergy_no_disponible_without_source(self) -> None:
+        self._without_pharma()
+        body = self._check("consultation", self.pharma_consultation_id).json()
+        allergy_flags = [f for f in body["flags"] if f["rule_id"] == RULE_DRUG_ALLERGY]
+        self.assertEqual(len(allergy_flags), 1, body["flags"])
+        self.assertEqual(allergy_flags[0]["source_ref"], DRUG_ALLERGY_UNAVAILABLE_REF)
+        self.assertEqual(allergy_flags[0]["severity"], "info")
+        # Las demás reglas SIGUEN corriendo (p. ej. la duplicidad).
+        rules = {f["rule_id"] for f in body["flags"]}
+        self.assertIn(RULE_DUPLICATE_MEDICATION, rules)
+
+    def test_duplicate_medications_flag(self) -> None:
+        self._without_pharma()
+        body = self._check("consultation", self.pharma_consultation_id).json()
+        dup = [f for f in body["flags"] if f["rule_id"] == RULE_DUPLICATE_MEDICATION]
+        self.assertEqual(len(dup), 1, body["flags"])
+        self.assertIn("Paracetamol", dup[0]["message"])
+
+    def test_clean_consultation_has_no_pharma_flags(self) -> None:
+        # La consulta limpia no tiene recetas ni alergias: ninguna regla de fase 2 dispara.
+        self._with_pharma_stub()
+        body = self._check("consultation", self.clean_consultation_id).json()
+        rules = {f["rule_id"] for f in body["flags"]}
+        self.assertNotIn(RULE_DRUG_ALLERGY, rules)
+        self.assertNotIn(RULE_DUPLICATE_MEDICATION, rules)
+
+    def test_patient_target_runs_pharma_rules(self) -> None:
+        self._with_pharma_stub()
+        body = self._check("patient", self.patient2_id).json()
+        rules = {f["rule_id"] for f in body["flags"]}
+        self.assertIn(RULE_DRUG_ALLERGY, rules)
+        self.assertIn(RULE_DUPLICATE_MEDICATION, rules)
 
     def test_check_does_not_mutate_records(self) -> None:
         # Ejecutar la verificación NO debe escribir nada: el borrador sigue siendo borrador,
