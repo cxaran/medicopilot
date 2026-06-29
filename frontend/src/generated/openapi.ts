@@ -1073,6 +1073,26 @@ export interface paths {
         patch: operations["update_doctor_api_v1_doctors__doctor_id__patch"];
         trace?: never;
     };
+    "/api/v1/follow-ups/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Follow Ups Summary
+         * @description Reúne los pendientes de seguimiento del médico. Sólo lectura; no muta nada.
+         */
+        get: operations["get_follow_ups_summary_api_v1_follow_ups_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/institutional-settings": {
         parameters: {
             query?: never;
@@ -4017,6 +4037,36 @@ export interface components {
             /** To */
             to: string;
         };
+        /**
+         * FollowUpSummaryResponse
+         * @description Resumen de pendientes de seguimiento: tres grupos con su conteo y los registros citados.
+         *
+         *     Toda salida es para la REVISIÓN del médico; no es una acción ni una corrección automática.
+         */
+        FollowUpSummaryResponse: {
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+            /**
+             * Appointment Lookback Days
+             * @description Ventana (días) usada para las citas no asistidas/canceladas.
+             */
+            appointment_lookback_days: number;
+            /** Pending Tasks Count */
+            pending_tasks_count: number;
+            /** Pending Tasks */
+            pending_tasks: components["schemas"]["PendingTaskRead"][];
+            /** Missed Appointments Count */
+            missed_appointments_count: number;
+            /** Missed Appointments */
+            missed_appointments: components["schemas"]["MissedAppointmentRead"][];
+            /** Unreviewed Abnormal Labs Count */
+            unreviewed_abnormal_labs_count: number;
+            /** Unreviewed Abnormal Labs */
+            unreviewed_abnormal_labs: components["schemas"]["UnreviewedAbnormalLabRead"][];
+        };
         /** ForgotPasswordRequest */
         ForgotPasswordRequest: {
             /**
@@ -4739,6 +4789,41 @@ export interface components {
             message: string;
         };
         /**
+         * MissedAppointmentRead
+         * @description Una cita reciente a la que el paciente no asistió (no_show) o que se canceló.
+         */
+        MissedAppointmentRead: {
+            /**
+             * Appointment Id
+             * Format: uuid
+             */
+            appointment_id: string;
+            /**
+             * Patient Id
+             * Format: uuid
+             */
+            patient_id: string;
+            /** Patient Label */
+            patient_label?: string | null;
+            /**
+             * Doctor Id
+             * Format: uuid
+             */
+            doctor_id: string;
+            /**
+             * Scheduled At
+             * Format: date-time
+             */
+            scheduled_at: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "no_show" | "cancelled";
+            /** Reason */
+            reason: string;
+        };
+        /**
          * OAuthCompleteRequest
          * @description Callback del flujo OAuth: ``code`` y ``state`` recibidos del proveedor.
          */
@@ -5253,6 +5338,50 @@ export interface components {
             pregnancy_since?: string | null;
             /** Fecha probable de parto */
             estimated_due_date?: string | null;
+        };
+        /**
+         * PendingTaskRead
+         * @description Una tarea clínica abierta (pendiente o vencida) para revisión.
+         */
+        PendingTaskRead: {
+            /**
+             * Task Id
+             * Format: uuid
+             */
+            task_id: string;
+            /** Title */
+            title: string;
+            /**
+             * Patient Id
+             * @description Paciente relacionado con la tarea, si aplica.
+             */
+            patient_id?: string | null;
+            /**
+             * Patient Label
+             * @description Nombre del paciente relacionado, si aplica.
+             */
+            patient_label?: string | null;
+            /**
+             * Priority
+             * @enum {string}
+             */
+            priority: "low" | "medium" | "high";
+            /**
+             * Status
+             * @description Sólo se listan tareas abiertas.
+             * @constant
+             */
+            status: "open";
+            /**
+             * Due At
+             * @description Vencimiento, si aplica.
+             */
+            due_at?: string | null;
+            /**
+             * Overdue
+             * @description True si tiene vencimiento y ya pasó.
+             */
+            overdue: boolean;
         };
         /** PermissionGroupRead */
         PermissionGroupRead: {
@@ -6591,6 +6720,42 @@ export interface components {
         UnlockAccountRequest: {
             /** Token */
             token: string;
+        };
+        /**
+         * UnreviewedAbnormalLabRead
+         * @description Un resultado de laboratorio anormal (fuera de rango) aún sin revisar.
+         */
+        UnreviewedAbnormalLabRead: {
+            /**
+             * Lab Result Id
+             * Format: uuid
+             */
+            lab_result_id: string;
+            /**
+             * Patient Id
+             * Format: uuid
+             */
+            patient_id: string;
+            /** Patient Label */
+            patient_label?: string | null;
+            /** Analyte Name */
+            analyte_name: string;
+            /**
+             * Abnormal Flag
+             * @enum {string}
+             */
+            abnormal_flag: "low" | "high" | "critical";
+            /** Value Numeric */
+            value_numeric?: number | null;
+            /** Value Text */
+            value_text?: string | null;
+            /** Unit */
+            unit?: string | null;
+            /**
+             * Measured At
+             * Format: date-time
+             */
+            measured_at: string;
         };
         /**
          * UnsignedNotesItem
@@ -10097,6 +10262,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DoctorRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_follow_ups_summary_api_v1_follow_ups_summary_get: {
+        parameters: {
+            query?: {
+                appointment_lookback_days?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FollowUpSummaryResponse"];
                 };
             };
             /** @description Validation Error */

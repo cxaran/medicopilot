@@ -40,6 +40,7 @@ _GROUP_LABELS = {
     "clinical_notes": "Notas clínicas",
     "quality_checks": "Verificaciones de calidad/seguridad",
     "medication_reconciliation": "Conciliación de medicación",
+    "follow_ups": "Pendientes de seguimiento",
     "permissions": "Permisos",
 }
 
@@ -71,6 +72,7 @@ def _group_name(group: type[SecurityGroup]) -> str:
         "clinicalnote": "clinical_notes",
         "qualitycheck": "quality_checks",
         "medicationreconciliation": "medication_reconciliation",
+        "followup": "follow_ups",
         "permission": "permissions",
     }.get(singular, singular)
 

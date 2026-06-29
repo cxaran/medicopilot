@@ -1162,6 +1162,49 @@ const TOOLS: ToolDefinition[] = [
     },
   },
   {
+    // FOLLOW-UP & TASKS (gap 57-62). SÓLO LECTURA: FastAPI exige follow_ups:read. Reúne los
+    // pendientes accionables del médico desde modelos YA existentes: tareas clínicas abiertas/
+    // vencidas, citas no asistidas (no_show) o canceladas recientes, y resultados de laboratorio
+    // anormales sin revisar. No corrige, no escribe, no muta; cita el id de cada registro.
+    //
+    // COMPOSICIÓN: presenta los tres grupos como "pendientes para tu revisión" citando el
+    // registro (tarea/cita/laboratorio), el paciente y la fecha. NUNCA actúes sobre ellos (no
+    // marques una tarea como hecha, no revises un laboratorio, no reagendes) salvo que el médico
+    // lo pida, y siempre por las tools de escritura correspondientes. Si un grupo viene vacío,
+    // dilo sin afirmar que no hay nada pendiente en absoluto: sólo que estas reglas no marcaron
+    // nada en la ventana consultada.
+    name: "clinical.list_follow_ups",
+    description:
+      "Reúne los pendientes de seguimiento del médico (SÓLO LECTURA): tareas clínicas abiertas/" +
+      "vencidas, citas no asistidas (no_show) o canceladas recientes, y resultados de laboratorio " +
+      "anormales (low/high/critical) aún sin revisar. Devuelve cada grupo con su conteo y los " +
+      "registros citados (id, paciente, fecha, qué está pendiente). Parámetro opcional " +
+      "appointment_lookback_days (1-365, por defecto 30) acota la ventana de citas. No corrige, " +
+      "no escribe ni cambia nada: preséntalos como pendientes para la REVISIÓN del médico, nunca " +
+      "como acciones automáticas. Solo lectura.",
+    kind: "read",
+    inputSchema: {
+      type: "object",
+      properties: {
+        appointment_lookback_days: {
+          type: "number",
+          description: "Ventana en días (1-365) para las citas no asistidas/canceladas. Opcional.",
+          minimum: 1,
+          maximum: 365,
+        },
+      },
+      additionalProperties: false,
+    },
+    execute: (args, ctx) => {
+      const days = args.appointment_lookback_days;
+      const query =
+        days === undefined || days === null
+          ? ""
+          : `?appointment_lookback_days=${encodeURIComponent(String(days))}`;
+      return ctx.api(`/api/v1/follow-ups/summary${query}`);
+    },
+  },
+  {
     // EPIC ESCALAS fase 2: listar los resultados de escalas YA persistidos de un paciente
     // (los borradores que el médico aprobó). Solo lectura; FastAPI exige scale_results:read.
     // Útil para mostrar puntajes previos antes de proponer uno nuevo.
