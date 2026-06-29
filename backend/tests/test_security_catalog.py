@@ -46,6 +46,9 @@ from backend.app.security.groups.consultations import ConsultationPermissions  #
 from backend.app.security.groups.clinical_events import (  # noqa: E402
     ClinicalEventPermissions,
 )
+from backend.app.security.groups.clinical_notes import (  # noqa: E402
+    ClinicalNotePermissions,
+)
 from backend.app.security.groups.clinical_scales import (  # noqa: E402
     ClinicalScalePermissions,
 )
@@ -115,6 +118,7 @@ class SecurityCatalogTest(unittest.TestCase):
                 ClinicalCodePermissions,
                 ClinicalScalePermissions,
                 ScaleResultPermissions,
+                ClinicalNotePermissions,
                 PermissionPermissions,
             ],
         )
@@ -218,6 +222,10 @@ class SecurityCatalogTest(unittest.TestCase):
                 "scale_results:create",
                 "scale_results:update",
                 "scale_results:delete",
+                "clinical_notes:read",
+                "clinical_notes:create",
+                "clinical_notes:update",
+                "clinical_notes:delete",
                 "permissions:read",
             ],
         )

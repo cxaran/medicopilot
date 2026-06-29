@@ -18,6 +18,7 @@ from backend.app.models.appointment import Appointment
 from backend.app.models.clinical_code import ClinicalCode
 from backend.app.models.clinical_document import ClinicalDocument
 from backend.app.models.clinical_event import ClinicalEvent
+from backend.app.models.clinical_note import ClinicalNote
 from backend.app.models.clinical_task import ClinicalTask
 from backend.app.models.consultation import Consultation
 from backend.app.models.consultation_diagnosis import ConsultationDiagnosis
@@ -80,6 +81,11 @@ from backend.app.schemas.clinical_event import (
     ClinicalEventCreate,
     ClinicalEventListItem,
     ClinicalEventUpdate,
+)
+from backend.app.schemas.clinical_note import (
+    ClinicalNoteCreate,
+    ClinicalNoteListItem,
+    ClinicalNoteUpdate,
 )
 from backend.app.schemas.clinical_task import (
     ClinicalTaskCreate,
@@ -157,6 +163,7 @@ from backend.app.schemas.user_admin import (
 from backend.app.security.groups.clinical_codes import ClinicalCodePermissions
 from backend.app.security.groups.clinical_documents import ClinicalDocumentPermissions
 from backend.app.security.groups.clinical_events import ClinicalEventPermissions
+from backend.app.security.groups.clinical_notes import ClinicalNotePermissions
 from backend.app.security.groups.clinical_tasks import ClinicalTaskPermissions
 from backend.app.security.groups.study_orders import StudyOrderPermissions
 from backend.app.security.groups.consultation_diagnoses import (
@@ -432,6 +439,24 @@ SCALE_RESULTS = ResourceQuery(
         in_fields=("id",),
         field_operators={"computed_at": _CREATED_AT_OPERATORS},
         default_sort="-computed_at",
+    ),
+)
+
+CLINICAL_NOTES = ResourceQuery(
+    name="ClinicalNoteQuery",
+    model=ClinicalNote,
+    schema=ClinicalNoteListItem,
+    options=QueryOptions(
+        # ``patient_id``/``consultation_id`` (UUID) y ``status`` (enum no-nativo) por
+        # igualdad: las notas se consultan por paciente o por consulta y se acotan por
+        # estado (draft/approved). ``created_at`` admite rango de calendario. Sin búsqueda
+        # libre (las secciones son texto clínico sensible). Los listados excluyen las
+        # eliminadas (``deleted_at``) vía stmt base en el router.
+        filter_fields=("patient_id", "consultation_id", "status"),
+        sort_fields=("created_at", "updated_at"),
+        in_fields=("id",),
+        field_operators={"created_at": _CREATED_AT_OPERATORS},
+        default_sort="-created_at",
     ),
 )
 
@@ -1317,6 +1342,41 @@ RESOURCE_REGISTRY: tuple[ResourceDefinition, ...] = (
                 confirmation=ConfirmationDef(
                     title="Eliminar resultado de escala",
                     message="El resultado de la escala se dará de baja lógica.",
+                    confirm_label="Eliminar",
+                    destructive=True,
+                ),
+            ),
+        ),
+    ),
+    ResourceDefinition(
+        name="clinical_notes",
+        label="Notas clínicas",
+        api_path="/api/v1/clinical-notes",
+        view=ResourceView.TABLE,
+        read_permission=ClinicalNotePermissions.READ,
+        list_query=CLINICAL_NOTES,
+        list_schema=ClinicalNoteListItem,
+        # A diferencia de scale_results (cuyo insumo JSON no se renderiza en un form), las
+        # secciones SOAP son TEXTO: se exponen como formulario genérico (textarea). El alta
+        # deriva el paciente de la consulta y nace en draft (el cliente no fija patient_id
+        # ni status). El copiloto las compone vía la tool P1 clinical.create_soap_note_draft.
+        create_schema=ClinicalNoteCreate,
+        update_schema=ClinicalNoteUpdate,
+        create_permission=ClinicalNotePermissions.CREATE,
+        update_permission=ClinicalNotePermissions.UPDATE,
+        detail_url_template="/api/v1/clinical-notes/{id}",
+        actions=(
+            ActionDef(
+                name="delete",
+                label="Eliminar",
+                method=HttpMethod.DELETE,
+                url_template="/api/v1/clinical-notes/{id}",
+                scope=ActionScope.ITEM,
+                danger=True,
+                permission=ClinicalNotePermissions.DELETE,
+                confirmation=ConfirmationDef(
+                    title="Eliminar nota clínica",
+                    message="La nota clínica se dará de baja lógica.",
                     confirm_label="Eliminar",
                     destructive=True,
                 ),

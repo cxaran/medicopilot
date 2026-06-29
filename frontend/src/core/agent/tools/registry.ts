@@ -1076,6 +1076,31 @@ const TOOLS: ToolDefinition[] = [
       ),
   },
   {
+    // EPIC DOCS fase 1: listar las notas clínicas (SOAP) ya guardadas de un paciente o
+    // consulta. Solo lectura; FastAPI exige clinical_notes:read.
+    name: "clinical.list_soap_notes",
+    description:
+      "Lista las notas clínicas (SOAP) ya guardadas de un paciente o de una consulta. Se " +
+      "filtran por patient_id, consultation_id y/o status (draft/approved). Cada nota es un " +
+      "borrador que el médico aprueba; no es un documento autofirmado. Solo lectura.",
+    kind: "read",
+    inputSchema: clinicalListSchema({
+      patient_id: PATIENT_FILTER_PROP,
+      consultation_id: CONSULTATION_FILTER_PROP,
+      status: {
+        type: "string",
+        description: "Estado de la nota.",
+        enum: ["draft", "approved"],
+      },
+    }),
+    execute: (args, ctx) =>
+      ctx.api(
+        `/api/v1/clinical-notes${clinicalListQuery(args, {
+          eq: ["patient_id", "consultation_id", "status"],
+        })}`,
+      ),
+  },
+  {
     // Acceso clínico estructurado estilo FHIR: equivalente NATIVO a un MCP-server FHIR
     // (p.ej. wso2/fhir-mcp-server) respetando la AUTORIDAD CLÍNICA. Se ejecuta en el
     // NAVEGADOR con la cookie del médico (ctx.api -> credentials:include); FastAPI valida
@@ -1501,6 +1526,56 @@ const TOOLS: ToolDefinition[] = [
     },
     execute: (args, ctx) =>
       ctx.api(`/api/v1/scale-results`, { method: "POST", body: args as Record<string, unknown> }),
+  },
+  {
+    // EPIC DOCS fase 1: componer una nota SOAP de una consulta y guardarla como BORRADOR que
+    // el médico aprueba (P1). NUNCA se autofinaliza: nace en estado draft.
+    //
+    // COMPOSICIÓN sugerida (todo se fundamenta en los datos REALES de la consulta; nada se
+    // inventa; el médico revisa y aprueba):
+    //   1) Lee la consulta y los datos clínicos relevantes (p. ej. clinical.patient_summary,
+    //      clinical.list_lab_results, clinical.list_diagnoses) para conocer el contenido real.
+    //   2) Redacta las cuatro secciones SOAP fundamentadas en esos datos: S (motivo/
+    //      padecimiento/interrogatorio), O (exploración/hallazgos/laboratorio), A (análisis/
+    //      impresión), P (tratamiento/indicaciones/seguimiento). Si una sección no tiene datos
+    //      de origen, DÉJALA VACÍA — no inventes contenido.
+    //   3) Propón clinical.create_soap_note_draft(consultation_id, S/O/A/P) para aprobación. El
+    //      servidor deriva el paciente de la consulta y guarda la nota como BORRADOR; el médico
+    //      la finaliza. El paciente y el estado NO se envían (los gobierna el servidor).
+    name: "clinical.create_soap_note_draft",
+    description:
+      "Guarda una nota SOAP EN BORRADOR para una consulta, compuesta de sus datos reales " +
+      "(secciones S/O/A/P). Acción de escritura: requiere confirmación explícita del médico " +
+      "antes de guardarse, y la nota queda en BORRADOR (nunca autofirmada/autofinalizada). El " +
+      "servidor deriva el paciente de la consulta; no envíes patient_id ni status. Deja vacía " +
+      "cualquier sección sin datos de origen: no inventes contenido. Debe traer al menos una " +
+      "sección con contenido.",
+    kind: "write",
+    inputSchema: {
+      type: "object",
+      properties: {
+        consultation_id: {
+          type: "string",
+          description: "Id (UUID) de la consulta de la que se compone la nota.",
+          format: "uuid",
+        },
+        subjective: { type: "string", description: "Sección S (Subjetivo). Vacía si no hay datos." },
+        objective: { type: "string", description: "Sección O (Objetivo). Vacía si no hay datos." },
+        assessment: { type: "string", description: "Sección A (Análisis). Vacía si no hay datos." },
+        plan: { type: "string", description: "Sección P (Plan). Vacía si no hay datos." },
+      },
+      required: ["consultation_id"],
+      additionalProperties: false,
+    },
+    approval: {
+      actionType: "create_soap_note_draft",
+      targetResource: "clinical_notes",
+      summarize: (args) =>
+        `Guardar una nota SOAP EN BORRADOR para la consulta ${String(args.consultation_id ?? "—")} ` +
+        `(el médico la revisa y finaliza; no se autofirma).`,
+    },
+    execute: (args, ctx) =>
+      ctx.api(`/api/v1/clinical-notes`, { method: "POST", body: args as Record<string, unknown> }),
   },
   {
     name: "clinical.create_study_order_draft",

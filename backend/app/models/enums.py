@@ -81,6 +81,16 @@ class ConsultationStatus(str, Enum):
     FINALIZED = "finalized"
 
 
+class ClinicalNoteStatus(str, Enum):
+    """Estado de una nota clínica estructurada (p. ej. nota SOAP).
+
+    Una nota se compone a partir de los datos REALES de la consulta y se guarda como
+    ``draft``; NUNCA se finaliza de forma autónoma. El médico la aprueba (``approved``)."""
+
+    DRAFT = "draft"
+    APPROVED = "approved"
+
+
 class ConsultationDiagnosisKind(str, Enum):
     """Tipo clínico de un diagnóstico o impresión diagnóstica de la consulta."""
 

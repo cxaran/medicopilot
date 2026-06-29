@@ -765,6 +765,43 @@ export interface paths {
         patch: operations["update_clinical_event_api_v1_clinical_events__event_id__patch"];
         trace?: never;
     };
+    "/api/v1/clinical-notes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Clinical Notes */
+        get: operations["list_clinical_notes_api_v1_clinical_notes_get"];
+        put?: never;
+        /** Create Clinical Note */
+        post: operations["create_clinical_note_api_v1_clinical_notes_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clinical-notes/{note_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Clinical Note */
+        get: operations["get_clinical_note_api_v1_clinical_notes__note_id__get"];
+        put?: never;
+        post?: never;
+        /** Delete Clinical Note */
+        delete: operations["delete_clinical_note_api_v1_clinical_notes__note_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Clinical Note */
+        patch: operations["update_clinical_note_api_v1_clinical_notes__note_id__patch"];
+        trace?: never;
+    };
     "/api/v1/clinical-scales": {
         parameters: {
             query?: never;
@@ -2904,6 +2941,127 @@ export interface components {
          */
         ClinicalItemStatus: "active" | "inactive" | "resolved" | "suspended";
         /**
+         * ClinicalNoteCreate
+         * @description Alta de una nota SOAP (borrador que el médico aprueba, P1).
+         *
+         *     Sólo se aceptan ``consultation_id`` y las cuatro secciones: el servidor deriva el
+         *     paciente de la consulta y fija ``status='draft'``. Enviar patient_id/status da 422
+         *     (extra forbid). Debe traer al menos una sección con contenido.
+         */
+        ClinicalNoteCreate: {
+            /**
+             * Consulta
+             * Format: uuid
+             * @description Consulta de la que se compone la nota.
+             */
+            consultation_id: string;
+            /** S — Subjetivo */
+            subjective?: string | null;
+            /** O — Objetivo */
+            objective?: string | null;
+            /** A — Análisis */
+            assessment?: string | null;
+            /** P — Plan */
+            plan?: string | null;
+        };
+        /**
+         * ClinicalNoteListItem
+         * @description Versión de listado.
+         *
+         *     Declara los campos de filtro (``patient_id``, ``consultation_id``, ``status``) que el
+         *     motor de query exige presentes en el schema de listado.
+         */
+        ClinicalNoteListItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Paciente
+             * Format: uuid
+             */
+            patient_id: string;
+            /**
+             * Consulta
+             * Format: uuid
+             */
+            consultation_id: string;
+            /** Estado */
+            status: components["schemas"]["ClinicalNoteStatus"];
+            /**
+             * Creada
+             * Format: date-time
+             */
+            created_at: string;
+            /** Actualizada */
+            updated_at?: string | null;
+        };
+        /**
+         * ClinicalNoteRead
+         * @description Representación pública completa de una nota (incluye render Markdown).
+         */
+        ClinicalNoteRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Patient Id
+             * Format: uuid
+             */
+            patient_id: string;
+            /**
+             * Consultation Id
+             * Format: uuid
+             */
+            consultation_id: string;
+            /** Subjective */
+            subjective?: string | null;
+            /** Objective */
+            objective?: string | null;
+            /** Assessment */
+            assessment?: string | null;
+            /** Plan */
+            plan?: string | null;
+            status: components["schemas"]["ClinicalNoteStatus"];
+            /** Content Markdown */
+            content_markdown: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /**
+         * ClinicalNoteStatus
+         * @description Estado de una nota clínica estructurada (p. ej. nota SOAP).
+         *
+         *     Una nota se compone a partir de los datos REALES de la consulta y se guarda como
+         *     ``draft``; NUNCA se finaliza de forma autónoma. El médico la aprueba (``approved``).
+         * @enum {string}
+         */
+        ClinicalNoteStatus: "draft" | "approved";
+        /**
+         * ClinicalNoteUpdate
+         * @description Edición parcial de las secciones de la nota (PATCH).
+         *
+         *     ``consultation_id``, ``status`` y la auditoría no se declaran: enviarlos da 422.
+         */
+        ClinicalNoteUpdate: {
+            /** S — Subjetivo */
+            subjective?: string | null;
+            /** O — Objetivo */
+            objective?: string | null;
+            /** A — Análisis */
+            assessment?: string | null;
+            /** P — Plan */
+            plan?: string | null;
+        };
+        /**
          * ClinicalSeverity
          * @description Severidad clínica reusable cuando aplica a un dato del paciente.
          * @enum {string}
@@ -4429,6 +4587,12 @@ export interface components {
         OffsetPage_ClinicalEventListItem_: {
             /** Items */
             items: components["schemas"]["ClinicalEventListItem"][];
+            pagination: components["schemas"]["OffsetPagination"];
+        };
+        /** OffsetPage[ClinicalNoteListItem] */
+        OffsetPage_ClinicalNoteListItem_: {
+            /** Items */
+            items: components["schemas"]["ClinicalNoteListItem"][];
             pagination: components["schemas"]["OffsetPagination"];
         };
         /** OffsetPage[ClinicalTaskListItem] */
@@ -8401,6 +8565,189 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ClinicalEventRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_clinical_notes_api_v1_clinical_notes_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+                /** @description Campos de orden separados por coma. Use '-' para orden descendente. */
+                sort?: string;
+                patient_id?: string | null;
+                consultation_id?: string | null;
+                status?: components["schemas"]["ClinicalNoteStatus"] | null;
+                id_in?: string[] | null;
+                created_at_on?: string | null;
+                created_at_before?: string | null;
+                created_at_after?: string | null;
+                created_at_from?: string | null;
+                created_at_to?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OffsetPage_ClinicalNoteListItem_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_clinical_note_api_v1_clinical_notes_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClinicalNoteCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClinicalNoteRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_clinical_note_api_v1_clinical_notes__note_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                note_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClinicalNoteRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_clinical_note_api_v1_clinical_notes__note_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                note_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClinicalNoteRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_clinical_note_api_v1_clinical_notes__note_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                note_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClinicalNoteUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClinicalNoteRead"];
                 };
             };
             /** @description Validation Error */

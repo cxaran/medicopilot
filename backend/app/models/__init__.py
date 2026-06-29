@@ -7,6 +7,7 @@ from backend.app.models.base import Base
 from backend.app.models.clinical_code import ClinicalCode
 from backend.app.models.clinical_document import ClinicalDocument
 from backend.app.models.clinical_event import ClinicalEvent
+from backend.app.models.clinical_note import ClinicalNote
 from backend.app.models.clinical_task import ClinicalTask
 from backend.app.models.consultation import Consultation
 from backend.app.models.consultation_ai_output import ConsultationAiOutput
@@ -24,6 +25,7 @@ from backend.app.models.enums import (
     ClinicalEventStatus,
     ClinicalEventType,
     ClinicalItemStatus,
+    ClinicalNoteStatus,
     ClinicalSeverity,
     ClinicalTaskPriority,
     ClinicalTaskStatus,
@@ -75,6 +77,8 @@ __all__ = [
     "ClinicalEventStatus",
     "ClinicalEventType",
     "ClinicalItemStatus",
+    "ClinicalNote",
+    "ClinicalNoteStatus",
     "ClinicalSeverity",
     "ClinicalTask",
     "ClinicalTaskPriority",
