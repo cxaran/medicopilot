@@ -52,6 +52,13 @@ _RESTRICTED_READ_ONLY: set[str] = {
     "clinical_notes:read",
 }
 
+# Persistencia del chat del copiloto (chat-first): leer y crear conversaciones/mensajes. Persistir
+# el hilo NO es una escritura clínica; habilita que el rol Médico tenga historial por paciente.
+_CHAT_PERSISTENCE: set[str] = {
+    "conversations:read", "conversations:create",
+    "messages:read", "messages:create",
+}
+
 # Apoyo / referencia / copiloto: sólo lectura.
 _SUPPORT_READ_ONLY: set[str] = {
     "clinical_scales:read",
@@ -68,7 +75,7 @@ _SUPPORT_READ_ONLY: set[str] = {
 }
 
 _CLINICAL_ROLE_ACCESS: set[str] = (
-    _CREATABLE_CLINICAL | _RESTRICTED_READ_ONLY | _SUPPORT_READ_ONLY
+    _CREATABLE_CLINICAL | _RESTRICTED_READ_ONLY | _SUPPORT_READ_ONLY | _CHAT_PERSISTENCE
 )
 
 

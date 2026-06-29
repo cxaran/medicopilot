@@ -23,7 +23,9 @@ from backend.app.models.clinical_note import ClinicalNote
 from backend.app.models.clinical_task import ClinicalTask
 from backend.app.models.consultation import Consultation
 from backend.app.models.consultation_diagnosis import ConsultationDiagnosis
+from backend.app.models.conversation import Conversation
 from backend.app.models.doctor import Doctor
+from backend.app.models.message import Message
 from backend.app.models.institutional_setting import InstitutionalSetting
 from backend.app.models.lab_result import LabResult
 from backend.app.models.medical_history import MedicalHistoryVersion
@@ -143,6 +145,11 @@ from backend.app.schemas.patient_history_item import (
     PatientHistoryItemUpdate,
 )
 from backend.app.schemas.audit_event import AuditEventListItem
+from backend.app.schemas.conversation import (
+    ConversationCreate,
+    ConversationListItem,
+)
+from backend.app.schemas.message import MessageCreate, MessageListItem
 from backend.app.schemas.patient_immunization import (
     PatientImmunizationCreate,
     PatientImmunizationListItem,
@@ -195,6 +202,10 @@ from backend.app.security.groups.prescriptions import PrescriptionPermissions
 from backend.app.security.groups.doctors import DoctorPermissions
 from backend.app.security.groups.institutional_settings import (
     InstitutionalSettingPermissions,
+)
+from backend.app.security.groups.conversations import (
+    ConversationPermissions,
+    MessagePermissions,
 )
 from backend.app.security.groups.lab_results import LabResultPermissions
 from backend.app.security.groups.patient_clinical_items import (
@@ -400,6 +411,36 @@ PATIENT_IMMUNIZATIONS = ResourceQuery(
         search_fields=("vaccine_name",),
         in_fields=("id",),
         default_sort="-administered_on",
+    ),
+)
+
+CONVERSATIONS = ResourceQuery(
+    name="ConversationQuery",
+    model=Conversation,
+    schema=ConversationListItem,
+    options=QueryOptions(
+        # Chat-first: el hilo se consulta por paciente (``patient_id`` por igualdad); el chat
+        # global (sin paciente) son las conversaciones con patient_id nulo. Orden por fecha
+        # descendente. Los listados excluyen eliminados (``deleted_at``) vía stmt base en el router.
+        filter_fields=("patient_id",),
+        sort_fields=("created_at", "updated_at"),
+        in_fields=("id",),
+        default_sort="-created_at",
+    ),
+)
+
+MESSAGES = ResourceQuery(
+    name="MessageQuery",
+    model=Message,
+    schema=MessageListItem,
+    options=QueryOptions(
+        # Los mensajes se consultan por conversación (``conversation_id`` por igualdad) y,
+        # opcionalmente, por ``role``. Orden por ``sequence_index`` ASCENDENTE (orden del chat).
+        # Los listados excluyen eliminados (``deleted_at``) vía stmt base en el router.
+        filter_fields=("conversation_id", "role"),
+        sort_fields=("sequence_index", "created_at"),
+        in_fields=("id",),
+        default_sort="sequence_index",
     ),
 )
 
@@ -1253,6 +1294,30 @@ RESOURCE_REGISTRY: tuple[ResourceDefinition, ...] = (
                 ),
             ),
         ),
+    ),
+    ResourceDefinition(
+        name="conversations",
+        label="Conversaciones",
+        api_path="/api/v1/conversations",
+        view=ResourceView.TABLE,
+        read_permission=ConversationPermissions.READ,
+        list_query=CONVERSATIONS,
+        list_schema=ConversationListItem,
+        create_schema=ConversationCreate,
+        create_permission=ConversationPermissions.CREATE,
+        detail_url_template="/api/v1/conversations/{id}",
+    ),
+    ResourceDefinition(
+        name="messages",
+        label="Mensajes",
+        api_path="/api/v1/messages",
+        view=ResourceView.TABLE,
+        read_permission=MessagePermissions.READ,
+        list_query=MESSAGES,
+        list_schema=MessageListItem,
+        create_schema=MessageCreate,
+        create_permission=MessagePermissions.CREATE,
+        detail_url_template="/api/v1/messages/{id}",
     ),
     ResourceDefinition(
         name="audit_events",

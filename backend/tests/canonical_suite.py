@@ -30,6 +30,7 @@ BACKEND_CANONICAL_TEST_MODULES = (
     "backend.tests.test_consultations_routes",
     "backend.tests.test_vital_signs_routes",
     "backend.tests.test_consultation_diagnoses_routes",
+    "backend.tests.test_conversations_messages_routes",
     "backend.tests.test_clinical_documents_routes",
     "backend.tests.test_prescriptions_routes",
     "backend.tests.test_appointments_routes",

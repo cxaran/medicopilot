@@ -133,6 +133,21 @@ class AiOutputStatus(str, Enum):
     REJECTED = "rejected"
 
 
+class MessageRole(str, Enum):
+    """Rol del autor de un mensaje en una conversación del copiloto.
+
+    Persiste el hilo de chat (cada paciente = una conversación): el médico (``user``), el
+    asistente (``assistant``), las instrucciones de sistema (``system``) y los resultados de
+    herramientas (``tool``). Enum NO nativo (VARCHAR + CHECK); el valor más largo es
+    ``assistant`` (9). Guardar la transcripción NO es una escritura clínica (no requiere P1);
+    las escrituras clínicas (borradores) siguen su propio camino de aprobación."""
+
+    USER = "user"
+    ASSISTANT = "assistant"
+    SYSTEM = "system"
+    TOOL = "tool"
+
+
 class PrescriptionStatus(str, Enum):
     """Estado operativo de una receta médica."""
 

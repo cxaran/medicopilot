@@ -12,6 +12,7 @@ from backend.app.models.clinical_task import ClinicalTask
 from backend.app.models.consultation import Consultation
 from backend.app.models.consultation_ai_output import ConsultationAiOutput
 from backend.app.models.consultation_diagnosis import ConsultationDiagnosis
+from backend.app.models.conversation import Conversation
 from backend.app.models.doctor import Doctor
 from backend.app.models.enums import (
     ActiveInactiveStatus,
@@ -38,6 +39,7 @@ from backend.app.models.enums import (
     ImmunizationStatus,
     LabResultAbnormalFlag,
     MedicalHistoryVersionStatus,
+    MessageRole,
     PatientClinicalItemType,
     PatientHistoryItemCategory,
     PatientStatus,
@@ -52,6 +54,7 @@ from backend.app.models.institutional_setting import InstitutionalSetting
 from backend.app.models.lab_result import LabResult
 from backend.app.models.medical_history import MedicalHistoryVersion
 from backend.app.models.medication_template import MedicationTemplate
+from backend.app.models.message import Message
 from backend.app.models.patient import Patient
 from backend.app.models.patient_clinical_item import PatientClinicalItem
 from backend.app.models.patient_history_item import PatientHistoryItem
@@ -97,6 +100,7 @@ __all__ = [
     "ConsultationDiagnosis",
     "ConsultationDiagnosisKind",
     "ConsultationStatus",
+    "Conversation",
     "Doctor",
     "FamilyRelationship",
     "ImmunizationRoute",
@@ -107,6 +111,8 @@ __all__ = [
     "MedicalHistoryVersion",
     "MedicalHistoryVersionStatus",
     "MedicationTemplate",
+    "Message",
+    "MessageRole",
     "Patient",
     "PatientClinicalItem",
     "PatientClinicalItemType",

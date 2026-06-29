@@ -46,6 +46,10 @@ from backend.app.security.groups.clinical_documents import (  # noqa: E402
     ClinicalDocumentPermissions,
 )
 from backend.app.security.groups.consultations import ConsultationPermissions  # noqa: E402
+from backend.app.security.groups.conversations import (  # noqa: E402
+    ConversationPermissions,
+    MessagePermissions,
+)
 from backend.app.security.groups.clinical_events import (  # noqa: E402
     ClinicalEventPermissions,
 )
@@ -122,6 +126,8 @@ class SecurityCatalogTest(unittest.TestCase):
                 MedicalHistoryVersionPermissions,
                 ConsultationPermissions,
                 ConsultationDiagnosisPermissions,
+                ConversationPermissions,
+                MessagePermissions,
                 VitalSignPermissions,
                 LabResultPermissions,
                 ClinicalEventPermissions,
@@ -200,6 +206,10 @@ class SecurityCatalogTest(unittest.TestCase):
                 "consultation_diagnoses:create",
                 "consultation_diagnoses:update",
                 "consultation_diagnoses:delete",
+                "conversations:read",
+                "conversations:create",
+                "messages:read",
+                "messages:create",
                 "vital_signs:read",
                 "vital_signs:create",
                 "vital_signs:update",

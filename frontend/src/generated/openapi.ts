@@ -1135,6 +1135,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/conversations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Conversations */
+        get: operations["list_conversations_api_v1_conversations_get"];
+        put?: never;
+        /** Create Conversation */
+        post: operations["create_conversation_api_v1_conversations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/conversations/{item_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Conversation */
+        get: operations["get_conversation_api_v1_conversations__item_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/doctors": {
         parameters: {
             query?: never;
@@ -1170,6 +1205,41 @@ export interface paths {
         head?: never;
         /** Update Doctor */
         patch: operations["update_doctor_api_v1_doctors__doctor_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Messages */
+        get: operations["list_messages_api_v1_messages_get"];
+        put?: never;
+        /** Create Message */
+        post: operations["create_message_api_v1_messages_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/messages/{item_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Message */
+        get: operations["get_message_api_v1_messages__item_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/follow-ups/summary": {
@@ -4111,6 +4181,66 @@ export interface components {
             observations?: string | null;
         };
         /**
+         * ConversationCreate
+         * @description Alta de una conversación del copiloto (chat-first).
+         *
+         *     ``patient_id`` opcional: presente para el chat de un paciente, ausente/nulo para el chat
+         *     global del inicio. Persistir el hilo NO es una escritura clínica.
+         */
+        ConversationCreate: {
+            /**
+             * Paciente
+             * @description Paciente del chat; nulo para el chat global (tareas sin paciente).
+             */
+            patient_id?: string | null;
+            /** Título */
+            title?: string | null;
+        };
+        /**
+         * ConversationListItem
+         * @description Versión de listado compatible con ``ResourceQuery``.
+         */
+        ConversationListItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Paciente */
+            patient_id?: string | null;
+            /** Título */
+            title?: string | null;
+            /**
+             * Creado
+             * Format: date-time
+             */
+            created_at: string;
+            /** Actualizado */
+            updated_at?: string | null;
+        };
+        /**
+         * ConversationRead
+         * @description Representación completa de una conversación.
+         */
+        ConversationRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Patient Id */
+            patient_id?: string | null;
+            /** Title */
+            title?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /**
          * CredentialLeaseRequest
          * @description Solicitud server-to-server de arriendo de credencial (endpoint interno).
          */
@@ -4121,6 +4251,7 @@ export interface components {
              */
             user_id: string;
             provider: components["schemas"]["AiProvider"];
+            credential_type?: components["schemas"]["AiCredentialType"] | null;
         };
         /**
          * CredentialLeaseResponse
@@ -4144,6 +4275,8 @@ export interface components {
             expires_at: string;
             /** Default Model */
             default_model?: string | null;
+            /** Account Id */
+            account_id?: string | null;
         };
         /**
          * DoctorCreate
@@ -5159,11 +5292,112 @@ export interface components {
             /** Estado */
             status?: components["schemas"]["ActiveInactiveStatus"] | null;
         };
+        /**
+         * MessageCreate
+         * @description Alta (append) de un mensaje en una conversación.
+         *
+         *     El índice de orden (``sequence_index``) lo asigna el servidor (máximo + 1 de la conversación);
+         *     el cliente no lo envía. Persistir el mensaje NO es una escritura clínica (no requiere P1).
+         */
+        MessageCreate: {
+            /**
+             * Conversación
+             * Format: uuid
+             * @description Conversación a la que se agrega el mensaje.
+             */
+            conversation_id: string;
+            /**
+             * Rol
+             * @description Rol del autor: user, assistant, system o tool.
+             */
+            role: components["schemas"]["MessageRole"];
+            /**
+             * Contenido
+             * @default
+             */
+            content: string;
+            /**
+             * Payload
+             * @description Payload estructurado opcional (tool calls / metadatos).
+             */
+            payload?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /**
+         * MessageListItem
+         * @description Versión de listado compatible con ``ResourceQuery`` (orden por ``sequence_index``).
+         */
+        MessageListItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Conversación
+             * Format: uuid
+             */
+            conversation_id: string;
+            /** Rol */
+            role: components["schemas"]["MessageRole"];
+            /** Contenido */
+            content: string;
+            /** Orden */
+            sequence_index: number;
+            /**
+             * Creado
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
+         * MessageRead
+         * @description Representación completa de un mensaje.
+         */
+        MessageRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Conversation Id
+             * Format: uuid
+             */
+            conversation_id: string;
+            role: components["schemas"]["MessageRole"];
+            /** Content */
+            content: string;
+            /** Payload */
+            payload?: {
+                [key: string]: unknown;
+            } | null;
+            /** Sequence Index */
+            sequence_index: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
         /** MessageResponse */
         MessageResponse: {
             /** Message */
             message: string;
         };
+        /**
+         * MessageRole
+         * @description Rol del autor de un mensaje en una conversación del copiloto.
+         *
+         *     Persiste el hilo de chat (cada paciente = una conversación): el médico (``user``), el
+         *     asistente (``assistant``), las instrucciones de sistema (``system``) y los resultados de
+         *     herramientas (``tool``). Enum NO nativo (VARCHAR + CHECK); el valor más largo es
+         *     ``assistant`` (9). Guardar la transcripción NO es una escritura clínica (no requiere P1);
+         *     las escrituras clínicas (borradores) siguen su propio camino de aprobación.
+         * @enum {string}
+         */
+        MessageRole: "user" | "assistant" | "system" | "tool";
         /**
          * MissedAppointmentRead
          * @description Una cita reciente a la que el paciente no asistió (no_show) o que se canceló.
@@ -5288,6 +5522,12 @@ export interface components {
             items: components["schemas"]["ConsultationListItem"][];
             pagination: components["schemas"]["OffsetPagination"];
         };
+        /** OffsetPage[ConversationListItem] */
+        OffsetPage_ConversationListItem_: {
+            /** Items */
+            items: components["schemas"]["ConversationListItem"][];
+            pagination: components["schemas"]["OffsetPagination"];
+        };
         /** OffsetPage[DoctorListItem] */
         OffsetPage_DoctorListItem_: {
             /** Items */
@@ -5316,6 +5556,12 @@ export interface components {
         OffsetPage_MedicationTemplateListItem_: {
             /** Items */
             items: components["schemas"]["MedicationTemplateListItem"][];
+            pagination: components["schemas"]["OffsetPagination"];
+        };
+        /** OffsetPage[MessageListItem] */
+        OffsetPage_MessageListItem_: {
+            /** Items */
+            items: components["schemas"]["MessageListItem"][];
             pagination: components["schemas"]["OffsetPagination"];
         };
         /** OffsetPage[PatientClinicalItemListItem] */
@@ -11143,6 +11389,112 @@ export interface operations {
             };
         };
     };
+    list_conversations_api_v1_conversations_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+                /** @description Campos de orden separados por coma. Use '-' para orden descendente. */
+                sort?: string;
+                patient_id?: string | null;
+                id_in?: string[] | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OffsetPage_ConversationListItem_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_conversation_api_v1_conversations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConversationCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_conversation_api_v1_conversations__item_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_doctors_api_v1_doctors_get: {
         parameters: {
             query?: {
@@ -11320,6 +11672,113 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DoctorRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_messages_api_v1_messages_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+                /** @description Campos de orden separados por coma. Use '-' para orden descendente. */
+                sort?: string;
+                conversation_id?: string | null;
+                role?: components["schemas"]["MessageRole"] | null;
+                id_in?: string[] | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OffsetPage_MessageListItem_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_message_api_v1_messages_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MessageCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MessageRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_message_api_v1_messages__item_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MessageRead"];
                 };
             };
             /** @description Validation Error */

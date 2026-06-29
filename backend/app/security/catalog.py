@@ -10,6 +10,10 @@ from backend.app.security.groups.consultation_diagnoses import (
     ConsultationDiagnosisPermissions,
 )
 from backend.app.security.groups.consultations import ConsultationPermissions
+from backend.app.security.groups.conversations import (
+    ConversationPermissions,
+    MessagePermissions,
+)
 from backend.app.security.groups.doctors import DoctorPermissions
 from backend.app.security.groups.follow_ups import FollowUpPermissions
 from backend.app.security.groups.institutional_settings import (
@@ -60,6 +64,8 @@ SECURITY_GROUPS: list[type[SecurityGroup]] = [
     MedicalHistoryVersionPermissions,
     ConsultationPermissions,
     ConsultationDiagnosisPermissions,
+    ConversationPermissions,
+    MessagePermissions,
     VitalSignPermissions,
     LabResultPermissions,
     ClinicalEventPermissions,

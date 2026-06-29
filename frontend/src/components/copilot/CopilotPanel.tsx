@@ -118,7 +118,7 @@ interface AttachedImage {
   name: string;
 }
 
-interface ChatMessage {
+export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   text: string;
@@ -212,6 +212,8 @@ export function CopilotPanel({
   activeContext: controlledContext,
   onActiveContextChange,
   hideContextPicker = false,
+  initialMessages,
+  onMessagesChange,
 }: Readonly<{
   // Contexto clínico activo CONTROLADO por el host (p. ej. el shell chat-first: paciente=chat).
   // Si se omite (uso independiente en /copilot), el panel lo gestiona internamente como antes.
@@ -219,6 +221,13 @@ export function CopilotPanel({
   onActiveContextChange?: (context: ActiveClinicalContext | null) => void;
   // Oculta el selector interno cuando el host ya ofrece la selección de paciente (evita duplicarlo).
   hideContextPicker?: boolean;
+  // PERSISTENCIA DEL HILO (MP-CTRL-0123): historial inicial con el que SEMBRAR el transcript al
+  // abrir un chat (mensajes ya persistidos del backend). El host remonta el panel con ``key`` por
+  // conversación, así el sembrado se reaplica al cambiar de chat. Si se omite, arranca vacío.
+  initialMessages?: readonly ChatMessage[];
+  // Notifica al host el transcript completo en cada cambio, para que persista los mensajes nuevos
+  // (append). Persistir el transcript NO es una escritura clínica (no pasa por P1).
+  onMessagesChange?: (messages: readonly ChatMessage[]) => void;
 }> = {}) {
   const [status, setStatus] = useState<ConnectionStatus>("idle");
   // Estado de la máquina de reconexión (resiliencia del WS). Se refleja en la UI; el ref es la
@@ -231,7 +240,11 @@ export function CopilotPanel({
   // Esfuerzo de razonamiento NORMALIZADO por turno (P5). Solo se ofrece/envía cuando el modelo
   // negociado soporta el control; default "medium" (se omite en modelos sin razonamiento).
   const [reasoningEffort, setReasoningEffort] = useState<NormalizedReasoningEffort>("medium");
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  // Sembrado con el historial persistido (si lo hay). El host remonta por conversación (key), así
+  // este inicializador se re-evalúa al abrir otro chat. Los ids sembrados son los del backend (uuid).
+  const [messages, setMessages] = useState<ChatMessage[]>(() =>
+    initialMessages ? [...initialMessages] : [],
+  );
   const [turn, setTurn] = useState<TurnState>(initialTurnState());
   const [toolCalls, setToolCalls] = useState<ToolCallView[]>([]);
   const [input, setInput] = useState("");
@@ -343,7 +356,10 @@ export function CopilotPanel({
 
   useEffect(() => {
     messagesRef.current = messages;
-  }, [messages]);
+    // Notifica al host para que persista los mensajes nuevos (append). El host diffea contra los
+    // ids ya persistidos; el sembrado inicial no genera reenvíos (sus ids ya están marcados).
+    onMessagesChange?.(messages);
+  }, [messages, onMessagesChange]);
 
   // Mantiene el ref del contexto activo en sincronía para los handlers del turno (closures).
   useEffect(() => {
