@@ -845,6 +845,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/clinical-notes/referral": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Referral
+         * @description Crea una REFERENCIA o CONTRARREFERENCIA EN BORRADOR, compuesta de la consulta.
+         *
+         *     El destino de una referencia es decisión médica explícita (lo valida el schema): no se
+         *     inventa. El servidor toma de la consulta el paciente y el médico + cédula.
+         */
+        post: operations["create_referral_api_v1_clinical_notes_referral_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/clinical-scales": {
         parameters: {
             query?: never;
@@ -3012,11 +3035,13 @@ export interface components {
          * @description Tipo de documento clínico estructurado almacenado como ``ClinicalNote``.
          *
          *     ``nota_soap`` es la nota SOAP (fase 1); ``constancia`` es la constancia/justificante de
-         *     asistencia; ``incapacidad`` es el justificante de reposo laboral. Todos se componen de
-         *     datos REALES de la consulta y se guardan como borrador (nunca autofirmados).
+         *     asistencia; ``incapacidad`` es el justificante de reposo laboral; ``referencia`` es la carta
+         *     de referencia a otra unidad/especialidad y ``contrarreferencia`` la respuesta de vuelta a la
+         *     unidad que refirió. Todos se componen de datos REALES de la consulta y se guardan como
+         *     borrador (nunca autofirmados).
          * @enum {string}
          */
-        ClinicalNoteKind: "nota_soap" | "constancia" | "incapacidad";
+        ClinicalNoteKind: "nota_soap" | "constancia" | "incapacidad" | "referencia" | "contrarreferencia";
         /**
          * ClinicalNoteListItem
          * @description Versión de listado.
@@ -5465,6 +5490,57 @@ export interface components {
          * @enum {string}
          */
         RecordStatus: "active" | "inactive" | "suspended";
+        /**
+         * ReferralCreate
+         * @description Alta de una referencia o contrarreferencia (borrador P1).
+         *
+         *     Un solo endpoint con discriminador ``kind`` (las dos son direcciones de la misma carta):
+         *     - ``referencia``: requiere ``destination`` (institución/servicio/especialidad — decisión
+         *       explícita; NUNCA se inventa); ``reason`` y ``clinical_summary`` opcionales (compuestos de
+         *       la consulta).
+         *     - ``contrarreferencia``: requiere al menos ``findings`` o ``recommendations``.
+         *     El servidor toma de la consulta la identidad del paciente y el médico + cédula; fija
+         *     ``status='draft'``. No envíes paciente/médico/estado (extra forbid).
+         */
+        ReferralCreate: {
+            /**
+             * Consulta
+             * Format: uuid
+             * @description Consulta de la que se compone la carta.
+             */
+            consultation_id: string;
+            /**
+             * Tipo
+             * @description referencia (envío) o contrarreferencia (respuesta de vuelta).
+             * @enum {string}
+             */
+            kind: "referencia" | "contrarreferencia";
+            /**
+             * Destino
+             * @description Institución/servicio/especialidad destino (obligatorio en referencia).
+             */
+            destination?: string | null;
+            /**
+             * Motivo de la referencia
+             * @description Motivo del envío, si aplica.
+             */
+            reason?: string | null;
+            /**
+             * Resumen clínico
+             * @description Resumen (motivo, hallazgos, diagnóstico presuntivo, estudios/tratamiento).
+             */
+            clinical_summary?: string | null;
+            /**
+             * Hallazgos / lo realizado
+             * @description En contrarreferencia: lo que el especialista hizo/encontró.
+             */
+            findings?: string | null;
+            /**
+             * Recomendaciones / plan
+             * @description En contrarreferencia: recomendaciones/plan para el médico de origen.
+             */
+            recommendations?: string | null;
+        };
         /** RegisterCompleteRequest */
         RegisterCompleteRequest: {
             /** First Name */
@@ -8922,6 +8998,41 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["SickLeaveCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClinicalNoteRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_referral_api_v1_clinical_notes_referral_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReferralCreate"];
             };
         };
         responses: {

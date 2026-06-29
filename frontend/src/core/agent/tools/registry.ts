@@ -1668,6 +1668,79 @@ const TOOLS: ToolDefinition[] = [
       }),
   },
   {
+    // EPIC DOCS fase 3: referencia/contrarreferencia EN BORRADOR. Un solo tool con discriminador
+    // kind ("referencia" = envío a otra unidad/especialidad; "contrarreferencia" = respuesta de
+    // vuelta a quien refirió). El servidor toma de la consulta el paciente y el médico + cédula.
+    //
+    // - referencia: el DESTINO (institución/servicio/especialidad) es una decisión médica
+    //   EXPLÍCITA; NUNCA lo inventes — si no lo tienes, PREGÚNTALO al médico. reason y
+    //   clinical_summary son opcionales (compuestos de la consulta).
+    // - contrarreferencia: requiere al menos hallazgos (findings) o recomendaciones
+    //   (recommendations); no los inventes — si no los tienes, pregúntalos.
+    // Nace en draft (nunca autofirmada).
+    name: "clinical.create_referral_draft",
+    description:
+      "Genera una REFERENCIA (envío a otra unidad/especialidad) o CONTRARREFERENCIA (respuesta de " +
+      "vuelta) EN BORRADOR a partir de una consulta. Acción de escritura: requiere confirmación " +
+      "explícita del médico y queda en BORRADOR (nunca autofirmada). Indica kind ('referencia' o " +
+      "'contrarreferencia'). En 'referencia' el DESTINO es obligatorio (institución/servicio/" +
+      "especialidad): es decisión médica, NUNCA lo inventes — si no lo tienes, pregúntalo. En " +
+      "'contrarreferencia' indica al menos hallazgos o recomendaciones. El servidor toma de la " +
+      "consulta el paciente y el médico + cédula.",
+    kind: "write",
+    inputSchema: {
+      type: "object",
+      properties: {
+        consultation_id: {
+          type: "string",
+          description: "Id (UUID) de la consulta de la que se compone la carta.",
+          format: "uuid",
+        },
+        kind: {
+          type: "string",
+          description: "Tipo de carta: referencia (envío) o contrarreferencia (respuesta de vuelta).",
+          enum: ["referencia", "contrarreferencia"],
+        },
+        destination: {
+          type: "string",
+          description:
+            "Institución/servicio/especialidad destino (OBLIGATORIO en referencia; decisión " +
+            "médica, nunca inventado).",
+        },
+        reason: { type: "string", description: "Motivo de la referencia (opcional)." },
+        clinical_summary: {
+          type: "string",
+          description: "Resumen clínico para la referencia (opcional; compuesto de la consulta).",
+        },
+        findings: {
+          type: "string",
+          description: "En contrarreferencia: hallazgos / lo realizado por el especialista.",
+        },
+        recommendations: {
+          type: "string",
+          description: "En contrarreferencia: recomendaciones/plan para el médico de origen.",
+        },
+      },
+      required: ["consultation_id", "kind"],
+      additionalProperties: false,
+    },
+    approval: {
+      actionType: "create_referral_draft",
+      targetResource: "clinical_notes",
+      summarize: (args) =>
+        args.kind === "contrarreferencia"
+          ? `Generar una contrarreferencia EN BORRADOR para la consulta ${String(args.consultation_id ?? "—")} ` +
+            `(el médico la revisa y firma).`
+          : `Generar una referencia EN BORRADOR a ${String(args.destination ?? "—")} para la consulta ` +
+            `${String(args.consultation_id ?? "—")} (el médico la revisa y firma).`,
+    },
+    execute: (args, ctx) =>
+      ctx.api(`/api/v1/clinical-notes/referral`, {
+        method: "POST",
+        body: args as Record<string, unknown>,
+      }),
+  },
+  {
     name: "clinical.create_study_order_draft",
     description:
       "Crea una orden de estudio/laboratorio EN BORRADOR para un paciente. Acción de escritura: " +

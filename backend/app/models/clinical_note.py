@@ -152,6 +152,10 @@ class ClinicalNote(Base):
             return self._render_constancia()
         if self.kind == ClinicalNoteKind.INCAPACIDAD:
             return self._render_incapacidad()
+        if self.kind == ClinicalNoteKind.REFERENCIA:
+            return self._render_referencia()
+        if self.kind == ClinicalNoteKind.CONTRARREFERENCIA:
+            return self._render_contrarreferencia()
         return self._render_soap()
 
     def _render_soap(self) -> str:
@@ -208,5 +212,41 @@ class ClinicalNote(Base):
                 f"Diagnóstico/motivo: {diagnostico}.",
                 reposo,
                 f"Atendió: **{medico}**, cédula profesional {cedula}.",
+            ]
+        )
+
+    def _render_referencia(self) -> str:
+        d = self.details or {}
+        paciente = d.get("patient_name") or "_(paciente no especificado)_"
+        medico = d.get("physician_name") or "_(médico no especificado)_"
+        cedula = d.get("physician_license") or "_(sin cédula)_"
+        destino = (d.get("destination") or "").strip() or "_(destino no especificado)_"
+        motivo = (d.get("reason") or "").strip()
+        resumen = (d.get("clinical_summary") or "").strip() or "_(sin resumen clínico)_"
+        parts = [
+            "# Referencia médica (borrador)",
+            f"Paciente: **{paciente}**.",
+            f"Se refiere a: **{destino}**.",
+        ]
+        if motivo:
+            parts.append(f"Motivo de la referencia: {motivo}.")
+        parts.append(f"Resumen clínico: {resumen}")
+        parts.append(f"Refiere: **{medico}**, cédula profesional {cedula}.")
+        return "\n\n".join(parts)
+
+    def _render_contrarreferencia(self) -> str:
+        d = self.details or {}
+        paciente = d.get("patient_name") or "_(paciente no especificado)_"
+        medico = d.get("physician_name") or "_(médico no especificado)_"
+        cedula = d.get("physician_license") or "_(sin cédula)_"
+        hallazgos = (d.get("findings") or "").strip() or "_(no especificado)_"
+        recomendaciones = (d.get("recommendations") or "").strip() or "_(no especificado)_"
+        return "\n\n".join(
+            [
+                "# Contrarreferencia médica (borrador)",
+                f"Paciente: **{paciente}**.",
+                f"Hallazgos / lo realizado: {hallazgos}",
+                f"Recomendaciones / plan: {recomendaciones}",
+                f"Responde: **{medico}**, cédula profesional {cedula}.",
             ]
         )

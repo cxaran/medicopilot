@@ -36,6 +36,7 @@ from backend.app.schemas.clinical_note import (
     ClinicalNoteRead,
     ClinicalNoteUpdate,
     MedicalCertificateCreate,
+    ReferralCreate,
     SickLeaveCreate,
 )
 from backend.app.schemas.pagination import OffsetPage
@@ -187,6 +188,55 @@ def create_sick_leave(
         patient_id=consultation.patient_id,
         consultation_id=consultation.id,
         kind=ClinicalNoteKind.INCAPACIDAD,
+        status=ClinicalNoteStatus.DRAFT,
+        details=details,
+        created_by=current_user.id,
+        updated_by=current_user.id,
+    )
+    session.add(note)
+    session.commit()
+    session.refresh(note)
+    return serialize(ClinicalNoteRead, note)
+
+
+@router.post(
+    "/referral",
+    response_model=ClinicalNoteRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_referral(
+    payload: ReferralCreate,
+    session: SessionDep,
+    current_user: CurrentUser,
+    _: ClinicalNotePermissions.CREATE.requiere,
+) -> ClinicalNoteRead:
+    """Crea una REFERENCIA o CONTRARREFERENCIA EN BORRADOR, compuesta de la consulta.
+
+    El destino de una referencia es decisión médica explícita (lo valida el schema): no se
+    inventa. El servidor toma de la consulta el paciente y el médico + cédula.
+    """
+    consultation = _get_active_consultation(session, payload.consultation_id)
+    details = _consultation_snapshot(session, consultation)
+    if payload.kind == "referencia":
+        details.update(
+            {
+                "destination": payload.destination,
+                "reason": payload.reason,
+                "clinical_summary": payload.clinical_summary,
+            }
+        )
+    else:
+        details.update(
+            {
+                "reason": payload.reason,
+                "findings": payload.findings,
+                "recommendations": payload.recommendations,
+            }
+        )
+    note = ClinicalNote(
+        patient_id=consultation.patient_id,
+        consultation_id=consultation.id,
+        kind=ClinicalNoteKind(payload.kind),
         status=ClinicalNoteStatus.DRAFT,
         details=details,
         created_by=current_user.id,

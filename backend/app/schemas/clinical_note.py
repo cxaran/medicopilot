@@ -8,7 +8,7 @@ secciones sin datos de origen quedan vacías (no se inventan). El servidor deriv
 
 import uuid
 from datetime import date, datetime
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import Field, model_validator
 
@@ -111,6 +111,61 @@ class SickLeaveCreate(ApiWriteSchema):
     rest_days: int = Field(
         ge=1, title="Días de reposo", description="Número de días de reposo (decisión médica)."
     )
+
+
+class ReferralCreate(ApiWriteSchema):
+    """Alta de una referencia o contrarreferencia (borrador P1).
+
+    Un solo endpoint con discriminador ``kind`` (las dos son direcciones de la misma carta):
+    - ``referencia``: requiere ``destination`` (institución/servicio/especialidad — decisión
+      explícita; NUNCA se inventa); ``reason`` y ``clinical_summary`` opcionales (compuestos de
+      la consulta).
+    - ``contrarreferencia``: requiere al menos ``findings`` o ``recommendations``.
+    El servidor toma de la consulta la identidad del paciente y el médico + cédula; fija
+    ``status='draft'``. No envíes paciente/médico/estado (extra forbid).
+    """
+
+    consultation_id: uuid.UUID = Field(
+        title="Consulta", description="Consulta de la que se compone la carta."
+    )
+    kind: Literal["referencia", "contrarreferencia"] = Field(
+        title="Tipo", description="referencia (envío) o contrarreferencia (respuesta de vuelta)."
+    )
+    destination: Optional[str] = Field(
+        default=None,
+        title="Destino",
+        description="Institución/servicio/especialidad destino (obligatorio en referencia).",
+    )
+    reason: Optional[str] = Field(
+        default=None, title="Motivo de la referencia", description="Motivo del envío, si aplica."
+    )
+    clinical_summary: Optional[str] = Field(
+        default=None,
+        title="Resumen clínico",
+        description="Resumen (motivo, hallazgos, diagnóstico presuntivo, estudios/tratamiento).",
+    )
+    findings: Optional[str] = Field(
+        default=None,
+        title="Hallazgos / lo realizado",
+        description="En contrarreferencia: lo que el especialista hizo/encontró.",
+    )
+    recommendations: Optional[str] = Field(
+        default=None,
+        title="Recomendaciones / plan",
+        description="En contrarreferencia: recomendaciones/plan para el médico de origen.",
+    )
+
+    @model_validator(mode="after")
+    def validate_by_kind(self) -> "ReferralCreate":
+        if self.kind == "referencia":
+            if not (self.destination and self.destination.strip()):
+                raise ValueError("La referencia requiere el destino (institución/servicio/especialidad)")
+        else:  # contrarreferencia
+            if not _has_content(self.findings, self.recommendations):
+                raise ValueError(
+                    "La contrarreferencia requiere al menos hallazgos o recomendaciones"
+                )
+        return self
 
 
 class ClinicalNoteRead(ApiReadSchema):

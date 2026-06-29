@@ -120,6 +120,31 @@ class ClinicalNotesPermissionsTest(unittest.TestCase):
         self.assertIn("2026-06-01", md)
         self.assertIn("2026-06-03", md)
 
+    def test_markdown_render_referencia(self) -> None:
+        note = ClinicalNote(kind=ClinicalNoteKind.REFERENCIA, details={
+            "patient_name": "Juan Pérez", "destination": "Cardiología, Hospital General",
+            "reason": "Soplo en estudio", "clinical_summary": "Disnea de esfuerzo; ECG normal.",
+            "physician_name": "Dra. House", "physician_license": "12345678"})
+        md = note.content_markdown
+        self.assertIn("# Referencia médica", md)
+        self.assertIn("Juan Pérez", md)
+        self.assertIn("Cardiología, Hospital General", md)
+        self.assertIn("Soplo en estudio", md)
+        self.assertIn("Disnea de esfuerzo", md)
+        self.assertIn("12345678", md)
+
+    def test_markdown_render_contrarreferencia(self) -> None:
+        note = ClinicalNote(kind=ClinicalNoteKind.CONTRARREFERENCIA, details={
+            "patient_name": "Ana López", "findings": "Ecocardiograma sin valvulopatía.",
+            "recommendations": "Alta de cardiología; control con su médico.",
+            "physician_name": "Dr. Wilson", "physician_license": "87654321"})
+        md = note.content_markdown
+        self.assertIn("# Contrarreferencia médica", md)
+        self.assertIn("Ana López", md)
+        self.assertIn("Ecocardiograma sin valvulopatía", md)
+        self.assertIn("Alta de cardiología", md)
+        self.assertIn("Dr. Wilson", md)
+
 
 @unittest.skipUnless(
     _is_test_url(_TEST_PG_URL),
@@ -323,6 +348,66 @@ class ClinicalNotesRoutesTest(unittest.TestCase):
         resp = self.client.post("/api/v1/clinical-notes/medical-certificate",
                                 json={"consultation_id": str(self.consultation_id)})
         self.assertEqual(resp.status_code, 403)
+
+    # --- referencia / contrarreferencia (fase 3) ---
+
+    def test_create_referencia_persists_draft(self) -> None:
+        resp = self.client.post("/api/v1/clinical-notes/referral", json={
+            "consultation_id": str(self.consultation_id), "kind": "referencia",
+            "destination": "Cardiología, Hospital General", "reason": "Soplo en estudio",
+            "clinical_summary": "Disnea de esfuerzo; ECG normal."})
+        self.assertEqual(resp.status_code, 201, resp.text)
+        body = resp.json()
+        self.assertEqual(body["kind"], "referencia")
+        self.assertEqual(body["status"], "draft")  # NUNCA autofinalizada
+        self.assertEqual(body["patient_id"], str(self.patient_id))
+        self.assertEqual(body["details"]["destination"], "Cardiología, Hospital General")
+        self.assertEqual(body["details"]["physician_name"], "Dra. House")
+        self.assertIn("# Referencia médica", body["content_markdown"])
+        self.assertIn("Cardiología, Hospital General", body["content_markdown"])
+
+    def test_create_contrarreferencia_persists_draft(self) -> None:
+        resp = self.client.post("/api/v1/clinical-notes/referral", json={
+            "consultation_id": str(self.consultation_id), "kind": "contrarreferencia",
+            "findings": "Ecocardiograma normal.", "recommendations": "Control con su médico."})
+        self.assertEqual(resp.status_code, 201, resp.text)
+        body = resp.json()
+        self.assertEqual(body["kind"], "contrarreferencia")
+        self.assertEqual(body["status"], "draft")
+        self.assertIn("# Contrarreferencia médica", body["content_markdown"])
+        self.assertIn("Ecocardiograma normal", body["content_markdown"])
+
+    def test_referencia_requires_destination_never_fabricated(self) -> None:
+        # Sin destino -> 422: el destino es decisión explícita; jamás se inventa.
+        resp = self.client.post("/api/v1/clinical-notes/referral", json={
+            "consultation_id": str(self.consultation_id), "kind": "referencia",
+            "reason": "Soplo"})
+        self.assertEqual(resp.status_code, 422, resp.text)
+
+    def test_contrarreferencia_requires_findings_or_recommendations(self) -> None:
+        resp = self.client.post("/api/v1/clinical-notes/referral", json={
+            "consultation_id": str(self.consultation_id), "kind": "contrarreferencia"})
+        self.assertEqual(resp.status_code, 422, resp.text)
+
+    def test_referral_rejects_nonexistent_consultation(self) -> None:
+        resp = self.client.post("/api/v1/clinical-notes/referral", json={
+            "consultation_id": str(uuid.uuid4()), "kind": "referencia", "destination": "X"})
+        self.assertEqual(resp.status_code, 404, resp.text)
+
+    def test_referral_requires_create_permission(self) -> None:
+        self._as("clinical_notes:read")
+        resp = self.client.post("/api/v1/clinical-notes/referral", json={
+            "consultation_id": str(self.consultation_id), "kind": "referencia", "destination": "X"})
+        self.assertEqual(resp.status_code, 403)
+
+    def test_list_filter_by_referral_kinds(self) -> None:
+        self.client.post("/api/v1/clinical-notes/referral", json={
+            "consultation_id": str(self.consultation_id), "kind": "referencia",
+            "destination": "Cardiología"}).raise_for_status()
+        ref = self.client.get(
+            f"/api/v1/clinical-notes?patient_id={self.patient_id}&kind=referencia"
+        ).json()
+        self.assertEqual({i["kind"] for i in ref["items"]}, {"referencia"})
 
     def test_read_requires_read_permission(self) -> None:
         self._as()
