@@ -40,6 +40,7 @@ from backend.app.api.v1.permissions import router as permissions_router
 from backend.app.api.v1.population import router as population_router
 from backend.app.api.v1.prescription_items import router as prescription_items_router
 from backend.app.api.v1.prescriptions import router as prescriptions_router
+from backend.app.api.v1.quality_checks import router as quality_checks_router
 from backend.app.api.v1.reports import router as reports_router
 from backend.app.api.v1.research import router as research_router
 from backend.app.api.v1.resources import router as resources_router
@@ -80,6 +81,7 @@ router.include_router(permissions_router)
 router.include_router(population_router)
 router.include_router(prescription_items_router)
 router.include_router(prescriptions_router)
+router.include_router(quality_checks_router)
 router.include_router(reports_router)
 router.include_router(research_router)
 router.include_router(resources_router)

@@ -1454,6 +1454,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/quality/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Quality Check
+         * @description Ejecuta las verificaciones deterministas sobre el objetivo. Sólo lectura; no muta nada.
+         */
+        post: operations["run_quality_check_api_v1_quality_check_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/reports/activity": {
         parameters: {
             query?: never;
@@ -5471,6 +5491,87 @@ export interface components {
              * @default []
              */
             articles: components["schemas"]["PubMedArticle"][];
+        };
+        /**
+         * QualityCheckRequest
+         * @description Objetivo de la verificación. ``extra=forbid``: no se aceptan campos no declarados.
+         *
+         *     - ``consultation``: revisa la nota SOAP (si está en borrador), sus signos vitales, sus
+         *       resultados de laboratorio y los medicamentos de sus recetas.
+         *     - ``prescription``: revisa los medicamentos de esa receta (dosis/frecuencia).
+         *     - ``patient``: revisa los resultados de laboratorio del paciente (valores no físicos).
+         */
+        QualityCheckRequest: {
+            /**
+             * Tipo de objetivo
+             * @description Qué se verifica: consultation, prescription o patient.
+             * @enum {string}
+             */
+            target_type: "consultation" | "prescription" | "patient";
+            /**
+             * Id del objetivo
+             * Format: uuid
+             * @description Id (UUID) de la consulta, receta o paciente a verificar.
+             */
+            target_id: string;
+        };
+        /**
+         * QualityCheckResponse
+         * @description Resultado de la verificación: el objetivo evaluado y las banderas encontradas.
+         *
+         *     Si ``flags`` está vacío, no se detectaron incidencias con las reglas vigentes (no es una
+         *     garantía de ausencia de problemas: sólo de que estas reglas no marcaron nada).
+         */
+        QualityCheckResponse: {
+            /**
+             * Target Type
+             * @enum {string}
+             */
+            target_type: "consultation" | "prescription" | "patient";
+            /**
+             * Target Id
+             * Format: uuid
+             */
+            target_id: string;
+            /** Flags */
+            flags: components["schemas"]["QualityFlagRead"][];
+            /**
+             * Flag Count
+             * @description Número de banderas devueltas.
+             */
+            flag_count: number;
+        };
+        /**
+         * QualityFlagRead
+         * @description Una posible incidencia detectada, para que el médico la revise (no es una corrección).
+         */
+        QualityFlagRead: {
+            /**
+             * Regla
+             * @description Identificador de la regla que disparó.
+             */
+            rule_id: string;
+            /**
+             * Severidad
+             * @description info o warning; ninguna implica acción automática.
+             * @enum {string}
+             */
+            severity: "info" | "warning";
+            /**
+             * Mensaje
+             * @description Descripción en español del posible problema.
+             */
+            message: string;
+            /**
+             * Origen
+             * @description Registro/campo concreto que disparó la bandera (modelo:id.campo).
+             */
+            source_ref: string;
+            /**
+             * Umbral/criterio citado
+             * @description Umbral o criterio usado, para que el médico lo verifique.
+             */
+            threshold_cited?: string | null;
         };
         /** ReadinessRead */
         ReadinessRead: {
@@ -11512,6 +11613,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PrescriptionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_quality_check_api_v1_quality_check_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QualityCheckRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QualityCheckResponse"];
                 };
             };
             /** @description Validation Error */

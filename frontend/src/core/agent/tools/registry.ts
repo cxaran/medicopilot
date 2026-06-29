@@ -1051,6 +1051,52 @@ const TOOLS: ToolDefinition[] = [
     },
   },
   {
+    // NUEVO CLUSTER — Verificaciones de calidad/seguridad clínica (fase 1). SÓLO LECTURA:
+    // FastAPI exige quality_checks:read. Ejecuta reglas DETERMINISTAS sobre datos existentes y
+    // devuelve banderas que el médico REVISA; no corrige ni escribe nada.
+    //
+    // COMPOSICIÓN (presenta las banderas como SUGERENCIAS de revisión, NUNCA como correcciones):
+    //   1) clinical.run_quality_checks(target_type, target_id) sobre la consulta/receta/paciente.
+    //   2) Presenta las banderas como "posibles problemas para tu revisión" citando el umbral de
+    //      cada una (threshold_cited). El médico decide qué hacer; el agente NO actúa sobre ellas
+    //      (no corrige valores, no firma, no edita). Si flags está vacío, dilo sin afirmar que el
+    //      expediente es perfecto: sólo que estas reglas no marcaron nada.
+    name: "clinical.run_quality_checks",
+    description:
+      "Ejecuta verificaciones DETERMINISTAS de calidad/seguridad sobre una consulta, receta o " +
+      "paciente y devuelve POSIBLES PROBLEMAS para la revisión del médico (signos vitales fuera " +
+      "de rango fisiológico, valores de laboratorio imposibles, nota SOAP incompleta antes de " +
+      "firmar, medicamentos sin dosis/frecuencia). SÓLO LECTURA: no corrige, no escribe ni firma " +
+      "nada. Cada bandera trae regla, severidad, mensaje, el origen (registro/campo) y el umbral " +
+      "citado. Preséntalas como sugerencias a revisar, NUNCA como correcciones automáticas; el " +
+      "médico decide. Devuelve {target_type, target_id, flags, flag_count}.",
+    kind: "read",
+    inputSchema: {
+      type: "object",
+      properties: {
+        target_type: {
+          type: "string",
+          description:
+            "Qué verificar: 'consultation' (nota+vitales+labs+recetas de la consulta), " +
+            "'prescription' (medicamentos de la receta) o 'patient' (labs del paciente).",
+          enum: ["consultation", "prescription", "patient"],
+        },
+        target_id: {
+          type: "string",
+          description: "Id (UUID) de la consulta, receta o paciente a verificar.",
+          format: "uuid",
+        },
+      },
+      required: ["target_type", "target_id"],
+      additionalProperties: false,
+    },
+    execute: (args, ctx) =>
+      ctx.api(`/api/v1/quality/check`, {
+        method: "POST",
+        body: args as Record<string, unknown>,
+      }),
+  },
+  {
     // EPIC ESCALAS fase 2: listar los resultados de escalas YA persistidos de un paciente
     // (los borradores que el médico aprobó). Solo lectura; FastAPI exige scale_results:read.
     // Útil para mostrar puntajes previos antes de proponer uno nuevo.
