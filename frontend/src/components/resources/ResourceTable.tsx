@@ -35,10 +35,10 @@ function SortableHeader({
     <Link
       href={href}
       aria-label={`Ordenar por ${label} (actual: ${described})`}
-      className="inline-flex items-center gap-1 text-slate-600 hover:text-slate-900"
+      className="inline-flex items-center gap-1 text-[var(--tx2)] transition hover:text-[var(--tx)]"
     >
       <span>{label}</span>
-      <span aria-hidden="true" className="text-xs text-slate-400">
+      <span aria-hidden="true" className="text-xs text-[var(--tx3)]">
         {indicator}
       </span>
     </Link>
@@ -85,12 +85,12 @@ export function ResourceTable({
   return (
     <section className="space-y-4">
       <header>
-        <h2 className="text-xl font-semibold text-slate-900">{label}</h2>
+        <h2 className="text-xl font-semibold text-[var(--tx)]">{label}</h2>
       </header>
 
-      <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
-        <table className="min-w-full divide-y divide-slate-200 text-sm">
-          <thead className="bg-slate-50">
+      <div className="overflow-x-auto rounded-[12px] border border-[var(--border)] bg-[var(--panel)] shadow-[var(--soft)]">
+        <table className="min-w-full divide-y divide-[var(--border)] text-sm">
+          <thead className="bg-[var(--panel2)]">
             <tr>
               {columns.map((column) => {
                 const active =
@@ -101,7 +101,7 @@ export function ResourceTable({
                   <th
                     key={column.name}
                     scope="col"
-                    className="px-4 py-3 text-left font-medium text-slate-600"
+                    className="px-4 py-3 text-left text-xs font-semibold text-[var(--tx2)]"
                   >
                     {column.sortable ? (
                       <SortableHeader
@@ -116,18 +116,18 @@ export function ResourceTable({
                 );
               })}
               {hasActions ? (
-                <th scope="col" className="px-4 py-3 text-left font-medium text-slate-600">
+                <th scope="col" className="px-4 py-3 text-left text-xs font-semibold text-[var(--tx2)]">
                   Acciones
                 </th>
               ) : null}
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100">
+          <tbody className="divide-y divide-[var(--border)]">
             {items.length === 0 ? (
               <tr>
                 <td
                   colSpan={totalColumns || 1}
-                  className="px-4 py-8 text-center text-slate-500"
+                  className="px-4 py-8 text-center text-[var(--tx3)]"
                 >
                   No hay registros.
                 </td>
@@ -140,9 +140,9 @@ export function ResourceTable({
                 // backend revalida). enabled_when lo resuelve ResourceRowActions.
                 const rowActions = visibleActionsForRow(actions, row);
                 return (
-                  <tr key={rowIndex} className="hover:bg-slate-50">
+                  <tr key={rowIndex} className="transition hover:bg-[var(--panel2)]">
                     {columns.map((column) => (
-                      <td key={column.name} className="px-4 py-3 text-slate-800">
+                      <td key={column.name} className="px-4 py-3 text-[var(--tx)]">
                         {formatCell(row[column.name], column.type)}
                       </td>
                     ))}
@@ -152,7 +152,7 @@ export function ResourceTable({
                           {id && detailEnabled ? (
                             <Link
                               href={`/resources/${encodeURIComponent(resourceName)}/${encodeURIComponent(id)}`}
-                              className="text-sm font-medium text-slate-700 underline-offset-2 hover:text-slate-900 hover:underline"
+                              className="text-sm font-medium text-[var(--accent-tx)] underline-offset-2 hover:underline"
                             >
                               Ver
                             </Link>
@@ -160,7 +160,7 @@ export function ResourceTable({
                           {id && editEnabled ? (
                             <Link
                               href={itemHref(id, "edit")}
-                              className="text-sm font-medium text-slate-700 underline-offset-2 hover:text-slate-900 hover:underline"
+                              className="text-sm font-medium text-[var(--accent-tx)] underline-offset-2 hover:underline"
                             >
                               Editar
                             </Link>
@@ -170,7 +170,7 @@ export function ResourceTable({
                                 <Link
                                   key={relation.name}
                                   href={itemHref(id, relation.name)}
-                                  className="text-sm font-medium text-slate-700 underline-offset-2 hover:text-slate-900 hover:underline"
+                                  className="text-sm font-medium text-[var(--accent-tx)] underline-offset-2 hover:underline"
                                 >
                                   {relation.label}
                                 </Link>

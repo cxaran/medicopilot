@@ -165,7 +165,7 @@ export function ResourceRowActions({
                 }
               }}
               className={`text-sm font-medium underline-offset-2 hover:underline ${
-                action.danger ? "text-red-700 hover:text-red-800" : "text-slate-700 hover:text-slate-900"
+                action.danger ? "text-[var(--danger)]" : "text-[var(--accent-tx)] hover:text-[var(--tx)]"
               } ${enabled ? "" : "cursor-not-allowed opacity-50 hover:no-underline"}`}
             >
               {action.label}
@@ -174,7 +174,7 @@ export function ResourceRowActions({
         })}
       </div>
       {inlineError ? (
-        <p role="alert" className="mt-1 text-sm text-red-700">
+        <p role="alert" className="mt-1 text-sm text-[var(--danger)]">
           {inlineError}
         </p>
       ) : null}
