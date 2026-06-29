@@ -14,6 +14,7 @@ from backend.app.api.v1.clinical_documents import (
     router as clinical_documents_router,
 )
 from backend.app.api.v1.clinical_events import router as clinical_events_router
+from backend.app.api.v1.clinical_scales import router as clinical_scales_router
 from backend.app.api.v1.clinical_tasks import router as clinical_tasks_router
 from backend.app.api.v1.consultation_diagnoses import (
     router as consultation_diagnoses_router,
@@ -61,6 +62,7 @@ router.include_router(bootstrap_router)
 router.include_router(clinical_codes_router)
 router.include_router(clinical_documents_router)
 router.include_router(clinical_events_router)
+router.include_router(clinical_scales_router)
 router.include_router(clinical_tasks_router)
 router.include_router(consultation_diagnoses_router)
 router.include_router(consultations_router)

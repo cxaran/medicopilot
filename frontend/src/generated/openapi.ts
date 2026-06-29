@@ -765,6 +765,46 @@ export interface paths {
         patch: operations["update_clinical_event_api_v1_clinical_events__event_id__patch"];
         trace?: never;
     };
+    "/api/v1/clinical-scales": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Clinical Scales
+         * @description Lista las escalas registradas con sus insumos requeridos y fuente citada.
+         */
+        get: operations["list_clinical_scales_api_v1_clinical_scales_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clinical-scales/{scale_id}/compute": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Compute Clinical Scale
+         * @description Computa el puntaje de una escala. 422 (nombrando campos) si faltan/invalidan insumos.
+         */
+        post: operations["compute_clinical_scale_api_v1_clinical_scales__scale_id__compute_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/clinical-tasks": {
         parameters: {
             query?: never;
@@ -5533,6 +5573,71 @@ export interface components {
             /** Activo */
             is_active?: boolean | null;
         };
+        /**
+         * ScaleComputeRequest
+         * @description Insumos para computar una escala. TODOS los declarados son obligatorios.
+         */
+        ScaleComputeRequest: {
+            /**
+             * Insumos
+             * @description Mapa clave→valor con todos los insumos requeridos por la escala.
+             */
+            inputs: {
+                [key: string]: unknown;
+            };
+        };
+        /**
+         * ScaleComputeResponse
+         * @description Resultado del cómputo: puntaje, interpretación y fuentes citadas.
+         */
+        ScaleComputeResponse: {
+            /** Scale Id */
+            scale_id: string;
+            /** Score */
+            score: number;
+            /** Interpretation Label */
+            interpretation_label: string;
+            /** Interpretation Detail */
+            interpretation_detail: string;
+            /** Sources */
+            sources: string[];
+        };
+        /**
+         * ScaleDefinitionRead
+         * @description Definición pública de una escala: insumos requeridos y fuente citada.
+         */
+        ScaleDefinitionRead: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+            /** Source */
+            source: string;
+            /** Inputs */
+            inputs: components["schemas"]["ScaleInputSpecRead"][];
+        };
+        /**
+         * ScaleInputSpecRead
+         * @description Especificación de un insumo requerido por una escala.
+         */
+        ScaleInputSpecRead: {
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Type */
+            type: string;
+            /** Description */
+            description?: string | null;
+            /** Allowed Values */
+            allowed_values?: string[] | null;
+            /** Min */
+            min?: number | null;
+            /** Max */
+            max?: number | null;
+        };
         /** SearchCapability */
         SearchCapability: {
             /** Enabled */
@@ -8120,6 +8225,74 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ClinicalEventRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_clinical_scales_api_v1_clinical_scales_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScaleDefinitionRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    compute_clinical_scale_api_v1_clinical_scales__scale_id__compute_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scale_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScaleComputeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScaleComputeResponse"];
                 };
             };
             /** @description Validation Error */

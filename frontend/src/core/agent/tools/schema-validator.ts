@@ -1,15 +1,20 @@
 // Validador mínimo de un subconjunto de JSON Schema, suficiente para validar los
 // argumentos de las tools del agente sin añadir una dependencia pesada. Soporta objetos
-// con propiedades tipadas (string/integer/number/boolean), required, enum, minimum/
+// con propiedades tipadas (string/integer/number/boolean/object), required, enum, minimum/
 // maximum, format:"uuid" y additionalProperties:false.
+//
+// Para propiedades de tipo "object" la validación es SUPERFICIAL: se comprueba que el valor
+// sea un objeto, pero no se recursan sus claves (p. ej. los insumos de una escala clínica,
+// cuya validación estricta vive en el backend, que responde 422 nombrando el campo faltante).
 
 export interface PropSchema {
-  type: "string" | "integer" | "number" | "boolean";
+  type: "string" | "integer" | "number" | "boolean" | "object";
   description?: string;
   enum?: (string | number)[];
   minimum?: number;
   maximum?: number;
   format?: "uuid";
+  additionalProperties?: boolean;
 }
 
 export interface ObjectSchema {
@@ -48,6 +53,13 @@ function checkProp(key: string, prop: PropSchema, value: unknown): string | null
 
   if (prop.type === "boolean") {
     return typeof value === "boolean" ? null : `El campo '${key}' debe ser booleano.`;
+  }
+
+  if (prop.type === "object") {
+    // Validación superficial: debe ser un objeto (no arreglo ni null); no se recursa.
+    return typeof value === "object" && value !== null && !Array.isArray(value)
+      ? null
+      : `El campo '${key}' debe ser un objeto.`;
   }
 
   // string

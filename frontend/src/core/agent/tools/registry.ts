@@ -982,6 +982,75 @@ const TOOLS: ToolDefinition[] = [
     },
   },
   {
+    // EPIC ESCALAS fase 1: descubrir las escalas clínicas validadas y sus insumos requeridos.
+    // Solo lectura; FastAPI exige clinical_scales:read. El cómputo es determinista y citado.
+    //
+    // COMPOSICIÓN sugerida (el puntaje es APOYO A LA DECISIÓN que el médico confirma):
+    //   1) clinical.list_scales() -> elige la escala y LEE sus insumos requeridos (key, tipo,
+    //      valores permitidos).
+    //   2) Reúne TODOS los insumos del expediente/conversación. Si falta alguno, PREGÚNTALO al
+    //      médico; NUNCA lo asumas ni uses un valor por defecto (no hay puntaje parcial).
+    //   3) clinical.compute_scale(scale_id, inputs) -> obtén {score, interpretation_label,
+    //      interpretation_detail, sources}. Presenta el puntaje, la interpretación y CITA las
+    //      fuentes; recuerda que es un apoyo a la decisión, no un diagnóstico.
+    name: "clinical.list_scales",
+    description:
+      "Lista las escalas clínicas validadas disponibles (p. ej. CHA2DS2-VASc, Wells para TVP) " +
+      "con su descripción, fuente citada y los insumos que cada una REQUIERE (key, etiqueta, " +
+      "tipo boolean/enum/number y valores permitidos). Úsala antes de clinical.compute_scale " +
+      "para saber qué datos reunir. El puntaje es apoyo a la decisión que el médico confirma, " +
+      "no un diagnóstico. Solo lectura.",
+    kind: "read",
+    inputSchema: {
+      type: "object",
+      properties: {},
+      additionalProperties: false,
+    },
+    execute: (_args, ctx) => ctx.api(`/api/v1/clinical-scales`),
+  },
+  {
+    // Cómputo determinista de una escala. La validación es estricta en el servidor: si falta o
+    // es inválido un insumo, responde 422 nombrando el campo; en ese caso PREGUNTA el dato al
+    // médico y NO inventes ni asumas valores.
+    name: "clinical.compute_scale",
+    description:
+      "Computa una escala clínica validada (cómputo determinista, sin estado). scale_id es el " +
+      "id de la escala (de clinical.list_scales) e inputs es un objeto con TODOS los insumos " +
+      "requeridos por esa escala. Devuelve {scale_id, score, interpretation_label, " +
+      "interpretation_detail, sources}. Si faltan o son inválidos los insumos, el servidor " +
+      "responde 422 nombrando el campo: en ese caso PREGUNTA el dato al médico, NUNCA lo " +
+      "asumas (no hay puntaje parcial). Presenta el resultado citando las fuentes; es apoyo a " +
+      "la decisión que el médico confirma, no un diagnóstico. Solo lectura (no guarda nada).",
+    kind: "read",
+    inputSchema: {
+      type: "object",
+      properties: {
+        scale_id: {
+          type: "string",
+          description: "Id de la escala a computar (de clinical.list_scales).",
+        },
+        inputs: {
+          type: "object",
+          description:
+            "Objeto clave→valor con TODOS los insumos requeridos por la escala (ver " +
+            "clinical.list_scales). No omitas insumos: si falta uno, pregúntalo.",
+          additionalProperties: true,
+        },
+      },
+      required: ["scale_id", "inputs"],
+      additionalProperties: false,
+    },
+    execute: (args, ctx) => {
+      const id = encodeURIComponent(String(args.scale_id ?? ""));
+      const inputs =
+        args.inputs && typeof args.inputs === "object" ? args.inputs : {};
+      return ctx.api(`/api/v1/clinical-scales/${id}/compute`, {
+        method: "POST",
+        body: { inputs } as Record<string, unknown>,
+      });
+    },
+  },
+  {
     // Acceso clínico estructurado estilo FHIR: equivalente NATIVO a un MCP-server FHIR
     // (p.ej. wso2/fhir-mcp-server) respetando la AUTORIDAD CLÍNICA. Se ejecuta en el
     // NAVEGADOR con la cookie del médico (ctx.api -> credentials:include); FastAPI valida
