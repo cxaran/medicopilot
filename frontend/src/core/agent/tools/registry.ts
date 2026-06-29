@@ -13,6 +13,7 @@ import {
   type DetectedActionsInput,
   type DetectedActionsSpec,
 } from "./detected-actions";
+import { buildTaskPlan, type TaskPlanInput, type TaskPlanSpec } from "./task-plan";
 import {
   searchTools,
   describeTools,
@@ -2882,6 +2883,92 @@ const TOOLS: ToolDefinition[] = [
           typeof args.confirm_prompt === "string"
             ? args.confirm_prompt
             : "Cierre de la consulta revisado:",
+      };
+      if (typeof args.title === "string") spec.title = args.title;
+      return spec;
+    },
+  },
+  {
+    // PLAN DE TAREAS revisable (MP-CTRL-0129, épica conversación→expediente): cuando el agente
+    // detecta pendientes de seguimiento de una conversación/transcripción (agendar control, pedir
+    // laboratorios, llamar al paciente), emite el CONJUNTO de tareas propuestas y esta tool renderiza
+    // un PANEL para que el médico las revise EN GRUPO (aceptar/posponer/rechazar) ANTES de crear
+    // nada. Es ORQUESTACIÓN read-only sobre el camino de creación P1 (clinical.create_task_draft):
+    // reparte por confianza (>=0.8 lista / >=0.5 sugerida / <0.5 descartada), valida contra el
+    // catálogo + RBAC (sin permiso/recurso desconocido = BLOQUEADA con motivo), descarta campos fuera
+    // del esquema (no inventa) y marca los requeridos que faltan. NO guarda nada: al confirmar, el
+    // agente crea las aceptadas TAREA POR TAREA con clinical.create_task_draft (cada una P1, nunca en
+    // lote). La extracción que produce las tareas es del agente.
+    name: "ui.review_task_plan",
+    description:
+      "Renderiza el PANEL de PLAN DE TAREAS para revisar juntas las tareas de seguimiento que " +
+      "detectaste (p. ej. 'agendar control en 2 semanas', 'solicitar laboratorios', 'llamar al " +
+      "paciente'). Indica tasks: lista de { id, label?, confidence (0-1), target_resource? (por " +
+      "defecto clinical_tasks), proposed_values (title/description/due_at/priority/patient_id/" +
+      "status), source_fragment? }, y opcional patient_id/consultation_id. La plataforma reparte por " +
+      "confianza (>=0.8 lista, >=0.5 sugerida, <0.5 descartada), valida contra el catálogo + permisos " +
+      "(sin permiso o recurso desconocido = bloqueada con motivo, no se inventa), descarta campos " +
+      "fuera del esquema y marca los requeridos que falten. NO guarda nada: el médico revisa y al " +
+      "confirmar tú creas las aceptadas UNA POR UNA con clinical.create_task_draft (cada una requiere " +
+      "aprobación P1, nunca en lote). Solo lectura.",
+    kind: "read",
+    inputSchema: PASSTHROUGH_SCHEMA,
+    wireSchema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Título del panel (opcional)." },
+        patient_id: { type: "string", description: "Paciente del plan (opcional)." },
+        consultation_id: { type: "string", description: "Consulta del plan (opcional)." },
+        confirm_label: { type: "string", description: "Etiqueta del botón de confirmación." },
+        confirm_prompt: { type: "string", description: "Encabezado del mensaje de confirmación." },
+        tasks: {
+          type: "array",
+          description: "Tareas de seguimiento detectadas a revisar.",
+          items: {
+            type: "object",
+            properties: {
+              id: { type: "string", description: "Id estable de la tarea." },
+              label: { type: "string", description: "Etiqueta legible de la tarea." },
+              confidence: {
+                type: "number",
+                description: "Confianza de la detección en [0,1].",
+                minimum: 0,
+                maximum: 1,
+              },
+              target_resource: {
+                type: "string",
+                description: "Recurso destino (por defecto clinical_tasks).",
+              },
+              proposed_values: {
+                type: "object",
+                description: "Valores propuestos por campo (title/description/due_at/priority/…).",
+                additionalProperties: true,
+              },
+              source_fragment: { type: "string", description: "Fragmento de origen." },
+            },
+            required: ["id"],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ["tasks"],
+      additionalProperties: false,
+    },
+    execute: async (args, ctx) => {
+      const catalog = await ctx.api<readonly CatalogResourceLike[]>(`/api/v1/resources`);
+      const result = buildTaskPlan(args as unknown as TaskPlanInput, reviewContextFromCatalog(catalog));
+      if (!result.ok) {
+        throw new ToolExecutionError("invalid_task_plan", result.error);
+      }
+      const spec: TaskPlanSpec = {
+        kind: "task_plan",
+        plan: result.plan,
+        confirm_label:
+          typeof args.confirm_label === "string" ? args.confirm_label : "Confirmar plan de tareas",
+        confirm_prompt:
+          typeof args.confirm_prompt === "string"
+            ? args.confirm_prompt
+            : "Plan de tareas de seguimiento revisado:",
       };
       if (typeof args.title === "string") spec.title = args.title;
       return spec;

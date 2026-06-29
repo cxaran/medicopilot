@@ -85,6 +85,8 @@ export interface ReviewContext {
   knownResources: ReadonlySet<string>;
   /** Campos del formulario de creación por recurso (para descartar campos ajenos al esquema). */
   schemaFields?: ReadonlyMap<string, ReadonlySet<string>>;
+  /** Campos REQUERIDOS del formulario de creación por recurso (para marcar lo que falta). */
+  requiredFields?: ReadonlyMap<string, ReadonlySet<string>>;
 }
 
 export type CloseOutResult = { ok: true; plan: CloseOutPlan } | { ok: false; error: string };
@@ -281,13 +283,14 @@ export function buildCloseOutPlan(
 /** Entrada mínima del catálogo de recursos que necesita el seam (subconjunto de ResourceCatalog). */
 export interface CatalogResourceLike {
   name: string;
-  forms?: { create?: { fields?: ReadonlyArray<{ name: string }> } | null } | null;
+  forms?: { create?: { fields?: ReadonlyArray<{ name: string; required?: boolean }> } | null } | null;
 }
 
 /**
  * Deriva el contexto de validación del catálogo de recursos (``/api/v1/resources``), ya proyectado
  * por permiso: ``forms.create`` sólo está presente si el rol puede crear ese recurso (MISMA señal
- * que el gating de tools). Read-only; no infiere permisos ajenos al catálogo.
+ * que el gating de tools). Read-only; no infiere permisos ajenos al catálogo. ``requiredFields``
+ * lista los campos requeridos de la creación (aditivo: 0120 no lo usa; 0129 marca lo que falta).
  */
 export function reviewContextFromCatalog(
   catalog: ReadonlyArray<CatalogResourceLike>,
@@ -295,15 +298,21 @@ export function reviewContextFromCatalog(
   const creatable = new Set<string>();
   const knownResources = new Set<string>();
   const schemaFields = new Map<string, ReadonlySet<string>>();
+  const requiredFields = new Map<string, ReadonlySet<string>>();
   for (const resource of catalog) {
     knownResources.add(resource.name);
     const create = resource.forms?.create;
     if (create) {
       creatable.add(resource.name);
-      schemaFields.set(resource.name, new Set((create.fields ?? []).map((field) => field.name)));
+      const fields = create.fields ?? [];
+      schemaFields.set(resource.name, new Set(fields.map((field) => field.name)));
+      requiredFields.set(
+        resource.name,
+        new Set(fields.filter((field) => field.required).map((field) => field.name)),
+      );
     }
   }
-  return { creatable, knownResources, schemaFields };
+  return { creatable, knownResources, schemaFields, requiredFields };
 }
 
 /** Especificación de UI del panel de cierre (se integra a la unión UiSpec; se pinta en GeneratedUi). */

@@ -26,6 +26,16 @@ import {
   type CloseOutEntry,
   type DetectedActionsSpec,
 } from "@/core/agent/tools/detected-actions";
+import {
+  applyTaskDecision,
+  buildTaskPlanSubmission,
+  defaultDecision,
+  summarizeTasks,
+  type TaskDecision,
+  type TaskDisposition,
+  type TaskPlanEntry,
+  type TaskPlanSpec,
+} from "@/core/agent/tools/task-plan";
 
 // Render seguro de UI generada por el modelo (B9, Parte B): specs declarativas mapeadas a
 // componentes React con los primitivos R2. NUNCA HTML/JS crudo del modelo.
@@ -49,6 +59,9 @@ export function GeneratedUi({
   }
   if (spec.kind === "detected_actions") {
     return <DetectedActionsPanel spec={spec} onSendFollowup={onSendFollowup} />;
+  }
+  if (spec.kind === "task_plan") {
+    return <TaskPlanPanel spec={spec} onSendFollowup={onSendFollowup} />;
   }
   return <ButtonsView spec={spec} onAction={(action) => onSendFollowup(buttonActionToMessage(action))} />;
 }
@@ -642,6 +655,201 @@ function renderValue(value: unknown): string {
   if (value === undefined || value === null) return "—";
   if (typeof value === "string") return value;
   return JSON.stringify(value);
+}
+
+// PLAN DE TAREAS revisable (MP-CTRL-0129). Lista las tareas detectadas con su confianza y los
+// campos que faltan/se ignoran, deja al médico aceptar/posponer/rechazar cada una (las bloqueadas
+// quedan fijas con su motivo), muestra el resumen y, al confirmar, envía un seguimiento para que el
+// agente cree las aceptadas TAREA POR TAREA por la aprobación P1. No escribe nada por sí mismo.
+type TaskPlanDecision = TaskDecision;
+
+const TASK_DISPOSITION_LABEL: Record<TaskDisposition, string> = {
+  ready: "Lista para guardar",
+  suggested: "Sugerida (a confirmar)",
+  discarded: "Descartada",
+  blocked: "Bloqueada",
+};
+
+const TASK_DECISION_OPTIONS: { value: TaskPlanDecision; label: string }[] = [
+  { value: "accept", label: "Aceptar (crear borrador)" },
+  { value: "later", label: "Dejar pendiente" },
+  { value: "reject", label: "Rechazar" },
+];
+
+interface TaskEntryOverride {
+  decision: TaskPlanDecision;
+  edited?: Record<string, string>;
+  editing?: boolean;
+}
+
+function TaskPlanPanel({
+  spec,
+  onSendFollowup,
+}: Readonly<{ spec: TaskPlanSpec; onSendFollowup: (text: string) => void }>) {
+  const [overrides, setOverrides] = useState<Record<string, TaskEntryOverride>>({});
+
+  const resolved: TaskPlanEntry[] = spec.plan.entries.map((entry) => {
+    if (entry.disposition === "blocked") return entry; // bloqueadas no cambian
+    const override = overrides[entry.id];
+    if (!override) return entry;
+    return applyTaskDecision(entry, override.decision, override.edited);
+  });
+  const summary = summarizeTasks(resolved);
+
+  const setDecision = (id: string, decision: TaskPlanDecision): void =>
+    setOverrides((prev) => ({ ...prev, [id]: { ...prev[id], decision } }));
+
+  const toggleEditing = (id: string, fallback: TaskPlanDecision): void =>
+    setOverrides((prev) => {
+      const current = prev[id] ?? { decision: fallback };
+      return { ...prev, [id]: { ...current, editing: !current.editing } };
+    });
+
+  const setField = (entry: TaskPlanEntry, field: string, value: string): void =>
+    setOverrides((prev) => {
+      const current = prev[entry.id] ?? { decision: "accept" as TaskPlanDecision };
+      const base: Record<string, string> = current.edited ?? stringifyValues(entry.values);
+      // Editar implica aceptar: si no, los valores editados no se crearían.
+      return {
+        ...prev,
+        [entry.id]: { ...current, decision: "accept", edited: { ...base, [field]: value } },
+      };
+    });
+
+  return (
+    <div className="flex flex-col gap-3">
+      {spec.title && <div className="text-sm font-semibold text-[var(--tx)]">{spec.title}</div>}
+
+      <div className="rounded-[10px] border border-[var(--border2)] bg-[var(--bg2)] px-3 py-2 text-xs text-[var(--tx2)]">
+        Plan: {summary.ready} a crear · {summary.suggested} pendientes · {summary.discarded}{" "}
+        descartadas · {summary.blocked} bloqueadas
+      </div>
+
+      <div className="flex flex-col gap-2">
+        {spec.plan.entries.map((entry) => (
+          <TaskCard
+            key={entry.id}
+            entry={entry}
+            override={overrides[entry.id]}
+            onDecision={setDecision}
+            onToggleEditing={toggleEditing}
+            onField={setField}
+          />
+        ))}
+      </div>
+
+      <div>
+        <Button
+          type="button"
+          onClick={() => onSendFollowup(buildTaskPlanSubmission(spec.confirm_prompt, resolved))}
+        >
+          {spec.confirm_label}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function TaskCard({
+  entry,
+  override,
+  onDecision,
+  onToggleEditing,
+  onField,
+}: Readonly<{
+  entry: TaskPlanEntry;
+  override: TaskEntryOverride | undefined;
+  onDecision: (id: string, decision: TaskPlanDecision) => void;
+  onToggleEditing: (id: string, fallback: TaskPlanDecision) => void;
+  onField: (entry: TaskPlanEntry, field: string, value: string) => void;
+}>) {
+  const blocked = entry.disposition === "blocked";
+  const fallback = defaultDecision(entry.disposition);
+  const editing = override?.editing ?? false;
+  const decision: TaskPlanDecision = blocked ? "reject" : override?.decision ?? fallback;
+
+  return (
+    <div
+      className={`flex flex-col gap-1 rounded-[10px] border p-2 ${
+        blocked ? "border-[var(--danger)]" : "border-[var(--border2)]"
+      }`}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs font-medium text-[var(--tx)]">{entry.label}</span>
+        <span className="text-[10px] text-[var(--tx2)]">
+          {entry.confidence !== null ? `confianza ${Math.round(entry.confidence * 100)}% · ` : ""}
+          {TASK_DISPOSITION_LABEL[entry.disposition]}
+        </span>
+      </div>
+
+      {entry.source_fragment && (
+        <p className="text-[11px] italic text-[var(--tx2)]">«{entry.source_fragment}»</p>
+      )}
+
+      {blocked ? (
+        <div className="text-[11px] text-[var(--danger)]">
+          {TASK_DISPOSITION_LABEL.blocked}: {entry.reason}
+        </div>
+      ) : (
+        <>
+          <div className="text-[11px] text-[var(--tx2)]">
+            {Object.keys(entry.values).length === 0
+              ? "Sin datos propuestos."
+              : Object.entries(entry.values)
+                  .map(([field, value]) => `${field}: ${renderValue(value)}`)
+                  .join("  ·  ")}
+          </div>
+          {entry.missing_required.length > 0 && (
+            <div className="text-[11px] text-[var(--danger)]">
+              Faltan campos requeridos: {entry.missing_required.join(", ")}
+            </div>
+          )}
+          {entry.dropped_fields.length > 0 && (
+            <div className="text-[11px] text-[var(--tx2)]">
+              Campos ignorados (fuera del esquema): {entry.dropped_fields.join(", ")}
+            </div>
+          )}
+
+          {editing && (
+            <div className="flex flex-col gap-1 rounded-[8px] border border-[var(--border2)] p-2">
+              {Object.entries(entry.values).map(([field, value]) => (
+                <label key={field} className="flex flex-col gap-0.5 text-[11px] text-[var(--tx2)]">
+                  <span>{field}</span>
+                  <Input
+                    value={
+                      override?.edited?.[field] ??
+                      (typeof value === "string" ? value : value == null ? "" : JSON.stringify(value))
+                    }
+                    onChange={(event) => onField(entry, field, event.target.value)}
+                  />
+                </label>
+              ))}
+            </div>
+          )}
+
+          <div className="flex items-center gap-2">
+            <Select
+              value={decision}
+              onChange={(event) => onDecision(entry.id, event.target.value as TaskPlanDecision)}
+            >
+              {TASK_DECISION_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </Select>
+            <button
+              type="button"
+              className="text-[11px] text-[var(--accent)] underline"
+              onClick={() => onToggleEditing(entry.id, fallback)}
+            >
+              {editing ? "Cerrar edición" : "Editar"}
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
 }
 
 function ButtonsView({

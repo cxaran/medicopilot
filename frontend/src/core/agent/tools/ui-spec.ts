@@ -49,13 +49,20 @@ export interface ButtonsSpec {
   buttons: ButtonSpec[];
 }
 
-// La spec de UI DINÁMICA en lista blanca (MP-CTRL-0117) y el panel de CIERRE post-transcripción
-// (MP-CTRL-0120) se integran a la unión: se validan en su propio módulo y se pintan dentro de
-// `GeneratedUi`, sin un renderizador paralelo.
+// La spec de UI DINÁMICA en lista blanca (MP-CTRL-0117), el panel de CIERRE post-transcripción
+// (MP-CTRL-0120) y el PLAN DE TAREAS revisable (MP-CTRL-0129) se integran a la unión: se validan en
+// su propio módulo y se pintan dentro de `GeneratedUi`, sin un renderizador paralelo.
 import type { DynamicFormSpec } from "./dynamic-form";
 import type { DetectedActionsSpec } from "./detected-actions";
+import type { TaskPlanSpec } from "./task-plan";
 
-export type UiSpec = FormSpec | ChartSpec | ButtonsSpec | DynamicFormSpec | DetectedActionsSpec;
+export type UiSpec =
+  | FormSpec
+  | ChartSpec
+  | ButtonsSpec
+  | DynamicFormSpec
+  | DetectedActionsSpec
+  | TaskPlanSpec;
 
 export type ParseResult<T> = { ok: true; spec: T } | { ok: false; error: string };
 
@@ -69,7 +76,8 @@ export function isUiSpec(value: unknown): value is UiSpec {
     kind === "chart" ||
     kind === "buttons" ||
     kind === "dynamic_form" ||
-    kind === "detected_actions"
+    kind === "detected_actions" ||
+    kind === "task_plan"
   );
 }
 
