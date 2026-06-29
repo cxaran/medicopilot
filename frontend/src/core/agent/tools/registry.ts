@@ -1917,6 +1917,45 @@ const TOOLS: ToolDefinition[] = [
       ),
   },
   {
+    // CONVERSACIÓN→EXPEDIENTE (keystone determinista): buscar pacientes existentes por señales
+    // de identidad y devolver candidatos ORDENADOS para que el médico ELIJA. Solo lectura;
+    // FastAPI exige patients:read. Sirve también para DEDUPLICAR antes de crear (has_strong_match
+    // avisa de un posible duplicado). NUNCA abre ni crea un expediente por su cuenta; presenta
+    // 'posibles coincidencias para elegir' con campos seguros (sin CURP/correo/dirección).
+    name: "clinical.search_patients",
+    description:
+      "Busca pacientes EXISTENTES por nombre (difuso, tolera acentos/mayúsculas), teléfono, " +
+      "CURP, fecha de nacimiento o correo, y devuelve POSIBLES COINCIDENCIAS ordenadas por " +
+      "confianza (nivel exacto/fuerte/posible) para que el médico ELIJA una o decida crear una " +
+      "nueva. Úsala ANTES de crear un paciente para detectar duplicados (has_strong_match). Solo " +
+      "lectura: no abre ni crea expedientes; si no hay coincidencia suficiente devuelve vacío. " +
+      "Sólo expone campos seguros (nombre, año de nacimiento, edad, sexo, teléfono enmascarado).",
+    kind: "read",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Nombre o parte del nombre (difuso)." },
+        phone: { type: "string", description: "Teléfono (se compara por dígitos)." },
+        curp: { type: "string", description: "CURP exacta." },
+        birth_date: { type: "string", description: "Fecha de nacimiento (AAAA-MM-DD)." },
+        email: { type: "string", description: "Correo exacto." },
+        limit: { type: "integer", description: "Máximo de candidatos (1-50).", minimum: 1, maximum: 50 },
+      },
+      required: [],
+      additionalProperties: false,
+    },
+    execute: (args, ctx) => {
+      const params = new URLSearchParams();
+      for (const key of ["name", "phone", "curp", "birth_date", "email"]) {
+        const value = args[key];
+        if (typeof value === "string" && value !== "") params.set(key, value);
+      }
+      if (typeof args.limit === "number") params.set("limit", String(args.limit));
+      const qs = params.toString();
+      return ctx.api(`/api/v1/patients/search${qs ? `?${qs}` : ""}`);
+    },
+  },
+  {
     // EPIC DOCS fase 1: componer una nota SOAP de una consulta y guardarla como BORRADOR que
     // el médico aprueba (P1). NUNCA se autofinaliza: nace en estado draft.
     //

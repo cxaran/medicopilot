@@ -1441,6 +1441,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/patients/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search Patients
+         * @description Busca pacientes existentes por señales de identidad y devuelve candidatos ORDENADOS por un
+         *     puntaje determinista, para que el médico ELIJA una coincidencia o cree un expediente nuevo.
+         *
+         *     Sirve también para DEDUPLICAR antes de crear: pasando los datos propuestos (nombre + fecha +
+         *     teléfono/CURP), ``has_strong_match`` indica si ya existe un posible duplicado. Sólo lectura:
+         *     nunca crea ni modifica, y por debajo del umbral devuelve vacío (no fabrica coincidencias).
+         *     Excluye expedientes eliminados y expone únicamente campos seguros para la tarjeta de selección.
+         */
+        get: operations["search_patients_api_v1_patients_search_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/patients/{patient_id}": {
         parameters: {
             query?: never;
@@ -5766,6 +5792,60 @@ export interface components {
             created_at: string;
             /** Updated At */
             updated_at?: string | null;
+        };
+        /**
+         * PatientSearchCandidate
+         * @description Candidato de coincidencia con campos seguros para una tarjeta de selección.
+         */
+        PatientSearchCandidate: {
+            /**
+             * Id del paciente
+             * Format: uuid
+             */
+            id: string;
+            /** Nombre */
+            full_name: string;
+            /** Año de nacimiento */
+            birth_year: number;
+            /** Edad */
+            age: number;
+            /** Sexo */
+            sex: string;
+            /**
+             * Teléfono (enmascarado)
+             * @description Sólo se revelan los últimos dígitos; el resto va enmascarado.
+             */
+            phone_masked?: string | null;
+            /** Puntaje de coincidencia */
+            score: number;
+            /**
+             * Nivel de confianza
+             * @description exacto | fuerte | posible
+             */
+            tier: string;
+            /**
+             * Por qué coincide
+             * @description Señales que coincidieron.
+             */
+            reasons?: string[];
+        };
+        /**
+         * PatientSearchResponse
+         * @description Resultado de la búsqueda: candidatos ordenados por confianza.
+         *
+         *     ``has_strong_match`` resume si hay al menos una coincidencia exacta/fuerte: el flujo de alta
+         *     lo usa para advertir de un posible DUPLICADO antes de crear un expediente nuevo.
+         */
+        PatientSearchResponse: {
+            /** Número de candidatos devueltos */
+            count: number;
+            /**
+             * ¿Hay coincidencia fuerte?
+             * @description Verdadero si algún candidato es de nivel exacto o fuerte (posible duplicado).
+             */
+            has_strong_match: boolean;
+            /** Candidatos */
+            candidates?: components["schemas"]["PatientSearchCandidate"][];
         };
         /**
          * PatientStatus
@@ -12263,6 +12343,50 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PatientRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    search_patients_api_v1_patients_search_get: {
+        parameters: {
+            query?: {
+                /** @description Nombre o parte del nombre (difuso). */
+                name?: string | null;
+                /** @description Teléfono (se compara por dígitos). */
+                phone?: string | null;
+                /** @description CURP exacta. */
+                curp?: string | null;
+                /** @description Fecha de nacimiento (AAAA-MM-DD). */
+                birth_date?: string | null;
+                /** @description Correo exacto. */
+                email?: string | null;
+                /** @description Máximo de candidatos. */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PatientSearchResponse"];
                 };
             };
             /** @description Validation Error */
