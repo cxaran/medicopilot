@@ -103,6 +103,53 @@ test("compute_scale: propaga el 422 del servidor (no fabrica puntaje)", async (t
   if (result.status === "error") assert.equal(result.code, "scale_inputs_invalid");
 });
 
+test("compute_scale (fase 3): computa una escala nueva como qSOFA por el mismo tool genérico", async (t) => {
+  let capturedUrl = "";
+  let capturedBody: unknown = null;
+  t.mock.method(globalThis, "fetch", async (url: unknown, init: RequestInit) => {
+    capturedUrl = String(url);
+    capturedBody = JSON.parse(String(init.body));
+    return jsonResponse(200, {
+      scale_id: "qsofa",
+      score: 3,
+      interpretation_label: "Riesgo alto",
+      interpretation_detail: "Puntaje ≥2.",
+      sources: ["Singer M, et al. Sepsis-3. JAMA. 2016."],
+    });
+  });
+  const inputs = { respiratory_rate: 24, altered_mentation: true, systolic_bp: 90 };
+  const resolved = resolveToolCall("clinical.compute_scale", { scale_id: "qsofa", inputs });
+  assert.equal(resolved.outcome, "ready");
+  if (resolved.outcome !== "ready") throw new Error("no ready");
+  const result = await executeTool(resolved.tool, resolved.args);
+  assert.equal(capturedUrl, "/api/v1/clinical-scales/qsofa/compute");
+  assert.deepEqual(capturedBody, { inputs });
+  assert.equal(result.status, "success");
+  if (result.status === "success") {
+    const body = result.content as { scale_id: string; sources: string[] };
+    assert.equal(body.scale_id, "qsofa");
+    assert.ok(body.sources.some((s) => s.includes("JAMA")));
+  }
+});
+
+test("compute_scale (fase 3): CURB-65 faltando un insumo propaga el 422 (no fabrica puntaje)", async (t) => {
+  const errorBody = {
+    code: "scale_inputs_invalid",
+    message: "Insumos de la escala faltantes o inválidos.",
+    errors: [{ field: "age", message: "Falta el insumo requerido: Edad (años)." }],
+  };
+  t.mock.method(globalThis, "fetch", async () => jsonResponse(422, errorBody));
+  const resolved = resolveToolCall("clinical.compute_scale", {
+    scale_id: "curb_65",
+    inputs: { confusion: true },
+  });
+  assert.equal(resolved.outcome, "ready");
+  if (resolved.outcome !== "ready") throw new Error("no ready");
+  const result = await executeTool(resolved.tool, resolved.args);
+  assert.equal(result.status, "error");
+  if (result.status === "error") assert.equal(result.code, "scale_inputs_invalid");
+});
+
 test("scales: son lecturas, no se gatean por rol en cliente", () => {
   const tools = listTools();
   const catalog = buildToolCatalog(tools, new Set<string>());

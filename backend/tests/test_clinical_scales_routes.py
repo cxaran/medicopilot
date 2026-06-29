@@ -58,9 +58,9 @@ class ClinicalScalesComputeUnitTest(unittest.TestCase):
     def test_permission_declared(self) -> None:
         self.assertIn("clinical_scales:read", declared_permissions())
 
-    def test_registry_has_exactly_the_two_validated_scales(self) -> None:
+    def test_registry_has_exactly_the_validated_scales(self) -> None:
         ids = {scale.id for scale in list_scales()}
-        self.assertEqual(ids, {"cha2ds2_vasc", "wells_dvt"})
+        self.assertEqual(ids, {"cha2ds2_vasc", "wells_dvt", "qsofa", "curb_65"})
 
     def test_cha2ds2_vasc_high_risk_textbook(self) -> None:
         # Mujer de 80 años con hipertensión y diabetes: edad≥75 (2) + sexo femenino (1) +
@@ -165,6 +165,128 @@ class ClinicalScalesComputeUnitTest(unittest.TestCase):
         self.assertEqual(result.score, -1)
         self.assertEqual(result.interpretation_label, "Probabilidad baja")
 
+    # --- fase 3: qSOFA ---
+
+    def test_qsofa_high_risk_textbook(self) -> None:
+        # Sepsis-3 (Singer, JAMA 2016): FR 24 ≥22 (1) + alteración mental (1) + TA sist 90 ≤100 (1)
+        # = 3 -> riesgo alto (≥2).
+        scale = get_scale("qsofa")
+        assert scale is not None
+        result = compute_scale(
+            scale,
+            {"respiratory_rate": 24, "altered_mentation": True, "systolic_bp": 90},
+        )
+        self.assertEqual(result.score, 3)
+        self.assertEqual(result.interpretation_label, "Riesgo alto")
+        self.assertTrue(any("Sepsis-3" in s or "JAMA" in s for s in result.sources))
+
+    def test_qsofa_low_risk_below_two(self) -> None:
+        # Sólo TA sist 95 ≤100 (1); FR 18 (<22) y sin alteración mental = 1 -> riesgo bajo (<2).
+        scale = get_scale("qsofa")
+        assert scale is not None
+        result = compute_scale(
+            scale,
+            {"respiratory_rate": 18, "altered_mentation": False, "systolic_bp": 95},
+        )
+        self.assertEqual(result.score, 1)
+        self.assertEqual(result.interpretation_label, "Riesgo bajo")
+
+    def test_qsofa_boundary_values_count(self) -> None:
+        # Umbrales exactos: FR 22 (≥22 -> 1) y TA sist 100 (≤100 -> 1), sin alteración = 2 -> alto.
+        scale = get_scale("qsofa")
+        assert scale is not None
+        result = compute_scale(
+            scale,
+            {"respiratory_rate": 22, "altered_mentation": False, "systolic_bp": 100},
+        )
+        self.assertEqual(result.score, 2)
+        self.assertEqual(result.interpretation_label, "Riesgo alto")
+
+    # --- fase 3: CURB-65 ---
+
+    def test_curb65_high_risk_textbook(self) -> None:
+        # Lim et al. (Thorax 2003): Confusión (1) + urea 8>7 (1) + FR 32≥30 (1) + SBP 85<90 (1)
+        # + edad 75≥65 (1) = 5 -> riesgo alto.
+        scale = get_scale("curb_65")
+        assert scale is not None
+        result = compute_scale(
+            scale,
+            {
+                "confusion": True,
+                "urea_mmol_l": 8,
+                "respiratory_rate": 32,
+                "systolic_bp": 85,
+                "diastolic_bp": 70,
+                "age": 75,
+            },
+        )
+        self.assertEqual(result.score, 5)
+        self.assertEqual(result.interpretation_label, "Riesgo alto")
+        self.assertTrue(any("Thorax" in s for s in result.sources))
+
+    def test_curb65_intermediate_score_two(self) -> None:
+        # Edad 70≥65 (1) + urea 8>7 (1); resto normal = 2 -> riesgo intermedio.
+        scale = get_scale("curb_65")
+        assert scale is not None
+        result = compute_scale(
+            scale,
+            {
+                "confusion": False,
+                "urea_mmol_l": 8,
+                "respiratory_rate": 18,
+                "systolic_bp": 120,
+                "diastolic_bp": 80,
+                "age": 70,
+            },
+        )
+        self.assertEqual(result.score, 2)
+        self.assertEqual(result.interpretation_label, "Riesgo intermedio")
+
+    def test_curb65_bp_criterion_fires_on_diastolic(self) -> None:
+        # El criterio de TA suma 1 si DBP≤60 aunque la SBP sea normal: DBP 55 (1) = 1 -> bajo (0-1).
+        scale = get_scale("curb_65")
+        assert scale is not None
+        result = compute_scale(
+            scale,
+            {
+                "confusion": False,
+                "urea_mmol_l": 5,
+                "respiratory_rate": 18,
+                "systolic_bp": 120,
+                "diastolic_bp": 55,
+                "age": 40,
+            },
+        )
+        self.assertEqual(result.score, 1)
+        self.assertEqual(result.interpretation_label, "Riesgo bajo")
+
+    def test_curb65_out_of_range_input_rejected(self) -> None:
+        # Edad fuera de rango (max 120) -> rechazada nombrando el campo.
+        scale = get_scale("curb_65")
+        assert scale is not None
+        with self.assertRaises(ScaleValidationError) as ctx:
+            compute_scale(
+                scale,
+                {
+                    "confusion": False,
+                    "urea_mmol_l": 5,
+                    "respiratory_rate": 18,
+                    "systolic_bp": 120,
+                    "diastolic_bp": 80,
+                    "age": 999,
+                },
+            )
+        self.assertIn("age", {item.field for item in ctx.exception.errors})
+
+    def test_qsofa_missing_input_names_field(self) -> None:
+        scale = get_scale("qsofa")
+        assert scale is not None
+        with self.assertRaises(ScaleValidationError) as ctx:
+            compute_scale(scale, {"respiratory_rate": 24})  # faltan los otros dos
+        missing = {item.field for item in ctx.exception.errors}
+        self.assertIn("altered_mentation", missing)
+        self.assertIn("systolic_bp", missing)
+
     def test_missing_input_raises_naming_the_field(self) -> None:
         scale = get_scale("cha2ds2_vasc")
         assert scale is not None
@@ -214,7 +336,7 @@ class ClinicalScalesRoutesTest(unittest.TestCase):
         response = self.client.get("/api/v1/clinical-scales")
         self.assertEqual(response.status_code, 200, response.text)
         scales = {s["id"]: s for s in response.json()}
-        self.assertEqual(set(scales), {"cha2ds2_vasc", "wells_dvt"})
+        self.assertEqual(set(scales), {"cha2ds2_vasc", "wells_dvt", "qsofa", "curb_65"})
         for scale in scales.values():
             self.assertTrue(scale["source"])
             self.assertTrue(scale["inputs"])
@@ -257,6 +379,35 @@ class ClinicalScalesRoutesTest(unittest.TestCase):
         fields = {item["field"] for item in detail["errors"]}
         self.assertIn("age", fields)
         self.assertIn("sex", fields)
+
+    def test_compute_qsofa_route_returns_score_and_source(self) -> None:
+        response = self.client.post(
+            "/api/v1/clinical-scales/qsofa/compute",
+            json={
+                "inputs": {
+                    "respiratory_rate": 24,
+                    "altered_mentation": True,
+                    "systolic_bp": 90,
+                }
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertEqual(body["score"], 3)
+        self.assertEqual(body["interpretation_label"], "Riesgo alto")
+        self.assertTrue(any("JAMA" in s for s in body["sources"]))
+
+    def test_compute_curb65_missing_input_returns_422_naming_field(self) -> None:
+        response = self.client.post(
+            "/api/v1/clinical-scales/curb_65/compute",
+            json={"inputs": {"confusion": True}},
+        )
+        self.assertEqual(response.status_code, 422, response.text)
+        detail = response.json().get("detail", response.json())
+        self.assertEqual(detail["code"], "scale_inputs_invalid")
+        fields = {item["field"] for item in detail["errors"]}
+        self.assertIn("age", fields)
+        self.assertIn("urea_mmol_l", fields)
 
     def test_compute_unknown_scale_returns_404(self) -> None:
         response = self.client.post(
