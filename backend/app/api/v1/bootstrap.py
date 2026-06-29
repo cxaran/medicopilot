@@ -191,6 +191,7 @@ def _group_name(class_name: str) -> str:
         "qualitycheck": "quality_checks",
         "medicationreconciliation": "medication_reconciliation",
         "followup": "follow_ups",
+        "auditevent": "audit_events",
         "permission": "permissions",
     }.get(singular, singular)
 
@@ -226,5 +227,6 @@ def _group_label(group_name: str) -> str:
         "quality_checks": "Verificaciones de calidad/seguridad",
         "medication_reconciliation": "Conciliación de medicación",
         "follow_ups": "Pendientes de seguimiento",
+        "audit_events": "Registros de auditoría",
         "permissions": "Permisos",
     }.get(group_name, group_name.capitalize())

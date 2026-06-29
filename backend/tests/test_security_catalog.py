@@ -33,6 +33,9 @@ from backend.app.security.catalog import SECURITY_GROUPS  # noqa: E402
 from backend.app.security.groups.appointments import (  # noqa: E402
     AppointmentPermissions,
 )
+from backend.app.security.groups.audit_events import (  # noqa: E402
+    AuditEventPermissions,
+)
 from backend.app.security.groups.consultation_diagnoses import (  # noqa: E402
     ConsultationDiagnosisPermissions,
 )
@@ -137,6 +140,7 @@ class SecurityCatalogTest(unittest.TestCase):
                 QualityCheckPermissions,
                 MedicationReconciliationPermissions,
                 FollowUpPermissions,
+                AuditEventPermissions,
                 PermissionPermissions,
             ],
         )
@@ -255,6 +259,7 @@ class SecurityCatalogTest(unittest.TestCase):
                 "quality_checks:read",
                 "medication_reconciliation:read",
                 "follow_ups:read",
+                "audit_events:read",
                 "permissions:read",
             ],
         )

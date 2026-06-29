@@ -342,6 +342,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/audit-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Audit Events */
+        get: operations["list_audit_events_api_v1_audit_events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/audit-events/{event_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Audit Event */
+        get: operations["get_audit_event_api_v1_audit_events__event_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/policy": {
         parameters: {
             query?: never;
@@ -2528,6 +2562,71 @@ export interface components {
             no_show_rate: number;
             /** Cancelled Rate */
             cancelled_rate: number;
+        };
+        /**
+         * AuditEventListItem
+         * @description Versión de listado compatible con ``ResourceQuery``.
+         *
+         *     Sólo campos factuales de la bitácora. ``changed_fields`` no se proyecta en el
+         *     listado (puede ser voluminoso y contener detalle sensible); se ve en el detalle.
+         */
+        AuditEventListItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Fecha y hora
+             * Format: date-time
+             */
+            occurred_at: string;
+            /** Acción */
+            action: string;
+            /** Tipo de entidad */
+            entity_type: string;
+            /**
+             * Entidad
+             * Format: uuid
+             */
+            entity_id: string;
+            /** Usuario */
+            actor_user_id?: string | null;
+            /** Motivo */
+            reason?: string | null;
+        };
+        /**
+         * AuditEventRead
+         * @description Representación completa de un evento de auditoría (sólo lectura).
+         */
+        AuditEventRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Entity Type */
+            entity_type: string;
+            /**
+             * Entity Id
+             * Format: uuid
+             */
+            entity_id: string;
+            /** Action */
+            action: string;
+            /** Actor User Id */
+            actor_user_id?: string | null;
+            /** Changed Fields */
+            changed_fields?: {
+                [key: string]: unknown;
+            } | null;
+            /** Reason */
+            reason?: string | null;
+            /**
+             * Occurred At
+             * Format: date-time
+             */
+            occurred_at: string;
         };
         /**
          * AuthPolicyRead
@@ -4954,6 +5053,12 @@ export interface components {
         OffsetPage_AppointmentListItem_: {
             /** Items */
             items: components["schemas"]["AppointmentListItem"][];
+            pagination: components["schemas"]["OffsetPagination"];
+        };
+        /** OffsetPage[AuditEventListItem] */
+        OffsetPage_AuditEventListItem_: {
+            /** Items */
+            items: components["schemas"]["AuditEventListItem"][];
             pagination: components["schemas"]["OffsetPagination"];
         };
         /** OffsetPage[ClinicalCodeListItem] */
@@ -8423,6 +8528,85 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AppointmentRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_audit_events_api_v1_audit_events_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+                /** @description Campos de orden separados por coma. Use '-' para orden descendente. */
+                sort?: string;
+                actor_user_id?: string | null;
+                action?: string | null;
+                entity_type?: string | null;
+                entity_id?: string | null;
+                id_in?: string[] | null;
+                occurred_at_on?: string | null;
+                occurred_at_before?: string | null;
+                occurred_at_after?: string | null;
+                occurred_at_from?: string | null;
+                occurred_at_to?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OffsetPage_AuditEventListItem_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_audit_event_api_v1_audit_events__event_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                event_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditEventRead"];
                 };
             };
             /** @description Validation Error */

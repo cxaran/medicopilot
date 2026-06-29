@@ -17,6 +17,7 @@ from backend.app.core.settings import settings
 from backend.app.models.appointment import Appointment
 from backend.app.models.clinical_code import ClinicalCode
 from backend.app.models.clinical_document import ClinicalDocument
+from backend.app.models.audit_event import AuditEvent
 from backend.app.models.clinical_event import ClinicalEvent
 from backend.app.models.clinical_note import ClinicalNote
 from backend.app.models.clinical_task import ClinicalTask
@@ -141,6 +142,7 @@ from backend.app.schemas.patient_history_item import (
     PatientHistoryItemListItem,
     PatientHistoryItemUpdate,
 )
+from backend.app.schemas.audit_event import AuditEventListItem
 from backend.app.schemas.patient_immunization import (
     PatientImmunizationCreate,
     PatientImmunizationListItem,
@@ -198,6 +200,7 @@ from backend.app.security.groups.lab_results import LabResultPermissions
 from backend.app.security.groups.patient_clinical_items import (
     PatientClinicalItemPermissions,
 )
+from backend.app.security.groups.audit_events import AuditEventPermissions
 from backend.app.security.groups.patient_history_items import (
     PatientHistoryItemPermissions,
 )
@@ -397,6 +400,24 @@ PATIENT_IMMUNIZATIONS = ResourceQuery(
         search_fields=("vaccine_name",),
         in_fields=("id",),
         default_sort="-administered_on",
+    ),
+)
+
+AUDIT_EVENTS = ResourceQuery(
+    name="AuditEventQuery",
+    model=AuditEvent,
+    schema=AuditEventListItem,
+    options=QueryOptions(
+        # Bitácora append-only (sin baja lógica). Filtros por igualdad: ``actor_user_id``
+        # (quién), ``action`` (qué acción), ``entity_type`` y ``entity_id`` (sobre qué
+        # entidad — así se reconstruye el rastro de un paciente: entity_type=patient +
+        # entity_id). ``occurred_at`` (DateTime) admite rango de calendario. Orden por
+        # fecha descendente por defecto. Sin búsqueda libre (la bitácora no es texto).
+        filter_fields=("actor_user_id", "action", "entity_type", "entity_id"),
+        field_operators={"occurred_at": _CREATED_AT_OPERATORS},
+        sort_fields=("occurred_at",),
+        in_fields=("id",),
+        default_sort="-occurred_at",
     ),
 )
 
@@ -1232,6 +1253,19 @@ RESOURCE_REGISTRY: tuple[ResourceDefinition, ...] = (
                 ),
             ),
         ),
+    ),
+    ResourceDefinition(
+        name="audit_events",
+        label="Registros de auditoría",
+        api_path="/api/v1/audit-events",
+        view=ResourceView.TABLE,
+        # Recurso SÓLO LECTURA: no declara create_schema/update_schema ni acciones (la
+        # bitácora es append-only). El gate es el permiso dedicado de auditoría
+        # (audit_events:read), distinto y NO más débil que population/reports.
+        read_permission=AuditEventPermissions.READ,
+        list_query=AUDIT_EVENTS,
+        list_schema=AuditEventListItem,
+        detail_url_template="/api/v1/audit-events/{id}",
     ),
     ResourceDefinition(
         name="medical_history_versions",

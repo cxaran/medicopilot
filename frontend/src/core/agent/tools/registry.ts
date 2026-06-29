@@ -1872,6 +1872,51 @@ const TOOLS: ToolDefinition[] = [
       }),
   },
   {
+    // AUDIT LOG READ (gaps 105/110-112): consultar la bitácora de auditoría YA registrada
+    // (quién accedió/cambió qué y cuándo). Solo lectura; FastAPI exige audit_events:read (gate
+    // SENSIBLE dedicado). Presenta los registros tal cual ('registros de auditoría'): NUNCA
+    // infiere intención ni edita la bitácora. El rastro de un paciente se reconstruye con
+    // entity_type=patient + entity_id (la bitácora no tiene una columna patient_id propia).
+    name: "clinical.list_audit_events",
+    description:
+      "Lista los REGISTROS DE AUDITORÍA ya registrados (bitácora append-only): qué acción se " +
+      "ejecutó, sobre qué entidad, por qué usuario y cuándo. Se puede filtrar por usuario " +
+      "(actor_user_id), acción (action), tipo de entidad (entity_type), entidad concreta " +
+      "(entity_id) y rango de fecha (date_from/date_to). Para el rastro de un paciente, filtra " +
+      "entity_type=patient y entity_id=<id del paciente>. Solo lectura: presenta los registros " +
+      "tal como están; no infiere intención ni modifica nada.",
+    kind: "read",
+    inputSchema: clinicalListSchema({
+      actor_user_id: {
+        type: "string",
+        description: "Filtra por id (UUID) del usuario que ejecutó la acción.",
+        format: "uuid",
+      },
+      action: {
+        type: "string",
+        description: "Filtra por acción exacta (p. ej. consultation_finalized).",
+      },
+      entity_type: {
+        type: "string",
+        description: "Filtra por tipo de entidad (p. ej. patient, prescription).",
+      },
+      entity_id: {
+        type: "string",
+        description: "Filtra por id (UUID) de la entidad afectada.",
+        format: "uuid",
+      },
+      date_from: DATE_FROM_PROP,
+      date_to: DATE_TO_PROP,
+    }),
+    execute: (args, ctx) =>
+      ctx.api(
+        `/api/v1/audit-events${clinicalListQuery(args, {
+          eq: ["actor_user_id", "action", "entity_type", "entity_id"],
+          dateField: "occurred_at",
+        })}`,
+      ),
+  },
+  {
     // EPIC DOCS fase 1: componer una nota SOAP de una consulta y guardarla como BORRADOR que
     // el médico aprueba (P1). NUNCA se autofinaliza: nace en estado draft.
     //

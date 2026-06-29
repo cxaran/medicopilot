@@ -7,6 +7,7 @@ from backend.app.api.v1.agent_oauth import router as agent_oauth_router
 from backend.app.api.v1.agent_persona import router as agent_persona_router
 from backend.app.api.v1.ai_providers import router as ai_providers_router
 from backend.app.api.v1.appointments import router as appointments_router
+from backend.app.api.v1.audit_events import router as audit_events_router
 from backend.app.api.v1.auth import router as auth_router
 from backend.app.api.v1.bootstrap import router as bootstrap_router
 from backend.app.api.v1.clinical_codes import router as clinical_codes_router
@@ -70,6 +71,7 @@ router.include_router(agent_oauth_router)
 router.include_router(agent_persona_router)
 router.include_router(ai_providers_router)
 router.include_router(appointments_router)
+router.include_router(audit_events_router)
 router.include_router(auth_router)
 router.include_router(bootstrap_router)
 router.include_router(clinical_codes_router)
