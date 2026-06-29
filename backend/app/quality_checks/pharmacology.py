@@ -19,9 +19,20 @@ Reglas de honestidad:
 Contrato del proveedor real (HTTP/JSON a mano, sin SDK):
     POST <url>  JSON {"name": "<fármaco|alérgeno>"}
     -> 200 JSON {"ingredients": ["...", ...], "classes": ["...", ...]}  (minúsculas)
+
+Fase 3 — INTERACCIONES (extensión honesta del MISMO contrato/URL):
+    POST <url>  JSON {"interaction": {"a": "<fármaco>", "b": "<fármaco>"}}
+    -> 200 JSON {"interacts": true|false, "severity": "<texto>", "source": "<cita>"}
+El conocimiento de interacciones VIENE de la fuente: la lógica NO tiene tabla de interacciones.
+Si la fuente NO implementa esta consulta (responde error o sin la clave ``interacts``) o no hay
+fuente configurada, la verificación de interacciones es NO DISPONIBLE (``available=False``):
+NUNCA se inventa una interacción ni se adivina una severidad. A día de hoy NINGÚN proveedor real
+está conectado; sólo el STUB de prueba (``stub://``) responde interacciones, para ejercitar el
+camino de extremo a extremo en QA.
 """
 
 from dataclasses import dataclass, field
+from typing import Optional
 
 import httpx
 
@@ -37,6 +48,23 @@ class PharmaResolution:
     available: bool
     ingredients: frozenset[str] = field(default_factory=frozenset)
     classes: frozenset[str] = field(default_factory=frozenset)
+
+
+@dataclass(frozen=True)
+class InteractionResolution:
+    """Resultado de consultar una interacción entre dos fármacos a la fuente de farmacología.
+
+    ``available=False`` significa que la fuente NO puede verificar interacciones (no configurada,
+    no responde o no implementa la consulta): se reporta 'no disponible', nunca se infiere nada.
+    ``interacts``/``severity``/``source`` vienen ÍNTEGRAMENTE de la fuente.
+    """
+
+    name_a: str
+    name_b: str
+    available: bool
+    interacts: bool = False
+    severity: Optional[str] = None
+    source: Optional[str] = None
 
 
 # STUB de PRUEBA (sólo se usa con el esquema sentinela ``stub://``; NO es una base real ni el
@@ -57,6 +85,29 @@ _STUB_DB: dict[str, tuple[frozenset[str], frozenset[str]]] = {
     "paracetamol": (frozenset({"paracetamol"}), frozenset({"analgesico"})),
     "tempra": (frozenset({"paracetamol"}), frozenset({"analgesico"})),
     "tylenol": (frozenset({"paracetamol"}), frozenset({"analgesico"})),
+    "warfarina": (frozenset({"warfarina"}), frozenset({"anticoagulante"})),
+    "warfarin": (frozenset({"warfarina"}), frozenset({"anticoagulante"})),
+    "metformina": (frozenset({"metformina"}), frozenset({"biguanida"})),
+    "metformin": (frozenset({"metformina"}), frozenset({"biguanida"})),
+    "gabapentina": (frozenset({"gabapentina"}), frozenset({"anticonvulsivante"})),
+}
+
+# STUB de INTERACCIONES de PRUEBA (sólo ``stub://``; NO es una base de interacciones real). Un
+# puñado de pares ingrediente-ingrediente conocidos para ejercitar el camino en QA. La lógica de
+# la regla NO contiene esta tabla: el conocimiento vive en la fuente (aquí, el stub de prueba). Un
+# proveedor real lo reemplaza implementando la consulta de interacciones por URL. Clave: par
+# (frozenset de dos ingredientes normalizados) -> (severidad, cita).
+_STUB_INTERACTIONS: dict[frozenset[str], tuple[str, str]] = {
+    frozenset({"warfarina", "ibuprofeno"}): (
+        "grave",
+        "AINE + anticoagulante oral (warfarina): mayor riesgo de hemorragia "
+        "(interacción de prueba del stub).",
+    ),
+    frozenset({"warfarina", "naproxeno"}): (
+        "grave",
+        "AINE + anticoagulante oral (warfarina): mayor riesgo de hemorragia "
+        "(interacción de prueba del stub).",
+    ),
 }
 
 
@@ -123,3 +174,70 @@ def resolve_pharmacology(name: str) -> PharmaResolution:
 def pharmacology_source_available() -> bool:
     """True si hay una fuente de farmacología configurada (no garantiza que responda)."""
     return bool((settings.pharma_mcp_server_url or "").strip())
+
+
+def _interaction_stub(name_a: str, name_b: str) -> InteractionResolution:
+    """Resuelve una interacción con el STUB de prueba (resuelve ingredientes y consulta pares)."""
+    res_a = _resolve_stub(name_a)
+    res_b = _resolve_stub(name_b)
+    for ing_a in res_a.ingredients:
+        for ing_b in res_b.ingredients:
+            entry = _STUB_INTERACTIONS.get(frozenset({ing_a, ing_b}))
+            if entry is not None:
+                return InteractionResolution(
+                    name_a=name_a, name_b=name_b, available=True, interacts=True,
+                    severity=entry[0], source=entry[1],
+                )
+    # La fuente respondió pero no conoce una interacción entre estos dos (distinto de 'no
+    # disponible'): disponible, sin interacción.
+    return InteractionResolution(name_a=name_a, name_b=name_b, available=True)
+
+
+def _interaction_remote(url: str, name_a: str, name_b: str) -> InteractionResolution:
+    """Consulta la interacción a la fuente real. Nunca lanza; ante error o falta de soporte,
+    devuelve ``available=False`` (no disponible): jamás infiere una interacción."""
+    headers = {"Content-Type": "application/json"}
+    api_key = settings.pharma_mcp_api_key
+    if api_key is not None and api_key.get_secret_value().strip():
+        headers["Authorization"] = f"Bearer {api_key.get_secret_value()}"
+    try:
+        response = httpx.post(
+            url,
+            json={"interaction": {"a": name_a, "b": name_b}},
+            headers=headers,
+            timeout=httpx.Timeout(settings.pharma_mcp_timeout_seconds),
+        )
+        if response.status_code >= 400:
+            return InteractionResolution(name_a=name_a, name_b=name_b, available=False)
+        data = response.json()
+    except (httpx.HTTPError, ValueError):
+        return InteractionResolution(name_a=name_a, name_b=name_b, available=False)
+    # La fuente debe declarar explícitamente la clave ``interacts``; si no, NO soporta interacciones.
+    if not isinstance(data, dict) or "interacts" not in data:
+        return InteractionResolution(name_a=name_a, name_b=name_b, available=False)
+    severity = data.get("severity")
+    source = data.get("source")
+    return InteractionResolution(
+        name_a=name_a,
+        name_b=name_b,
+        available=True,
+        interacts=bool(data.get("interacts")),
+        severity=severity if isinstance(severity, str) and severity.strip() else None,
+        source=source if isinstance(source, str) and source.strip() else None,
+    )
+
+
+def check_interaction(name_a: str, name_b: str) -> InteractionResolution:
+    """Consulta a la fuente configurada si dos fármacos interactúan.
+
+    Sin fuente configurada o sin soporte de interacciones -> ``available=False`` (no disponible).
+    No inventa interacciones ni adivina severidad.
+    """
+    if not name_a or not name_a.strip() or not name_b or not name_b.strip():
+        return InteractionResolution(name_a=name_a, name_b=name_b, available=False)
+    url = (settings.pharma_mcp_server_url or "").strip()
+    if not url:
+        return InteractionResolution(name_a=name_a, name_b=name_b, available=False)
+    if url.startswith("stub://"):
+        return _interaction_stub(name_a, name_b)
+    return _interaction_remote(url, name_a, name_b)

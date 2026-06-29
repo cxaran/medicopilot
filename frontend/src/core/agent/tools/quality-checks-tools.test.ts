@@ -166,6 +166,77 @@ test("run_quality_checks (fase 2): refleja el marcador 'no disponible' del cruce
   }
 });
 
+test("run_quality_checks (fase 3): pasa por interacciones y ajuste de dosis renal", async (t) => {
+  const body = {
+    target_type: "consultation",
+    target_id: "11111111-1111-1111-1111-111111111111",
+    flags: [
+      {
+        rule_id: "drug_drug_interaction",
+        severity: "warning",
+        message:
+          "Los medicamentos 'Warfarina 5 mg' y 'Ibuprofeno 400 mg' tienen una interacción " +
+          "reportada por la fuente de farmacología. Severidad informada: grave. Revísalo.",
+        source_ref: "prescription_item:a|prescription_item:b",
+        threshold_cited: "AINE + anticoagulante oral (warfarina): mayor riesgo de hemorragia...",
+      },
+      {
+        rule_id: "renal_dose_adjustment",
+        severity: "warning",
+        message:
+          "El paciente tiene eGFR = 25 mL/min/1.73 m² y el medicamento 'Metformina 850 mg' " +
+          "suele requerir ajuste de dosis por función renal por debajo de 45 mL/min/1.73 m²; revísalo.",
+        source_ref: "prescription_item:c|lab_result:d",
+        threshold_cited: "Metformina: la FDA recomienda no iniciar con eGFR <45... Valor usado: eGFR del 2026-04-01.",
+      },
+    ],
+    flag_count: 2,
+  };
+  t.mock.method(globalThis, "fetch", async () => jsonResponse(200, body));
+  const resolved = resolveToolCall("clinical.run_quality_checks", {
+    target_type: "consultation", target_id: "11111111-1111-1111-1111-111111111111",
+  });
+  assert.equal(resolved.outcome, "ready");
+  if (resolved.outcome !== "ready") throw new Error("no ready");
+  const result = await executeTool(resolved.tool, resolved.args);
+  assert.equal(result.status, "success");
+  if (result.status === "success") {
+    const rules = (result.content as typeof body).flags.map((f) => f.rule_id);
+    assert.ok(rules.includes("drug_drug_interaction"));
+    assert.ok(rules.includes("renal_dose_adjustment"));
+  }
+});
+
+test("run_quality_checks (fase 3): refleja el 'no disponible' de las interacciones", async (t) => {
+  const body = {
+    target_type: "patient",
+    target_id: "11111111-1111-1111-1111-111111111111",
+    flags: [
+      {
+        rule_id: "drug_drug_interaction",
+        severity: "info",
+        message: "Verificación de interacciones medicamentosas NO disponible: la fuente...",
+        source_ref: "drug_interaction:no_disponible",
+        threshold_cited: null,
+      },
+    ],
+    flag_count: 1,
+  };
+  t.mock.method(globalThis, "fetch", async () => jsonResponse(200, body));
+  const resolved = resolveToolCall("clinical.run_quality_checks", {
+    target_type: "patient", target_id: "11111111-1111-1111-1111-111111111111",
+  });
+  assert.equal(resolved.outcome, "ready");
+  if (resolved.outcome !== "ready") throw new Error("no ready");
+  const result = await executeTool(resolved.tool, resolved.args);
+  assert.equal(result.status, "success");
+  if (result.status === "success") {
+    const flag = (result.content as typeof body).flags[0];
+    assert.equal(flag.source_ref, "drug_interaction:no_disponible");
+    assert.equal(flag.severity, "info");
+  }
+});
+
 test("run_quality_checks: es lectura, no se gatea por rol en cliente", () => {
   const tools = listTools();
   const catalog = buildToolCatalog(tools, new Set<string>());

@@ -58,3 +58,34 @@ class ResolvedDrug:
     label: str
     ingredients: frozenset[str] = field(default_factory=frozenset)
     classes: frozenset[str] = field(default_factory=frozenset)
+
+
+@dataclass(frozen=True)
+class InteractionFinding:
+    """Resultado de consultar una interacción entre DOS medicamentos activos del paciente.
+
+    ``interacts`` y ``severity``/``source`` provienen ÍNTEGRAMENTE de la fuente de farmacología
+    (no se infieren ni se inventan aquí). ``ref_a``/``ref_b`` son los orígenes (``modelo:id``).
+    """
+
+    ref_a: str
+    label_a: str
+    ref_b: str
+    label_b: str
+    interacts: bool
+    severity: Optional[str] = None
+    source: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class RenalFunction:
+    """Función renal del paciente tomada de un LabResult real (eGFR medida).
+
+    ``value`` es el eGFR numérico; ``measured_label`` describe el dato (analito + fecha) para
+    citarlo en la bandera. ``source_ref`` apunta al ``lab_result:id`` concreto.
+    """
+
+    value: float
+    unit: Optional[str]
+    source_ref: str
+    measured_label: str

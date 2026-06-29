@@ -10,6 +10,14 @@ El cruce fármaco-alergia resuelve ingredientes/clases con una fuente de farmaco
 CONFIGURABLE (el MCP real se enchufa por URL); si no está disponible, ese cruce reporta
 'no disponible' (NUNCA inventa una coincidencia) y las demás reglas siguen corriendo.
 
+Fase 3 añade dos reglas de seguridad farmacológica:
+  - INTERACCIONES fármaco-fármaco: marca pares de medicamentos activos con una interacción que
+    REPORTA la fuente de farmacología (con su severidad/cita). Si la fuente no soporta
+    interacciones o no está disponible, reporta 'no disponible' (NUNCA inventa una interacción).
+  - AJUSTE DE DOSIS RENAL: si hay un eGFR MEDIDO (de un LabResult real) por debajo del umbral
+    citado de un fármaco de eliminación renal activo, lo marca para revisión. Si no hay eGFR, la
+    regla no dispara (no se estima ni se fabrica el dato).
+
 Alcance por objetivo:
   - ``consultation``: nota SOAP (si está en borrador) + signos vitales + resultados de
     laboratorio + medicamentos de las recetas + duplicidad y cruce fármaco-alergia, de esa
@@ -40,14 +48,19 @@ from backend.app.models.patient_clinical_item import PatientClinicalItem
 from backend.app.models.prescription import Prescription, PrescriptionItem
 from backend.app.models.vital_sign import VitalSign
 from backend.app.quality_checks import (
+    InteractionFinding,
     PharmaResolution,
     QualityFlag,
+    RenalFunction,
     ResolvedDrug,
     check_consultation_note,
     check_drug_allergy,
+    check_drug_interactions,
     check_duplicate_medications,
+    check_interaction,
     check_lab_result,
     check_prescription_item,
+    check_renal_dose,
     check_vital_sign,
     pharmacology_source_available,
     resolve_pharmacology,
@@ -145,28 +158,16 @@ def _active_allergies(session: Session, patient_id: UUID) -> list[PatientClinica
     )
 
 
-def _pharmacology_flags(
+def _drug_allergy_flags(
     session: Session, patient_id: UUID, med_items: Sequence[PrescriptionItem]
 ) -> list[QualityFlag]:
-    """Reglas de medicación activa: duplicidad (siempre) y cruce fármaco-alergia (vía fuente).
-
-    El cruce fármaco-alergia sólo corre si hay medicamentos Y alergias que comparar. Resuelve
-    ingredientes/clases con la fuente de farmacología configurada (cacheada por nombre); si la
-    fuente no está disponible, emite el marcador 'no disponible' (NO concluye ausencia).
-    """
-    flags: list[QualityFlag] = list(
-        check_duplicate_medications(
-            [(f"prescription_item:{item.id}", item.medication_name) for item in med_items]
-        )
-    )
-
+    """Cruce fármaco-alergia (fase 2): sólo corre si hay medicamentos Y alergias que comparar."""
     allergies = _active_allergies(session, patient_id)
     if not med_items or not allergies:
-        return flags  # nada que cruzar
+        return []  # nada que cruzar
 
     if not pharmacology_source_available():
-        flags.extend(check_drug_allergy([], [], source_available=False))
-        return flags
+        return check_drug_allergy([], [], source_available=False)
 
     cache: dict[str, PharmaResolution] = {}
 
@@ -196,10 +197,125 @@ def _pharmacology_flags(
     ]
     # La fuente está configurada; si NINGUNA resolución respondió, se considera no disponible.
     responded = any(resolution.available for resolution in cache.values())
-    flags.extend(
-        check_drug_allergy(resolved_meds, resolved_allergies, source_available=responded)
+    return check_drug_allergy(resolved_meds, resolved_allergies, source_available=responded)
+
+
+def _pharmacology_flags(
+    session: Session, patient_id: UUID, med_items: Sequence[PrescriptionItem]
+) -> list[QualityFlag]:
+    """Reglas de medicación activa sobre los datos reales del paciente.
+
+    - Duplicidad (siempre, sin fuente): un mismo medicamento repetido.
+    - Cruce fármaco-alergia (fase 2): vía la fuente de farmacología configurada.
+    - Interacciones fármaco-fármaco (fase 3): vía la fuente; 'no disponible' si no la soporta.
+    - Ajuste de dosis renal (fase 3): si hay un eGFR medido + un fármaco de eliminación renal.
+
+    Cada regla es independiente: el resultado de una no impide que corran las demás.
+    """
+    flags: list[QualityFlag] = list(
+        check_duplicate_medications(
+            [(f"prescription_item:{item.id}", item.medication_name) for item in med_items]
+        )
     )
+    flags.extend(_drug_allergy_flags(session, patient_id, med_items))
+    flags.extend(_interaction_flags(med_items, pharmacology_source_available()))
+    flags.extend(_renal_flags(session, patient_id, med_items))
     return flags
+
+
+def _latest_egfr(session: Session, patient_id: UUID) -> RenalFunction | None:
+    """Devuelve el eGFR MEDIDO más reciente del paciente (de un LabResult), o None si no hay.
+
+    Reconoce el analito por nombre (texto libre): eGFR / TFG / filtrado glomerular. Sólo usa un
+    valor numérico real; no estima eGFR desde la creatinina (eso exigiría una fórmula con
+    edad/sexo y sería fabricar el dato).
+    """
+    labs = session.execute(
+        select(LabResult)
+        .where(
+            LabResult.patient_id == patient_id,
+            LabResult.value_numeric.is_not(None),
+            LabResult.deleted_at.is_(None),
+        )
+        .order_by(LabResult.measured_at.desc())
+    ).scalars().all()
+    for lab in labs:
+        name = normalize_text(lab.analyte_name or "")
+        is_egfr = (
+            "egfr" in name
+            or "gfr" in name
+            or "filtrado glomerular" in name
+            or "tasa de filtracion glomerular" in name
+            or "tfg" in name.split()
+        )
+        if is_egfr and lab.value_numeric is not None:
+            measured = lab.measured_at.date().isoformat() if lab.measured_at else "fecha desconocida"
+            return RenalFunction(
+                value=float(lab.value_numeric),
+                unit=lab.unit,
+                source_ref=f"lab_result:{lab.id}",
+                measured_label=f"{lab.analyte_name} del {measured}",
+            )
+    return None
+
+
+def _interaction_flags(
+    med_items: Sequence[PrescriptionItem], source_available: bool
+) -> list[QualityFlag]:
+    """Interacciones fármaco-fármaco (fase 3): consulta a la fuente cada par de medicamentos.
+
+    Necesita al menos dos medicamentos activos. Si la fuente no está configurada o no soporta
+    interacciones, emite el marcador 'no disponible' (NO concluye ausencia). Sólo marca lo que la
+    fuente reporta como interacción real.
+    """
+    if len(med_items) < 2:
+        return []
+    if not source_available:
+        return check_drug_interactions([], available=False)
+    findings: list[InteractionFinding] = []
+    any_available = False
+    pair_cache: dict[frozenset[str], InteractionFinding] = {}
+    for i in range(len(med_items)):
+        for j in range(i + 1, len(med_items)):
+            a, b = med_items[i], med_items[j]
+            key = frozenset({normalize_text(a.medication_name), normalize_text(b.medication_name)})
+            if key not in pair_cache:
+                res = check_interaction(a.medication_name, b.medication_name)
+                any_available = any_available or res.available
+                pair_cache[key] = InteractionFinding(
+                    ref_a=f"prescription_item:{a.id}", label_a=a.medication_name,
+                    ref_b=f"prescription_item:{b.id}", label_b=b.medication_name,
+                    interacts=res.interacts, severity=res.severity, source=res.source,
+                )
+            findings.append(pair_cache[key])
+    # La fuente está configurada; si NINGÚN par pudo verificarse, las interacciones son
+    # 'no disponible' (la fuente no soporta la consulta).
+    return check_drug_interactions(findings, available=any_available)
+
+
+def _renal_flags(
+    session: Session, patient_id: UUID, med_items: Sequence[PrescriptionItem]
+) -> list[QualityFlag]:
+    """Ajuste de dosis renal (fase 3): requiere un eGFR medido + un fármaco de eliminación renal.
+
+    Mapea el fármaco a su ingrediente con la fuente (cae a coincidencia por nombre si no hay
+    fuente). Si no hay eGFR, la regla NO dispara: no se fabrica el dato.
+    """
+    if not med_items:
+        return []
+    egfr = _latest_egfr(session, patient_id)
+    if egfr is None:
+        return []
+    resolved = [
+        ResolvedDrug(
+            ref=f"prescription_item:{item.id}",
+            label=item.medication_name,
+            ingredients=resolve_pharmacology(item.medication_name).ingredients,
+            classes=resolve_pharmacology(item.medication_name).classes,
+        )
+        for item in med_items
+    ]
+    return check_renal_dose(egfr, resolved)
 
 
 def _check_consultation(session: Session, consultation: Consultation) -> list[QualityFlag]:

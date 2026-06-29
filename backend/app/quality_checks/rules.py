@@ -19,6 +19,7 @@ no existir en el esquema (no se inventa un campo).
 """
 
 from collections import defaultdict
+from dataclasses import dataclass
 from typing import Optional, Sequence
 
 from backend.app.models.consultation import Consultation
@@ -28,7 +29,9 @@ from backend.app.models.prescription import PrescriptionItem
 from backend.app.models.vital_sign import VitalSign
 from backend.app.quality_checks.base import (
     Bound,
+    InteractionFinding,
     QualityFlag,
+    RenalFunction,
     ResolvedDrug,
     Severity,
     normalize_text,
@@ -40,9 +43,13 @@ RULE_CONSULTATION_NOTE_INCOMPLETE = "consultation_note_incomplete"
 RULE_PRESCRIPTION_ITEM_INCOMPLETE = "prescription_item_incomplete"
 RULE_DRUG_ALLERGY = "drug_allergy_cross_check"
 RULE_DUPLICATE_MEDICATION = "duplicate_active_medication"
+RULE_DRUG_INTERACTION = "drug_drug_interaction"
+RULE_RENAL_DOSE = "renal_dose_adjustment"
 
 # Marcador especial de origen cuando el cruce fármaco-alergia no puede ejecutarse.
 DRUG_ALLERGY_UNAVAILABLE_REF = "drug_allergy:no_disponible"
+# Marcador especial de origen cuando la verificación de interacciones no puede ejecutarse.
+DRUG_INTERACTION_UNAVAILABLE_REF = "drug_interaction:no_disponible"
 
 # Rangos fisiológicos de PLAUSIBILIDAD (no de normalidad): valores fuera de estos límites son
 # prácticamente incompatibles con un registro humano vivo y suelen indicar un error de captura
@@ -298,6 +305,160 @@ def check_duplicate_medications(
                     ),
                     source_ref=refs,
                     threshold_cited=_DUPLICATE_CITATION,
+                )
+            )
+    return flags
+
+
+# --- fase 3: interacciones fármaco-fármaco ---
+
+_DRUG_INTERACTION_UNAVAILABLE_MSG = (
+    "Verificación de interacciones medicamentosas NO disponible: la fuente de farmacología (MCP) "
+    "no está configurada, no respondió o no provee datos de interacciones. No se concluye "
+    "ausencia de interacciones; verifícalo manualmente."
+)
+_DRUG_INTERACTION_CITATION = "Interacción reportada por la fuente de farmacología configurada."
+
+
+def check_drug_interactions(
+    findings: Sequence[InteractionFinding],
+    *,
+    available: bool,
+) -> list[QualityFlag]:
+    """Marca pares de medicamentos activos con una interacción CONOCIDA por la fuente.
+
+    El conocimiento de interacciones viene ÍNTEGRAMENTE de la fuente de farmacología (no hay
+    tabla de interacciones en esta lógica). Si la verificación NO está disponible (sin fuente o
+    la fuente no soporta interacciones), devuelve un ÚNICO marcador 'no disponible' (severidad
+    info): NUNCA inventa una interacción ni concluye ausencia. Sólo marca lo que la fuente
+    reporta como interacción real; cita la severidad y la fuente que ésta provee.
+    """
+    if not available:
+        return [
+            QualityFlag(
+                rule_id=RULE_DRUG_INTERACTION,
+                severity=Severity.INFO,
+                message_es=_DRUG_INTERACTION_UNAVAILABLE_MSG,
+                source_ref=DRUG_INTERACTION_UNAVAILABLE_REF,
+                threshold_cited=None,
+            )
+        ]
+    flags: list[QualityFlag] = []
+    for finding in findings:
+        if not finding.interacts:
+            continue
+        severity_note = (
+            f" Severidad informada: {finding.severity}." if finding.severity else ""
+        )
+        flags.append(
+            QualityFlag(
+                rule_id=RULE_DRUG_INTERACTION,
+                severity=Severity.WARNING,
+                message_es=(
+                    f"Los medicamentos '{finding.label_a}' y '{finding.label_b}' tienen una "
+                    f"interacción reportada por la fuente de farmacología.{severity_note} "
+                    f"Revísalo."
+                ),
+                source_ref=f"{finding.ref_a}|{finding.ref_b}",
+                threshold_cited=finding.source or _DRUG_INTERACTION_CITATION,
+            )
+        )
+    return flags
+
+
+# --- fase 3: ajuste de dosis por función renal ---
+
+
+@dataclass(frozen=True)
+class RenalThreshold:
+    """Umbral de eGFR por debajo del cual un fármaco suele requerir ajuste/revisión, con su cita."""
+
+    egfr_threshold: float
+    citation: str
+
+
+# Conjunto PEQUEÑO, CONSERVADOR y CITADO de fármacos de eliminación/ajuste renal bien conocidos.
+# A diferencia de las interacciones (que vienen de la fuente), estos umbrales son conocimiento
+# clínico de referencia y se CITAN uno a uno para que el médico los verifique. eGFR en
+# mL/min/1.73 m². No es exhaustivo ni un sustituto del criterio clínico ni de la ficha técnica.
+# Clave: nombre de ingrediente normalizado (minúsculas, sin acentos).
+RENAL_ADJUSTED_DRUGS: dict[str, RenalThreshold] = {
+    "metformina": RenalThreshold(
+        45.0,
+        "Metformina: la FDA recomienda no iniciar con eGFR <45 y la contraindica con eGFR <30 "
+        "mL/min/1.73 m² por riesgo de acidosis láctica (FDA drug label, 2016).",
+    ),
+    "gabapentina": RenalThreshold(
+        60.0,
+        "Gabapentina: de eliminación renal; requiere ajuste de dosis con eGFR <60 mL/min/1.73 m² "
+        "(ficha técnica del producto).",
+    ),
+    "enoxaparina": RenalThreshold(
+        30.0,
+        "Enoxaparina: ajustar la dosis con eGFR/ClCr <30 mL/min por acumulación y riesgo "
+        "hemorrágico (ficha técnica / guías de anticoagulación).",
+    ),
+    "nitrofurantoina": RenalThreshold(
+        45.0,
+        "Nitrofurantoína: evitar con eGFR <45 mL/min/1.73 m² por menor eficacia y mayor toxicidad "
+        "(criterios de Beers de la AGS / ficha técnica).",
+    ),
+    "atenolol": RenalThreshold(
+        35.0,
+        "Atenolol: de eliminación renal; reducir la dosis con eGFR <35 mL/min/1.73 m² "
+        "(ficha técnica del producto).",
+    ),
+}
+
+
+def _renal_matches(drug: ResolvedDrug) -> Optional[tuple[str, RenalThreshold]]:
+    """Empareja un fármaco con la tabla renal por ingrediente resuelto o por nombre normalizado.
+
+    Reutiliza el ingrediente que resolvió la fuente; si no hay fuente, cae a una coincidencia
+    CONSERVADORA por nombre (el nombre normalizado contiene la clave). No inventa nada.
+    """
+    for key, threshold in RENAL_ADJUSTED_DRUGS.items():
+        if key in drug.ingredients:
+            return key, threshold
+    name_tokens = normalize_text(drug.label or "").split()
+    for key, threshold in RENAL_ADJUSTED_DRUGS.items():
+        if key in name_tokens:
+            return key, threshold
+    return None
+
+
+def check_renal_dose(
+    egfr: Optional[RenalFunction],
+    medications: Sequence[ResolvedDrug],
+) -> list[QualityFlag]:
+    """Marca un medicamento de eliminación renal cuando el eGFR del paciente está por debajo del
+    umbral citado para ese fármaco.
+
+    Requiere un eGFR MEDIDO (de un LabResult real). Si no hay eGFR disponible, la regla NO
+    dispara (no fabrica un valor ni lo estima desde la creatinina, que exigiría una fórmula con
+    edad/sexo). Cada bandera cita el umbral y su fuente, y el valor de eGFR usado.
+    """
+    if egfr is None:
+        return []
+    flags: list[QualityFlag] = []
+    unit = f" {egfr.unit}" if egfr.unit else " mL/min/1.73 m²"
+    for drug in medications:
+        match = _renal_matches(drug)
+        if match is None:
+            continue
+        _, threshold = match
+        if egfr.value < threshold.egfr_threshold:
+            flags.append(
+                QualityFlag(
+                    rule_id=RULE_RENAL_DOSE,
+                    severity=Severity.WARNING,
+                    message_es=(
+                        f"El paciente tiene eGFR = {_fmt(egfr.value)}{unit} y el medicamento "
+                        f"'{drug.label}' suele requerir ajuste de dosis por función renal por "
+                        f"debajo de {_fmt(threshold.egfr_threshold)} mL/min/1.73 m²; revísalo."
+                    ),
+                    source_ref=f"{drug.ref}|{egfr.source_ref}",
+                    threshold_cited=f"{threshold.citation} Valor usado: {egfr.measured_label}.",
                 )
             )
     return flags

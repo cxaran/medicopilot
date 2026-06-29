@@ -68,18 +68,26 @@ from backend.app.models.user import User  # noqa: E402
 from backend.app.models.vital_sign import VitalSign  # noqa: E402
 from backend.app.quality_checks import (  # noqa: E402
     DRUG_ALLERGY_UNAVAILABLE_REF,
+    DRUG_INTERACTION_UNAVAILABLE_REF,
     RULE_CONSULTATION_NOTE_INCOMPLETE,
     RULE_DRUG_ALLERGY,
+    RULE_DRUG_INTERACTION,
     RULE_DUPLICATE_MEDICATION,
     RULE_LAB_VALUE_NON_PHYSICAL,
     RULE_PRESCRIPTION_ITEM_INCOMPLETE,
+    RULE_RENAL_DOSE,
     RULE_VITALS_OUT_OF_RANGE,
+    InteractionFinding,
+    RenalFunction,
     ResolvedDrug,
     check_consultation_note,
     check_drug_allergy,
+    check_drug_interactions,
     check_duplicate_medications,
+    check_interaction,
     check_lab_result,
     check_prescription_item,
+    check_renal_dose,
     check_vital_sign,
     resolve_pharmacology,
 )
@@ -247,6 +255,93 @@ class QualityRulesUnitTest(unittest.TestCase):
         finally:
             settings.pharma_mcp_server_url = original
 
+    # --- fase 3: interacciones fármaco-fármaco ---
+
+    def test_drug_interaction_fires_only_on_reported_pair(self) -> None:
+        interacting = InteractionFinding(
+            ref_a="prescription_item:1", label_a="Warfarina 5 mg",
+            ref_b="prescription_item:2", label_b="Ibuprofeno 400 mg",
+            interacts=True, severity="grave", source="AINE + anticoagulante.",
+        )
+        no_interaction = InteractionFinding(
+            ref_a="prescription_item:1", label_a="Warfarina",
+            ref_b="prescription_item:3", label_b="Paracetamol",
+            interacts=False,
+        )
+        flags = check_drug_interactions([interacting, no_interaction], available=True)
+        self.assertEqual({f.rule_id for f in flags}, {RULE_DRUG_INTERACTION})
+        self.assertEqual(len(flags), 1)
+        self.assertEqual(flags[0].severity.value, "warning")
+        self.assertIn("Warfarina", flags[0].message_es)
+        self.assertIn("grave", flags[0].message_es)  # cita la severidad que dio la fuente
+        self.assertIn("prescription_item:1", flags[0].source_ref)
+        self.assertIn("prescription_item:2", flags[0].source_ref)
+        self.assertEqual(flags[0].threshold_cited, "AINE + anticoagulante.")
+
+    def test_drug_interaction_no_disponible_when_unavailable(self) -> None:
+        flags = check_drug_interactions([], available=False)
+        self.assertEqual(len(flags), 1)
+        self.assertEqual(flags[0].rule_id, RULE_DRUG_INTERACTION)
+        self.assertEqual(flags[0].severity.value, "info")
+        self.assertEqual(flags[0].source_ref, DRUG_INTERACTION_UNAVAILABLE_REF)
+        self.assertIn("no disponible", flags[0].message_es.lower())
+
+    def test_interaction_resolver_stub_and_unconfigured(self) -> None:
+        original = settings.pharma_mcp_server_url
+        try:
+            settings.pharma_mcp_server_url = "stub://pharma"
+            hit = check_interaction("Warfarina 5 mg", "Ibuprofeno 400 mg")
+            self.assertTrue(hit.available)
+            self.assertTrue(hit.interacts)  # par conocido por el stub de prueba
+            self.assertTrue(hit.severity)
+            self.assertTrue(hit.source)
+            # Par sin interacción conocida: disponible, pero NO interactúa (no se inventa).
+            miss = check_interaction("Paracetamol", "Metformina 850 mg")
+            self.assertTrue(miss.available)
+            self.assertFalse(miss.interacts)
+            # Sin fuente -> no disponible (jamás infiere).
+            settings.pharma_mcp_server_url = None
+            off = check_interaction("Warfarina", "Ibuprofeno")
+            self.assertFalse(off.available)
+            self.assertFalse(off.interacts)
+        finally:
+            settings.pharma_mcp_server_url = original
+
+    # --- fase 3: ajuste de dosis renal ---
+
+    def test_renal_dose_fires_below_threshold_and_silent_normal(self) -> None:
+        egfr_low = RenalFunction(value=25.0, unit="mL/min/1.73m2",
+                                 source_ref="lab_result:1", measured_label="eGFR del 2026-04-01")
+        metformina = ResolvedDrug(ref="prescription_item:1", label="Metformina 850 mg",
+                                  ingredients=frozenset({"metformina"}))
+        flags = check_renal_dose(egfr_low, [metformina])
+        self.assertEqual({f.rule_id for f in flags}, {RULE_RENAL_DOSE})
+        self.assertEqual(flags[0].severity.value, "warning")
+        self.assertIn("Metformina", flags[0].message_es)
+        self.assertIn("lab_result:1", flags[0].source_ref)
+        self.assertTrue(flags[0].threshold_cited)  # cita umbral + fuente + valor
+
+        # eGFR normal (90): no dispara.
+        egfr_ok = RenalFunction(value=90.0, unit="mL/min/1.73m2",
+                                source_ref="lab_result:2", measured_label="eGFR del 2026-04-01")
+        self.assertEqual(check_renal_dose(egfr_ok, [metformina]), [])
+
+    def test_renal_dose_silent_when_egfr_absent_and_matches_by_name(self) -> None:
+        # Sin eGFR -> NO dispara (no fabrica el dato).
+        metformina = ResolvedDrug(ref="prescription_item:1", label="Metformina 850 mg")
+        self.assertEqual(check_renal_dose(None, [metformina]), [])
+
+        # Sin ingredientes resueltos (fuente caída), empareja por NOMBRE normalizado.
+        egfr_low = RenalFunction(value=20.0, unit=None,
+                                 source_ref="lab_result:1", measured_label="eGFR del 2026-04-01")
+        flags = check_renal_dose(egfr_low, [metformina])
+        self.assertEqual({f.rule_id for f in flags}, {RULE_RENAL_DOSE})
+
+        # Un fármaco que NO es de la tabla renal no dispara aunque el eGFR sea bajo.
+        paracetamol = ResolvedDrug(ref="prescription_item:2", label="Paracetamol 500 mg",
+                                   ingredients=frozenset({"paracetamol"}))
+        self.assertEqual(check_renal_dose(egfr_low, [paracetamol]), [])
+
 
 @unittest.skipUnless(
     _is_test_url(_TEST_PG_URL),
@@ -344,6 +439,37 @@ class QualityChecksRoutesTest(unittest.TestCase):
             session.add(PrescriptionItem(id=uuid.uuid4(), prescription_id=cls.pharma_rx_id,
                                          position=3, medication_name="paracetamol",
                                          dose="500 mg", frequency="cada 12 h"))
+
+            # --- fase 3: paciente con par interactuante (Warfarina+Ibuprofeno) + fármaco de
+            # eliminación renal (Metformina) + eGFR medido por debajo del umbral. ---
+            cls.patient3_id = uuid.uuid4()
+            cls.fase3_consultation_id = uuid.uuid4()
+            cls.fase3_rx_id = uuid.uuid4()
+            session.add(Patient(id=cls.patient3_id, full_name="Paciente Farmacología",
+                                birth_date=date(1955, 3, 3), sex=Sex.MALE))
+            session.flush()
+            # eGFR bajo (25 mL/min/1.73m²): valor POSITIVO (no dispara la regla de lab no físico).
+            session.add(LabResult(id=uuid.uuid4(), patient_id=cls.patient3_id,
+                                  analyte_name="eGFR (CKD-EPI)", value_numeric=Decimal("25"),
+                                  unit="mL/min/1.73m2", measured_at=datetime(2026, 4, 1, 9, 0)))
+            session.add(Consultation(id=cls.fase3_consultation_id, patient_id=cls.patient3_id,
+                                     attending_doctor_id=cls.doctor_id,
+                                     consulted_at=datetime(2026, 4, 1, 10, 0),
+                                     reason_for_visit="Control", status=ConsultationStatus.DRAFT,
+                                     current_illness="x", physical_examination="x",
+                                     clinical_assessment="x", treatment="x"))
+            session.add(Prescription(id=cls.fase3_rx_id,
+                                     consultation_id=cls.fase3_consultation_id))
+            session.flush()
+            session.add(PrescriptionItem(id=uuid.uuid4(), prescription_id=cls.fase3_rx_id,
+                                         position=1, medication_name="Warfarina 5 mg",
+                                         dose="5 mg", frequency="cada 24 h"))
+            session.add(PrescriptionItem(id=uuid.uuid4(), prescription_id=cls.fase3_rx_id,
+                                         position=2, medication_name="Ibuprofeno 400 mg",
+                                         dose="400 mg", frequency="cada 8 h"))
+            session.add(PrescriptionItem(id=uuid.uuid4(), prescription_id=cls.fase3_rx_id,
+                                         position=3, medication_name="Metformina 850 mg",
+                                         dose="850 mg", frequency="cada 12 h"))
             session.commit()
 
     @classmethod
@@ -492,6 +618,53 @@ class QualityChecksRoutesTest(unittest.TestCase):
         rules = {f["rule_id"] for f in body["flags"]}
         self.assertIn(RULE_DRUG_ALLERGY, rules)
         self.assertIn(RULE_DUPLICATE_MEDICATION, rules)
+
+    # --- fase 3: interacciones + ajuste de dosis renal ---
+
+    def test_drug_interaction_flag_with_stub_source(self) -> None:
+        self._with_pharma_stub()
+        body = self._check("consultation", self.fase3_consultation_id).json()
+        inter = [f for f in body["flags"] if f["rule_id"] == RULE_DRUG_INTERACTION]
+        self.assertEqual(len(inter), 1, body["flags"])
+        flag = inter[0]
+        self.assertEqual(flag["severity"], "warning")
+        self.assertNotEqual(flag["source_ref"], DRUG_INTERACTION_UNAVAILABLE_REF)
+        self.assertTrue(flag["threshold_cited"])
+        # El par citado es Warfarina + Ibuprofeno.
+        self.assertIn("Warfarina", flag["message"])
+        self.assertIn("Ibuprofeno", flag["message"])
+
+    def test_drug_interaction_no_disponible_without_source(self) -> None:
+        self._without_pharma()
+        body = self._check("consultation", self.fase3_consultation_id).json()
+        inter = [f for f in body["flags"] if f["rule_id"] == RULE_DRUG_INTERACTION]
+        self.assertEqual(len(inter), 1, body["flags"])
+        self.assertEqual(inter[0]["source_ref"], DRUG_INTERACTION_UNAVAILABLE_REF)
+        self.assertEqual(inter[0]["severity"], "info")
+
+    def test_renal_dose_flag_fires_with_low_egfr(self) -> None:
+        self._with_pharma_stub()
+        body = self._check("consultation", self.fase3_consultation_id).json()
+        renal = [f for f in body["flags"] if f["rule_id"] == RULE_RENAL_DOSE]
+        self.assertEqual(len(renal), 1, body["flags"])
+        self.assertIn("Metformina", renal[0]["message"])
+        self.assertIn("eGFR", renal[0]["message"])
+        self.assertTrue(renal[0]["threshold_cited"])
+        self.assertIn("lab_result:", renal[0]["source_ref"])
+
+    def test_renal_dose_fires_by_name_without_source(self) -> None:
+        # Sin fuente, el mapeo cae a NOMBRE: 'Metformina 850 mg' empareja la tabla renal igual.
+        self._without_pharma()
+        body = self._check("consultation", self.fase3_consultation_id).json()
+        renal = [f for f in body["flags"] if f["rule_id"] == RULE_RENAL_DOSE]
+        self.assertEqual(len(renal), 1, body["flags"])
+
+    def test_renal_dose_silent_when_no_egfr(self) -> None:
+        # patient2 tiene medicamentos pero NO eGFR: la regla renal no dispara (no fabrica el dato).
+        self._with_pharma_stub()
+        body = self._check("patient", self.patient2_id).json()
+        rules = {f["rule_id"] for f in body["flags"]}
+        self.assertNotIn(RULE_RENAL_DOSE, rules)
 
     def test_check_does_not_mutate_records(self) -> None:
         # Ejecutar la verificación NO debe escribir nada: el borrador sigue siendo borrador,
