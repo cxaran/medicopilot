@@ -1,36 +1,19 @@
 import { ChatShell } from "@/components/chat-shell/ChatShell";
 import { requireSession } from "@/core/auth/session";
-import { getResourceCapability } from "@/core/resources/capabilities-client";
-import { buildFilterableControls, parseListQuery } from "@/core/resources/list-query";
-import { getResourceListPage } from "@/core/resources/resource-list-client";
-import { toRecentPatients, type RecentPatient } from "@/core/chat-shell/recent-patients";
 import { getDashboardData } from "@/core/chat-shell/dashboard-data";
 
-const RECENT_LIMIT = 8;
-
 /**
- * Inicio CHAT-FIRST (MP-CTRL-0122): el home es el agente global + la lista de pacientes/chats.
- * Los pacientes salen del CONTRATO de recursos (misma lista que la tabla genérica de pacientes),
- * no se hardcodean; si el rol no puede leer pacientes o no hay, el shell muestra sólo el agente
- * global + el buscador. El chat reusa el CopilotPanel existente (lógica intacta).
+ * Inicio CHAT-FIRST (MP-CTRL-0122; barra lateral unificada en 0128): el home es el agente global con
+ * su dashboard de resumen y el chat. La navegación (agente global + buscador + pacientes recientes)
+ * vive ahora en la barra lateral única del shell; el contexto activo se comparte con ella vía
+ * ChatNavProvider, así que aquí sólo se compone el área principal.
  */
 export default async function HomePage() {
   await requireSession();
-
-  let recentPatients: RecentPatient[] = [];
-  const capability = await getResourceCapability("patients");
-  if (capability && capability.view === "table" && capability.list) {
-    const controls = buildFilterableControls(capability.list);
-    const query = parseListQuery({}, capability.list, controls);
-    const page = await getResourceListPage(capability, query);
-    if (page) {
-      recentPatients = toRecentPatients(page.items).slice(0, RECENT_LIMIT);
-    }
-  }
 
   // Dashboard del inicio (agente global): compone lecturas existentes del contrato (citas de hoy,
   // consultas recientes, pendientes de seguimiento). Degrada a vacío si el rol no tiene permiso.
   const dashboard = await getDashboardData();
 
-  return <ChatShell recentPatients={recentPatients} dashboard={dashboard} />;
+  return <ChatShell dashboard={dashboard} />;
 }
