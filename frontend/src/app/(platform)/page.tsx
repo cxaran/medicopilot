@@ -4,6 +4,7 @@ import { getResourceCapability } from "@/core/resources/capabilities-client";
 import { buildFilterableControls, parseListQuery } from "@/core/resources/list-query";
 import { getResourceListPage } from "@/core/resources/resource-list-client";
 import { toRecentPatients, type RecentPatient } from "@/core/chat-shell/recent-patients";
+import { getDashboardData } from "@/core/chat-shell/dashboard-data";
 
 const RECENT_LIMIT = 8;
 
@@ -27,5 +28,9 @@ export default async function HomePage() {
     }
   }
 
-  return <ChatShell recentPatients={recentPatients} />;
+  // Dashboard del inicio (agente global): compone lecturas existentes del contrato (citas de hoy,
+  // consultas recientes, pendientes de seguimiento). Degrada a vacío si el rol no tiene permiso.
+  const dashboard = await getDashboardData();
+
+  return <ChatShell recentPatients={recentPatients} dashboard={dashboard} />;
 }

@@ -4,8 +4,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { CopilotPanel, type ChatMessage } from "@/components/copilot/CopilotPanel";
 import { ActiveContextPicker } from "@/components/copilot/ActiveContextPicker";
+import { DashboardHome } from "@/components/chat-shell/DashboardHome";
 import type { ActiveClinicalContext } from "@/core/agent/active-context";
 import type { RecentPatient } from "@/core/chat-shell/recent-patients";
+import type { DashboardData } from "@/core/chat-shell/dashboard";
 import {
   messagesToTranscript,
   selectUnpersisted,
@@ -31,13 +33,30 @@ import {
  * (borradores) conservan su aprobación dentro del CopilotPanel. Si la persistencia falla, el chat
  * sigue funcionando sin historial (degradación limpia).
  */
-export function ChatShell({ recentPatients }: Readonly<{ recentPatients: readonly RecentPatient[] }>) {
+export function ChatShell({
+  recentPatients,
+  dashboard,
+}: Readonly<{
+  recentPatients: readonly RecentPatient[];
+  // Resumen del inicio (agente global). Se renderiza sólo en el chat global; opcional para
+  // mantener compatibilidad si el inicio no lo provee.
+  dashboard?: DashboardData;
+}>) {
   const [activeContext, setActiveContext] = useState<ActiveClinicalContext | null>(null);
 
   const openPatient = (patient: RecentPatient): void =>
     setActiveContext({
       patientId: patient.id,
       patientLabel: patient.label,
+      consultationId: null,
+      consultationLabel: null,
+    });
+
+  // Apertura desde una tarjeta del dashboard: fija el chat de ese paciente (redirect global->paciente).
+  const openPatientById = (patientId: string, patientLabel: string): void =>
+    setActiveContext({
+      patientId,
+      patientLabel,
       consultationId: null,
       consultationLabel: null,
     });
@@ -190,9 +209,14 @@ export function ChatShell({ recentPatients }: Readonly<{ recentPatients: readonl
         </div>
       </aside>
 
-      {/* Chat activo: el CopilotPanel existente, con contexto + historial controlados por el shell.
-          Se remonta por conversación (key) para re-sembrar el historial al cambiar de chat. */}
-      <div className="flex min-w-0 flex-1 flex-col">
+      {/* Columna principal. En el inicio (chat global) la superficie de aterrizaje es el dashboard
+          de resumen; debajo, el chat global sigue accesible. En un paciente, sólo su chat. */}
+      <div className="flex min-w-0 flex-1 flex-col gap-5 overflow-y-auto">
+        {activeContext === null && dashboard && (
+          <DashboardHome data={dashboard} onOpenPatient={openPatientById} />
+        )}
+        {/* Chat activo: el CopilotPanel existente, con contexto + historial controlados por el shell.
+            Se remonta por conversación (key) para re-sembrar el historial al cambiar de chat. */}
         {loaded ? (
           <CopilotPanel
             key={conversationId ?? chatKey}
