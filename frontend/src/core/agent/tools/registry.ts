@@ -5,6 +5,7 @@ import type { WireTool } from "@/core/agent/protocol";
 import type { ObjectSchema, PropSchema } from "./schema-validator";
 import { browserSandboxRunner, type SandboxRunner } from "./sandbox";
 import { parseButtonsSpec, parseChartSpec, parseFormSpec } from "./ui-spec";
+import { validateDynamicForm } from "./dynamic-form";
 import {
   searchTools,
   describeTools,
@@ -2603,6 +2604,95 @@ const TOOLS: ToolDefinition[] = [
     },
     execute: async (args) => {
       const parsed = parseButtonsSpec(args);
+      if (!parsed.ok) {
+        throw new ToolExecutionError("invalid_ui_spec", parsed.error);
+      }
+      return parsed.spec;
+    },
+  },
+  {
+    name: "ui.render_dynamic_form",
+    description:
+      "Compone una UI a la medida SOLO para casos especiales que NINGUNA plantilla registrada " +
+      "cubre. Recibe { title?, description?, widgets: [...] } con widgets de una LISTA BLANCA: " +
+      "heading, info_card, section (contenedor), text, textarea, number, date, checkbox, select, " +
+      "multiselect, radio, decision_list. Cada widget admite solo props fijas (name, label, " +
+      "options, items, required, min, max, placeholder, help, text, title, tone, children); se " +
+      "rechaza cualquier prop, HTML, script o URL. Hay límites de cantidad/anidación/opciones. " +
+      "Al enviarlo se continúa la conversación con los valores; no escribe ni guarda nada por sí " +
+      "mismo (las acciones clínicas siguen requiriendo aprobación). Prefiere SIEMPRE una plantilla " +
+      "registrada (open_template) cuando exista; usa esto solo para lo no cubierto.",
+    kind: "read",
+    inputSchema: PASSTHROUGH_SCHEMA,
+    wireSchema: {
+      type: "object",
+      properties: {
+        title: { type: "string" },
+        description: { type: "string" },
+        submit_label: { type: "string" },
+        submit_prompt: { type: "string" },
+        widgets: {
+          type: "array",
+          description:
+            "Lista de widgets de la lista blanca. 'section' puede anidar 'children'; los widgets de " +
+            "selección requieren 'options: [{value, label?}]'; 'decision_list' requiere " +
+            "'items: [{value, text}]'.",
+          items: {
+            type: "object",
+            properties: {
+              type: {
+                type: "string",
+                enum: [
+                  "heading",
+                  "info_card",
+                  "section",
+                  "text",
+                  "textarea",
+                  "number",
+                  "date",
+                  "checkbox",
+                  "select",
+                  "multiselect",
+                  "radio",
+                  "decision_list",
+                ],
+              },
+              name: { type: "string" },
+              label: { type: "string" },
+              text: { type: "string" },
+              title: { type: "string" },
+              tone: { type: "string", enum: ["info", "warn", "muted"] },
+              placeholder: { type: "string" },
+              help: { type: "string" },
+              required: { type: "boolean" },
+              min: { type: "number" },
+              max: { type: "number" },
+              options: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: { value: { type: "string" }, label: { type: "string" } },
+                  required: ["value"],
+                },
+              },
+              items: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: { value: { type: "string" }, text: { type: "string" } },
+                  required: ["value", "text"],
+                },
+              },
+              children: { type: "array", items: { type: "object" } },
+            },
+            required: ["type"],
+          },
+        },
+      },
+      required: ["widgets"],
+    },
+    execute: async (args) => {
+      const parsed = validateDynamicForm(args);
       if (!parsed.ok) {
         throw new ToolExecutionError("invalid_ui_spec", parsed.error);
       }
