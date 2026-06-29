@@ -175,7 +175,7 @@ class BootstrapRoutesTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertEqual(body["limits"], {"max_additional_roles": 10})
-        self.assertEqual([group["name"] for group in body["permission_groups"]], ["users", "roles", "doctors", "medication_templates", "patients", "patient_clinical_items", "medical_history_versions", "consultations", "consultation_diagnoses", "vital_signs", "lab_results", "clinical_events", "study_orders", "clinical_tasks", "prescriptions", "appointments", "clinical_documents", "population", "reports", "institutional_settings", "clinical_codes", "clinical_scales", "scale_results", "clinical_notes", "quality_checks", "medication_reconciliation", "follow_ups", "permissions"])
+        self.assertEqual([group["name"] for group in body["permission_groups"]], ["users", "roles", "doctors", "medication_templates", "patients", "patient_clinical_items", "patient_history_items", "medical_history_versions", "consultations", "consultation_diagnoses", "vital_signs", "lab_results", "clinical_events", "study_orders", "clinical_tasks", "prescriptions", "appointments", "clinical_documents", "population", "reports", "institutional_settings", "clinical_codes", "clinical_scales", "scale_results", "clinical_notes", "quality_checks", "medication_reconciliation", "follow_ups", "permissions"])
         self.assertIn("users:read", {item["access"] for group in body["permission_groups"] for item in group["permissions"]})
 
         with Session(self.engine) as session:

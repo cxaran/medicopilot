@@ -69,6 +69,9 @@ from backend.app.security.groups.medication_templates import (  # noqa: E402
 from backend.app.security.groups.patient_clinical_items import (  # noqa: E402
     PatientClinicalItemPermissions,
 )
+from backend.app.security.groups.patient_history_items import (  # noqa: E402
+    PatientHistoryItemPermissions,
+)
 from backend.app.security.groups.patients import PatientPermissions  # noqa: E402
 from backend.app.security.groups.permissions import PermissionPermissions  # noqa: E402
 from backend.app.security.groups.population import (  # noqa: E402
@@ -108,6 +111,7 @@ class SecurityCatalogTest(unittest.TestCase):
                 MedicationTemplatePermissions,
                 PatientPermissions,
                 PatientClinicalItemPermissions,
+                PatientHistoryItemPermissions,
                 MedicalHistoryVersionPermissions,
                 ConsultationPermissions,
                 ConsultationDiagnosisPermissions,
@@ -166,6 +170,10 @@ class SecurityCatalogTest(unittest.TestCase):
                 "patient_clinical_items:create",
                 "patient_clinical_items:update",
                 "patient_clinical_items:delete",
+                "patient_history_items:read",
+                "patient_history_items:create",
+                "patient_history_items:update",
+                "patient_history_items:delete",
                 "medical_history_versions:read",
                 "medical_history_versions:create",
                 "medical_history_versions:update",

@@ -237,6 +237,33 @@ class LabResultAbnormalFlag(str, Enum):
     UNKNOWN = "unknown"
 
 
+class PatientHistoryItemCategory(str, Enum):
+    """Categoría de un antecedente clínico estructurado del paciente.
+
+    Son CATEGORÍAS de registro del expediente (no implican afirmación médica alguna):
+    antecedentes familiares, quirúrgicos, obstétricos, y personales patológicos/no patológicos."""
+
+    FAMILIAR = "familiar"
+    QUIRURGICO = "quirurgico"
+    OBSTETRICO = "obstetrico"
+    PATOLOGICO = "patologico"
+    NO_PATOLOGICO = "no_patologico"
+
+
+class FamilyRelationship(str, Enum):
+    """Parentesco del familiar en un antecedente familiar (opcional)."""
+
+    PADRE = "padre"
+    MADRE = "madre"
+    HERMANO = "hermano"
+    HERMANA = "hermana"
+    ABUELO = "abuelo"
+    ABUELA = "abuela"
+    HIJO = "hijo"
+    HIJA = "hija"
+    OTRO = "otro"
+
+
 class AiProvider(str, Enum):
     """Proveedor de IA de una credencial registrada por el usuario."""
 

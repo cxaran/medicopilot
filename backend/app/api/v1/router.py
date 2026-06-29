@@ -39,6 +39,9 @@ from backend.app.api.v1.medication_templates import (
 from backend.app.api.v1.patient_clinical_items import (
     router as patient_clinical_items_router,
 )
+from backend.app.api.v1.patient_history_items import (
+    router as patient_history_items_router,
+)
 from backend.app.api.v1.patients import router as patients_router
 from backend.app.api.v1.permissions import router as permissions_router
 from backend.app.api.v1.population import router as population_router
@@ -82,6 +85,7 @@ router.include_router(medical_history_versions_router)
 router.include_router(medication_reconciliation_router)
 router.include_router(medication_templates_router)
 router.include_router(patient_clinical_items_router)
+router.include_router(patient_history_items_router)
 router.include_router(patients_router)
 router.include_router(permissions_router)
 router.include_router(population_router)

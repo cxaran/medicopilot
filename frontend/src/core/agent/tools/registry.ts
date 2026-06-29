@@ -1682,6 +1682,103 @@ const TOOLS: ToolDefinition[] = [
       ctx.api(`/api/v1/scale-results`, { method: "POST", body: args as Record<string, unknown> }),
   },
   {
+    // STRUCTURED HISTORY (gap 6): listar los antecedentes ESTRUCTURADOS de un paciente
+    // (familiar/quirúrgico/obstétrico/patológico/no patológico). Solo lectura; FastAPI exige
+    // patient_history_items:read. Distinto de patient_clinical_items (problemas ACTIVOS): esto es
+    // la HISTORIA (antecedentes). Filtrable por categoría.
+    name: "clinical.list_history_items",
+    description:
+      "Lista los ANTECEDENTES clínicos estructurados de un paciente (historia familiar, " +
+      "quirúrgica, obstétrica y personal patológica/no patológica). Se consultan por paciente " +
+      "(patient_id) y pueden filtrarse por categoría (familiar/quirurgico/obstetrico/patologico/" +
+      "no_patologico). Son ANTECEDENTES (historia), no los problemas activos del resumen (para " +
+      "esos usa clinical.patient_summary / los datos clínicos). Solo lectura.",
+    kind: "read",
+    inputSchema: clinicalListSchema({
+      patient_id: PATIENT_FILTER_PROP,
+      category: {
+        type: "string",
+        description: "Categoría para filtrar.",
+        enum: ["familiar", "quirurgico", "obstetrico", "patologico", "no_patologico"],
+      },
+    }),
+    execute: (args, ctx) =>
+      ctx.api(
+        `/api/v1/patient-history-items${clinicalListQuery(args, {
+          eq: ["patient_id", "category"],
+        })}`,
+      ),
+  },
+  {
+    // STRUCTURED HISTORY (gap 6): crear un antecedente ESTRUCTURADO como BORRADOR que el médico
+    // aprueba (P1). Acción de escritura gateada por aprobación: nada se guarda de forma autónoma.
+    // Para antecedentes familiares, usa relationship_to_patient (parentesco). Funda el dato en lo
+    // que dijo el paciente/el expediente; no inventes diagnósticos ni fechas.
+    name: "clinical.create_history_item_draft",
+    description:
+      "Guarda un ANTECEDENTE clínico estructurado EN BORRADOR para un paciente (historia " +
+      "familiar/quirúrgica/obstétrica/patológica/no patológica). Acción de escritura: requiere " +
+      "confirmación explícita del médico antes de guardarse; nada se guarda de forma autónoma. " +
+      "category y description son obligatorios; para antecedentes familiares indica el parentesco " +
+      "(relationship_to_patient). Campos opcionales: condición/código relacionados, edad de " +
+      "inicio (0-120) y fecha del evento. No inventes datos: funda el antecedente en lo referido.",
+    kind: "write",
+    inputSchema: {
+      type: "object",
+      properties: {
+        patient_id: { type: "string", description: "Id (UUID) del paciente.", format: "uuid" },
+        category: {
+          type: "string",
+          description: "Categoría del antecedente.",
+          enum: ["familiar", "quirurgico", "obstetrico", "patologico", "no_patologico"],
+        },
+        description: {
+          type: "string",
+          description: "Descripción breve (p. ej. 'Apendicectomía', 'Diabetes en la madre').",
+        },
+        relationship_to_patient: {
+          type: "string",
+          description: "Parentesco, para antecedentes familiares (opcional).",
+          enum: ["padre", "madre", "hermano", "hermana", "abuelo", "abuela", "hijo", "hija", "otro"],
+        },
+        related_condition: {
+          type: "string",
+          description: "Condición o diagnóstico relacionado, en texto libre (opcional).",
+        },
+        related_code: {
+          type: "string",
+          description: "Código de la condición (estilo CIE-10), si se conoce (opcional).",
+        },
+        onset_age: {
+          type: "number",
+          description: "Edad (años) de inicio o del evento (0-120, opcional).",
+          minimum: 0,
+          maximum: 120,
+        },
+        occurred_on: {
+          type: "string",
+          description: "Fecha del evento en formato AAAA-MM-DD (opcional).",
+        },
+        notes: { type: "string", description: "Notas o contexto adicional (opcional)." },
+      },
+      required: ["patient_id", "category", "description"],
+      additionalProperties: false,
+    },
+    approval: {
+      actionType: "create_history_item_draft",
+      targetResource: "patient_history_items",
+      summarize: (args) =>
+        `Guardar un antecedente "${String(args.category ?? "—")}" (${String(
+          args.description ?? "—",
+        )}) para el paciente ${String(args.patient_id ?? "—")}.`,
+    },
+    execute: (args, ctx) =>
+      ctx.api(`/api/v1/patient-history-items`, {
+        method: "POST",
+        body: args as Record<string, unknown>,
+      }),
+  },
+  {
     // EPIC DOCS fase 1: componer una nota SOAP de una consulta y guardarla como BORRADOR que
     // el médico aprueba (P1). NUNCA se autofinaliza: nace en estado draft.
     //

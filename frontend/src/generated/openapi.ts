@@ -1315,6 +1315,43 @@ export interface paths {
         patch: operations["update_patient_clinical_item_api_v1_patient_clinical_items__item_id__patch"];
         trace?: never;
     };
+    "/api/v1/patient-history-items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Patient History Items */
+        get: operations["list_patient_history_items_api_v1_patient_history_items_get"];
+        put?: never;
+        /** Create Patient History Item */
+        post: operations["create_patient_history_item_api_v1_patient_history_items_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/patient-history-items/{item_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Patient History Item */
+        get: operations["get_patient_history_item_api_v1_patient_history_items__item_id__get"];
+        put?: never;
+        post?: never;
+        /** Delete Patient History Item */
+        delete: operations["delete_patient_history_item_api_v1_patient_history_items__item_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Patient History Item */
+        patch: operations["update_patient_history_item_api_v1_patient_history_items__item_id__patch"];
+        trace?: never;
+    };
     "/api/v1/patients": {
         parameters: {
             query?: never;
@@ -3961,6 +3998,12 @@ export interface components {
             status?: components["schemas"]["RecordStatus"] | null;
         };
         /**
+         * FamilyRelationship
+         * @description Parentesco del familiar en un antecedente familiar (opcional).
+         * @enum {string}
+         */
+        FamilyRelationship: "padre" | "madre" | "hermano" | "hermana" | "abuelo" | "abuela" | "hijo" | "hija" | "otro";
+        /**
          * FieldValueType
          * @enum {string}
          */
@@ -4942,6 +4985,12 @@ export interface components {
             items: components["schemas"]["PatientClinicalItemListItem"][];
             pagination: components["schemas"]["OffsetPagination"];
         };
+        /** OffsetPage[PatientHistoryItemListItem] */
+        OffsetPage_PatientHistoryItemListItem_: {
+            /** Items */
+            items: components["schemas"]["PatientHistoryItemListItem"][];
+            pagination: components["schemas"]["OffsetPagination"];
+        };
         /** OffsetPage[PatientListItem] */
         OffsetPage_PatientListItem_: {
             /** Items */
@@ -5207,6 +5256,143 @@ export interface components {
             pregnancy_since?: string | null;
             /** Fecha probable de parto */
             estimated_due_date?: string | null;
+        };
+        /**
+         * PatientHistoryItemCategory
+         * @description Categoría de un antecedente clínico estructurado del paciente.
+         *
+         *     Son CATEGORÍAS de registro del expediente (no implican afirmación médica alguna):
+         *     antecedentes familiares, quirúrgicos, obstétricos, y personales patológicos/no patológicos.
+         * @enum {string}
+         */
+        PatientHistoryItemCategory: "familiar" | "quirurgico" | "obstetrico" | "patologico" | "no_patologico";
+        /**
+         * PatientHistoryItemCreate
+         * @description Alta de un antecedente clínico estructurado del paciente.
+         *
+         *     ``patient_id`` se fija en la creación y es inmutable después (no se edita por PATCH).
+         */
+        PatientHistoryItemCreate: {
+            /**
+             * Paciente
+             * Format: uuid
+             * @description Paciente al que pertenece el antecedente (no se reasigna después).
+             */
+            patient_id: string;
+            /** Categoría */
+            category: components["schemas"]["PatientHistoryItemCategory"];
+            /** Descripción */
+            description: string;
+            /**
+             * Parentesco
+             * @description Para antecedentes familiares (opcional).
+             */
+            relationship_to_patient?: components["schemas"]["FamilyRelationship"] | null;
+            /** Condición relacionada */
+            related_condition?: string | null;
+            /** Código (CIE-10) */
+            related_code?: string | null;
+            /** Edad de inicio */
+            onset_age?: number | null;
+            /** Fecha del evento */
+            occurred_on?: string | null;
+            /** Notas */
+            notes?: string | null;
+        };
+        /**
+         * PatientHistoryItemListItem
+         * @description Versión de listado compatible con ``ResourceQuery``.
+         */
+        PatientHistoryItemListItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Paciente
+             * Format: uuid
+             */
+            patient_id: string;
+            /** Categoría */
+            category: components["schemas"]["PatientHistoryItemCategory"];
+            /** Descripción */
+            description: string;
+            /** Parentesco */
+            relationship_to_patient?: components["schemas"]["FamilyRelationship"] | null;
+            /** Condición relacionada */
+            related_condition?: string | null;
+            /** Fecha del evento */
+            occurred_on?: string | null;
+            /**
+             * Creado
+             * Format: date-time
+             */
+            created_at: string;
+            /** Actualizado */
+            updated_at?: string | null;
+        };
+        /**
+         * PatientHistoryItemRead
+         * @description Representación completa de un antecedente clínico estructurado.
+         */
+        PatientHistoryItemRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Patient Id
+             * Format: uuid
+             */
+            patient_id: string;
+            category: components["schemas"]["PatientHistoryItemCategory"];
+            /** Description */
+            description: string;
+            relationship_to_patient?: components["schemas"]["FamilyRelationship"] | null;
+            /** Related Condition */
+            related_condition?: string | null;
+            /** Related Code */
+            related_code?: string | null;
+            /** Onset Age */
+            onset_age?: number | null;
+            /** Occurred On */
+            occurred_on?: string | null;
+            /** Notes */
+            notes?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /**
+         * PatientHistoryItemUpdate
+         * @description Actualización parcial de un antecedente (PATCH).
+         *
+         *     ``patient_id`` es inmutable: no se declara aquí, por lo que enviarlo da 422
+         *     (``extra="forbid"``). La auditoría tampoco es editable desde el cliente.
+         */
+        PatientHistoryItemUpdate: {
+            /** Categoría */
+            category?: components["schemas"]["PatientHistoryItemCategory"] | null;
+            /** Descripción */
+            description?: string | null;
+            /** Parentesco */
+            relationship_to_patient?: components["schemas"]["FamilyRelationship"] | null;
+            /** Condición relacionada */
+            related_condition?: string | null;
+            /** Código (CIE-10) */
+            related_code?: string | null;
+            /** Edad de inicio */
+            onset_age?: number | null;
+            /** Fecha del evento */
+            occurred_on?: string | null;
+            /** Notas */
+            notes?: string | null;
         };
         /**
          * PatientListItem
@@ -11268,6 +11454,184 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PatientClinicalItemRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_patient_history_items_api_v1_patient_history_items_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+                /** @description Campos de orden separados por coma. Use '-' para orden descendente. */
+                sort?: string;
+                patient_id?: string | null;
+                category?: components["schemas"]["PatientHistoryItemCategory"] | null;
+                id_in?: string[] | null;
+                q?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OffsetPage_PatientHistoryItemListItem_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_patient_history_item_api_v1_patient_history_items_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatientHistoryItemCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PatientHistoryItemRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_patient_history_item_api_v1_patient_history_items__item_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PatientHistoryItemRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_patient_history_item_api_v1_patient_history_items__item_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PatientHistoryItemRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_patient_history_item_api_v1_patient_history_items__item_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatientHistoryItemUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PatientHistoryItemRead"];
                 };
             };
             /** @description Validation Error */

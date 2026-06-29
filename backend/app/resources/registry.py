@@ -29,6 +29,7 @@ from backend.app.models.medical_history import MedicalHistoryVersion
 from backend.app.models.medication_template import MedicationTemplate
 from backend.app.models.patient import Patient
 from backend.app.models.patient_clinical_item import PatientClinicalItem
+from backend.app.models.patient_history_item import PatientHistoryItem
 from backend.app.models.prescription import Prescription, PrescriptionItem
 from backend.app.models.scale_result import ScaleResult
 from backend.app.models.study_order import StudyOrder
@@ -134,6 +135,11 @@ from backend.app.schemas.patient_clinical_item import (
     PatientClinicalItemListItem,
     PatientClinicalItemUpdate,
 )
+from backend.app.schemas.patient_history_item import (
+    PatientHistoryItemCreate,
+    PatientHistoryItemListItem,
+    PatientHistoryItemUpdate,
+)
 from backend.app.schemas.prescription import (
     PrescriptionCreate,
     PrescriptionItemCreate,
@@ -185,6 +191,9 @@ from backend.app.security.groups.institutional_settings import (
 from backend.app.security.groups.lab_results import LabResultPermissions
 from backend.app.security.groups.patient_clinical_items import (
     PatientClinicalItemPermissions,
+)
+from backend.app.security.groups.patient_history_items import (
+    PatientHistoryItemPermissions,
 )
 from backend.app.security.groups.patients import PatientPermissions
 from backend.app.security.groups.vital_signs import VitalSignPermissions
@@ -344,6 +353,22 @@ PATIENT_CLINICAL_ITEMS = ResourceQuery(
         filter_fields=("patient_id", "item_type", "status", "severity"),
         sort_fields=("created_at", "updated_at", "title", "started_on"),
         search_fields=("title", "details"),
+        in_fields=("id",),
+        default_sort="-created_at",
+    ),
+)
+
+PATIENT_HISTORY_ITEMS = ResourceQuery(
+    name="PatientHistoryItemQuery",
+    model=PatientHistoryItem,
+    schema=PatientHistoryItemListItem,
+    options=QueryOptions(
+        # ``patient_id`` (UUID) y ``category`` (enum no-nativo) por igualdad: la historia se
+        # consulta por paciente y opcionalmente por categoría. Búsqueda libre sobre la
+        # descripción/condición. Los listados excluyen eliminados (``deleted_at``) vía stmt base.
+        filter_fields=("patient_id", "category"),
+        sort_fields=("created_at", "updated_at", "occurred_on"),
+        search_fields=("description", "related_condition"),
         in_fields=("id",),
         default_sort="-created_at",
     ),
@@ -1108,6 +1133,40 @@ RESOURCE_REGISTRY: tuple[ResourceDefinition, ...] = (
                 confirmation=ConfirmationDef(
                     title="Eliminar dato clínico",
                     message="El dato clínico se dará de baja lógica.",
+                    confirm_label="Eliminar",
+                    destructive=True,
+                ),
+            ),
+        ),
+    ),
+    ResourceDefinition(
+        name="patient_history_items",
+        label="Antecedentes del paciente",
+        api_path="/api/v1/patient-history-items",
+        view=ResourceView.TABLE,
+        read_permission=PatientHistoryItemPermissions.READ,
+        list_query=PATIENT_HISTORY_ITEMS,
+        list_schema=PatientHistoryItemListItem,
+        # Columnas tipadas (sin JSON): el alta/edición SÍ se exponen como formulario genérico,
+        # igual que patient_clinical_items. El copiloto crea antecedentes como BORRADOR que el
+        # médico aprueba (P1) vía la tool clinical.create_history_item_draft.
+        create_schema=PatientHistoryItemCreate,
+        update_schema=PatientHistoryItemUpdate,
+        create_permission=PatientHistoryItemPermissions.CREATE,
+        update_permission=PatientHistoryItemPermissions.UPDATE,
+        detail_url_template="/api/v1/patient-history-items/{id}",
+        actions=(
+            ActionDef(
+                name="delete",
+                label="Eliminar",
+                method=HttpMethod.DELETE,
+                url_template="/api/v1/patient-history-items/{id}",
+                scope=ActionScope.ITEM,
+                danger=True,
+                permission=PatientHistoryItemPermissions.DELETE,
+                confirmation=ConfirmationDef(
+                    title="Eliminar antecedente",
+                    message="El antecedente se dará de baja lógica.",
                     confirm_label="Eliminar",
                     destructive=True,
                 ),
