@@ -109,7 +109,7 @@ const MAIN_NAV: NavItem[] = [
   },
   {
     label: "Agenda",
-    href: "/resources/appointments",
+    href: "/agenda",
     resource: "appointments",
     icon: <AgendaIcon />,
   },

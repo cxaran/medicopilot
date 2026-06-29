@@ -1,5 +1,8 @@
 "use client";
 
+import type { ReactNode } from "react";
+import Link from "next/link";
+
 import type {
   DashboardCard,
   DashboardData,
@@ -112,6 +115,7 @@ function Card({
   layout,
   countTone,
   onOpenPatient,
+  footer,
 }: Readonly<{
   title: string;
   card: DashboardCard;
@@ -119,6 +123,7 @@ function Card({
   layout: ItemLayout;
   countTone: DashboardTone;
   onOpenPatient: (patientId: string, patientLabel: string) => void;
+  footer?: ReactNode;
 }>) {
   return (
     <section className="flex flex-col rounded-[18px] border border-[var(--border)] bg-[var(--panel)] p-4 shadow-[var(--soft)]">
@@ -145,6 +150,7 @@ function Card({
           ))}
         </div>
       )}
+      {footer}
     </section>
   );
 }
@@ -173,6 +179,14 @@ export function DashboardHome({
           layout="time-left"
           countTone="info"
           onOpenPatient={onOpenPatient}
+          footer={
+            <Link
+              href="/agenda"
+              className="mt-3 block rounded-[9px] border border-[var(--border)] px-3 py-2 text-center text-[12.5px] font-medium text-[var(--accent-tx)] transition hover:bg-[var(--panel2)]"
+            >
+              Ver agenda completa
+            </Link>
+          }
         />
         <Card
           title="Consultas recientes"
