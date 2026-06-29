@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { CopilotPanel, type ChatMessage } from "@/components/copilot/CopilotPanel";
 import { ActiveContextPicker } from "@/components/copilot/ActiveContextPicker";
 import { DashboardHome } from "@/components/chat-shell/DashboardHome";
+import { PatientRecordPanel } from "@/components/chat-shell/PatientRecordPanel";
 import type { ActiveClinicalContext } from "@/core/agent/active-context";
 import type { RecentPatient } from "@/core/chat-shell/recent-patients";
 import type { DashboardData } from "@/core/chat-shell/dashboard";
@@ -214,6 +215,15 @@ export function ChatShell({
       <div className="flex min-w-0 flex-1 flex-col gap-5 overflow-y-auto">
         {activeContext === null && dashboard && (
           <DashboardHome data={dashboard} onOpenPatient={openPatientById} />
+        )}
+        {/* Expediente del paciente activo: pestañas con la UI genérica del contrato, acotada al
+            paciente. Reemplaza al dashboard cuando hay paciente; el chat sigue debajo. */}
+        {activeContext !== null && (
+          <PatientRecordPanel
+            key={activeContext.patientId}
+            patientId={activeContext.patientId}
+            patientLabel={activeContext.patientLabel}
+          />
         )}
         {/* Chat activo: el CopilotPanel existente, con contexto + historial controlados por el shell.
             Se remonta por conversación (key) para re-sembrar el historial al cambiar de chat. */}
