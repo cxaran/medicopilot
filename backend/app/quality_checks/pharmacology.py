@@ -45,6 +45,8 @@ class PharmaResolution:
 _STUB_DB: dict[str, tuple[frozenset[str], frozenset[str]]] = {
     "ibuprofeno": (frozenset({"ibuprofeno"}), frozenset({"aine"})),
     "ibuprofen": (frozenset({"ibuprofeno"}), frozenset({"aine"})),
+    "advil": (frozenset({"ibuprofeno"}), frozenset({"aine"})),
+    "motrin": (frozenset({"ibuprofeno"}), frozenset({"aine"})),
     "naproxeno": (frozenset({"naproxeno"}), frozenset({"aine"})),
     "aine": (frozenset(), frozenset({"aine"})),
     "aines": (frozenset(), frozenset({"aine"})),
@@ -53,6 +55,8 @@ _STUB_DB: dict[str, tuple[frozenset[str], frozenset[str]]] = {
     "penicilina": (frozenset({"penicilina"}), frozenset({"penicilina"})),
     "penicillin": (frozenset({"penicilina"}), frozenset({"penicilina"})),
     "paracetamol": (frozenset({"paracetamol"}), frozenset({"analgesico"})),
+    "tempra": (frozenset({"paracetamol"}), frozenset({"analgesico"})),
+    "tylenol": (frozenset({"paracetamol"}), frozenset({"analgesico"})),
 }
 
 

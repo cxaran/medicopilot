@@ -1114,6 +1114,47 @@ const TOOLS: ToolDefinition[] = [
       }),
   },
   {
+    // CLINICAL ROADMAP — Conciliación de medicación (gap case 26). SÓLO LECTURA: FastAPI exige
+    // medication_reconciliation:read. Consolida la medicación ACTIVA del paciente desde lo
+    // PRESCRITO (recetas activas) y lo REPORTADO ('medicamento actual'), de-duplica por
+    // ingrediente/clase con la fuente de farmacología, y devuelve discrepancias que el médico
+    // REVISA. No corrige, no escribe, no auto-concilia.
+    //
+    // COMPOSICIÓN: presenta la lista consolidada y las discrepancias (prescribed_not_reported,
+    // reported_not_prescribed, duplicate_medication) como "para tu revisión"; NUNCA actúes sobre
+    // ellas ni propongas una escritura salvo que el médico lo pida (y toda escritura va por las
+    // tools de borrador P1, no por esta lectura). Si resolver_available es false o un elemento
+    // trae resolver_status 'no_disponible', aclara que el emparejamiento por ingrediente/clase no
+    // estuvo disponible y se usó el nombre (no es una confirmación).
+    name: "clinical.reconcile_medications",
+    description:
+      "Concilia la medicación de un paciente: consolida lo PRESCRITO (recetas activas) y lo " +
+      "REPORTADO por el paciente ('medicamento actual'), de-duplica por ingrediente/clase y " +
+      "devuelve {patient_id, consolidated, flags, flag_count, resolver_available}. Las " +
+      "discrepancias (prescribed_not_reported, reported_not_prescribed, duplicate_medication) son " +
+      "PARA REVISIÓN del médico: no corrige ni escribe nada. Si la fuente de farmacología no está " +
+      "disponible, el emparejamiento cae a nombre y se marca 'no_disponible' (no concluye). " +
+      "Preséntalas como sugerencias; cualquier cambio lo decide el médico por las tools de " +
+      "borrador (P1), no por esta lectura. Solo lectura.",
+    kind: "read",
+    inputSchema: {
+      type: "object",
+      properties: {
+        patient_id: {
+          type: "string",
+          description: "Id (UUID) del paciente a conciliar.",
+          format: "uuid",
+        },
+      },
+      required: ["patient_id"],
+      additionalProperties: false,
+    },
+    execute: (args, ctx) => {
+      const id = encodeURIComponent(String(args.patient_id));
+      return ctx.api(`/api/v1/patients/${id}/medication-reconciliation`);
+    },
+  },
+  {
     // EPIC ESCALAS fase 2: listar los resultados de escalas YA persistidos de un paciente
     // (los borradores que el médico aprobó). Solo lectura; FastAPI exige scale_results:read.
     // Útil para mostrar puntajes previos antes de proponer uno nuevo.

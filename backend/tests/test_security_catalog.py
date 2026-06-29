@@ -77,6 +77,9 @@ from backend.app.security.groups.population import (  # noqa: E402
 from backend.app.security.groups.prescriptions import (  # noqa: E402
     PrescriptionPermissions,
 )
+from backend.app.security.groups.medication_reconciliation import (  # noqa: E402
+    MedicationReconciliationPermissions,
+)
 from backend.app.security.groups.quality_checks import (  # noqa: E402
     QualityCheckPermissions,
 )
@@ -123,6 +126,7 @@ class SecurityCatalogTest(unittest.TestCase):
                 ScaleResultPermissions,
                 ClinicalNotePermissions,
                 QualityCheckPermissions,
+                MedicationReconciliationPermissions,
                 PermissionPermissions,
             ],
         )
@@ -231,6 +235,7 @@ class SecurityCatalogTest(unittest.TestCase):
                 "clinical_notes:update",
                 "clinical_notes:delete",
                 "quality_checks:read",
+                "medication_reconciliation:read",
                 "permissions:read",
             ],
         )

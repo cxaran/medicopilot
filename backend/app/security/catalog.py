@@ -14,6 +14,9 @@ from backend.app.security.groups.institutional_settings import (
     InstitutionalSettingPermissions,
 )
 from backend.app.security.groups.lab_results import LabResultPermissions
+from backend.app.security.groups.medication_reconciliation import (
+    MedicationReconciliationPermissions,
+)
 from backend.app.security.groups.medical_history_versions import (
     MedicalHistoryVersionPermissions,
 )
@@ -63,6 +66,7 @@ SECURITY_GROUPS: list[type[SecurityGroup]] = [
     ScaleResultPermissions,
     ClinicalNotePermissions,
     QualityCheckPermissions,
+    MedicationReconciliationPermissions,
     PermissionPermissions,
 ]
 

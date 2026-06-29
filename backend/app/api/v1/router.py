@@ -29,6 +29,9 @@ from backend.app.api.v1.lab_results import router as lab_results_router
 from backend.app.api.v1.medical_history_versions import (
     router as medical_history_versions_router,
 )
+from backend.app.api.v1.medication_reconciliation import (
+    router as medication_reconciliation_router,
+)
 from backend.app.api.v1.medication_templates import (
     router as medication_templates_router,
 )
@@ -74,6 +77,7 @@ router.include_router(doctors_router)
 router.include_router(institutional_settings_router)
 router.include_router(lab_results_router)
 router.include_router(medical_history_versions_router)
+router.include_router(medication_reconciliation_router)
 router.include_router(medication_templates_router)
 router.include_router(patient_clinical_items_router)
 router.include_router(patients_router)

@@ -1201,6 +1201,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/patients/{patient_id}/medication-reconciliation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Reconcile Patient Medications
+         * @description Concilia la medicación del paciente. Sólo lectura; no muta nada.
+         */
+        get: operations["reconcile_patient_medications_api_v1_patients__patient_id__medication_reconciliation_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/medication-templates": {
         parameters: {
             query?: never;
@@ -3377,6 +3397,43 @@ export interface components {
             expires_at: string;
         };
         /**
+         * ConsolidatedMedicationRead
+         * @description Una entrada de la lista única de medicación activa.
+         */
+        ConsolidatedMedicationRead: {
+            /**
+             * Key
+             * @description Clave de agrupación (ingrediente/clase o nombre normalizado).
+             */
+            key: string;
+            /**
+             * Display Name
+             * @description Nombre legible del medicamento.
+             */
+            display_name: string;
+            /**
+             * Ingredient Or Class
+             * @description Ingrediente o clase resuelto, si la fuente de farmacología lo dio.
+             */
+            ingredient_or_class?: string | null;
+            /**
+             * Resolver Status
+             * @description Cómo se agrupó: por ingrediente/clase, por nombre, o sin fuente (no disponible).
+             * @enum {string}
+             */
+            resolver_status: "resolved" | "name_only" | "no_disponible";
+            /**
+             * Prescribed Refs
+             * @description Registros prescritos que aportan a esta entrada.
+             */
+            prescribed_refs?: string[];
+            /**
+             * Reported Refs
+             * @description Registros reportados por el paciente para esta entrada.
+             */
+            reported_refs?: string[];
+        };
+        /**
          * ConsultationCreate
          * @description Alta de una consulta en borrador.
          *
@@ -4518,6 +4575,31 @@ export interface components {
             clinical_observations?: string | null;
         };
         /**
+         * MedicationReconciliationResponse
+         * @description Resultado de la conciliación: lista consolidada + discrepancias.
+         */
+        MedicationReconciliationResponse: {
+            /**
+             * Patient Id
+             * Format: uuid
+             */
+            patient_id: string;
+            /** Consolidated */
+            consolidated: components["schemas"]["ConsolidatedMedicationRead"][];
+            /** Flags */
+            flags: components["schemas"]["ReconciliationFlagRead"][];
+            /**
+             * Flag Count
+             * @description Número de discrepancias.
+             */
+            flag_count: number;
+            /**
+             * Resolver Available
+             * @description Si la fuente de farmacología respondió (false -> emparejamiento por nombre).
+             */
+            resolver_available: boolean;
+        };
+        /**
          * MedicationTemplateCreate
          * @description Alta de una plantilla de medicamento frecuente de un médico.
          *
@@ -5584,6 +5666,35 @@ export interface components {
             checks: {
                 [key: string]: boolean;
             };
+        };
+        /**
+         * ReconciliationFlagRead
+         * @description Una discrepancia para revisión (no es una corrección).
+         */
+        ReconciliationFlagRead: {
+            /**
+             * Kind
+             * @description Tipo de discrepancia.
+             * @enum {string}
+             */
+            kind: "prescribed_not_reported" | "reported_not_prescribed" | "duplicate_medication";
+            /**
+             * Message
+             * @description Descripción en español de la discrepancia.
+             */
+            message: string;
+            /**
+             * Source Refs
+             * @description Registros (modelo:id) que sustentan la discrepancia.
+             */
+            source_refs?: string[];
+            /** Ingredient Or Class */
+            ingredient_or_class?: string | null;
+            /**
+             * Resolver Status
+             * @enum {string}
+             */
+            resolver_status: "resolved" | "name_only" | "no_disponible";
         };
         /**
          * RecordStatus
@@ -10567,6 +10678,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MedicalHistoryVersionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reconcile_patient_medications_api_v1_patients__patient_id__medication_reconciliation_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                patient_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MedicationReconciliationResponse"];
                 };
             };
             /** @description Validation Error */
