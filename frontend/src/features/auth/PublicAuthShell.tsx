@@ -1,8 +1,11 @@
 import Link from "next/link";
 
-import { Card } from "@/components/ui/Card";
-
-/** Marco visual común a las páginas públicas de auth (tarjeta centrada, tokens). */
+/**
+ * Marco visual común a las páginas públicas de auth — re-skin del LOGIN del diseño (MP-CTRL-0127):
+ * marca centrada (orbe de gradiente + "MediCopilot"), título/descripción de la página y una tarjeta
+ * de panel suave; con blobs decorativos al fondo. SÓLO presentación (tokens de tema, sin lógica de
+ * auth): cada página inyecta su formulario como ``children`` sin cambios de comportamiento.
+ */
 export function PublicAuthShell({
   title,
   description,
@@ -15,21 +18,31 @@ export function PublicAuthShell({
   footer?: React.ReactNode;
 }>) {
   return (
-    <main className="flex min-h-screen items-center justify-center bg-[var(--bg)] px-4 py-10 text-[var(--tx)]">
-      <Card className="w-full max-w-sm">
-        <div className="mb-6 flex flex-col gap-3">
-          <span className="flex h-10 w-10 items-center justify-center rounded-[12px] bg-[var(--accent)] text-base font-bold text-[var(--on-accent)]">
-            M
-          </span>
-          <div>
-            <p className="text-sm text-[var(--tx3)]">MediCopilot</p>
-            <h1 className="text-2xl font-semibold tracking-tight text-[var(--tx)]">{title}</h1>
-            {description ? <p className="mt-1 text-sm text-[var(--tx2)]">{description}</p> : null}
-          </div>
+    <main className="relative flex min-h-screen flex-col overflow-hidden bg-[var(--bg)] px-4 py-10 text-[var(--tx)]">
+      {/* Blobs decorativos del diseño (estáticos, sin captura de eventos). */}
+      <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
+        <div className="absolute -left-40 -top-44 h-[560px] w-[560px] rounded-full opacity-40 blur-[70px] [background:radial-gradient(circle,#a59bf6,transparent_68%)]" />
+        <div className="absolute -bottom-40 -right-40 h-[520px] w-[520px] rounded-full opacity-30 blur-[72px] [background:radial-gradient(circle,#7fd9d0,transparent_68%)]" />
+        <div className="absolute -top-28 right-[8%] h-[380px] w-[380px] rounded-full opacity-25 blur-[66px] [background:radial-gradient(circle,#f4a6c0,transparent_70%)]" />
+      </div>
+
+      <div className="relative z-[1] m-auto flex w-full max-w-[392px] flex-col items-center">
+        <span className="flex h-12 w-12 items-center justify-center rounded-[14px] text-xl font-bold text-white [background:linear-gradient(135deg,#a59bf6,#7fd9d0)]">
+          M
+        </span>
+        <h1 className="mt-5 text-[27px] font-semibold tracking-tight text-[var(--tx)]">
+          MediCopilot
+        </h1>
+        <p className="mt-2 text-center text-[14.5px] text-[var(--tx2)]">{title}</p>
+        {description ? (
+          <p className="mt-1 text-center text-sm text-[var(--tx3)]">{description}</p>
+        ) : null}
+
+        <div className="mt-7 w-full rounded-[22px] bg-[var(--panel)] p-6 shadow-[var(--soft2)]">
+          {children}
+          {footer ? <div className="mt-6 text-sm text-[var(--tx2)]">{footer}</div> : null}
         </div>
-        {children}
-        {footer ? <div className="mt-6 text-sm text-[var(--tx2)]">{footer}</div> : null}
-      </Card>
+      </div>
     </main>
   );
 }

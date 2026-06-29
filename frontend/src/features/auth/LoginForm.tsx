@@ -5,9 +5,15 @@ import { useRouter } from "next/navigation";
 
 import { ApiRequestError } from "@/core/api/api-error";
 import { browserApi } from "@/core/api/browser-client";
-import { Button } from "@/components/ui/Button";
-import { Input } from "@/components/ui/Input";
 import { AuthAlert, AuthLabel } from "@/features/auth/PublicAuthShell";
+
+// Caja de campo del diseño (LOGIN, MP-CTRL-0127): icono + input transparente en un contenedor
+// redondeado. SÓLO presentación; los atributos del input (name/type/autoComplete/required) se
+// conservan idénticos, así el envío por FormData no cambia.
+const FIELD_BOX =
+  "flex items-center gap-2.5 rounded-[13px] border border-[var(--border2)] bg-[var(--bg2)] px-3 py-2.5 transition focus-within:border-[var(--accent-bd)]";
+const FIELD_INPUT =
+  "flex-1 border-0 bg-transparent text-sm text-[var(--tx)] outline-none placeholder:text-[var(--tx3)]";
 
 export function LoginForm() {
   const router = useRouter();
@@ -45,26 +51,85 @@ export function LoginForm() {
     <form className="space-y-4" onSubmit={onSubmit}>
       <div className="space-y-1.5">
         <AuthLabel htmlFor="email">Correo electrónico</AuthLabel>
-        <Input id="email" name="email" type="email" autoComplete="email" required />
+        <div className={FIELD_BOX}>
+          <svg
+            aria-hidden="true"
+            width="17"
+            height="17"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="var(--tx3)"
+            strokeWidth="1.7"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <rect x="3" y="5" width="18" height="14" rx="2.5" />
+            <path d="M3.5 6.5L12 13l8.5-6.5" />
+          </svg>
+          <input
+            id="email"
+            name="email"
+            type="email"
+            autoComplete="email"
+            required
+            placeholder="doctor@ejemplo.com"
+            className={FIELD_INPUT}
+          />
+        </div>
       </div>
       <div className="space-y-1.5">
         <AuthLabel htmlFor="password">Contraseña</AuthLabel>
-        <Input
-          id="password"
-          name="password"
-          type="password"
-          autoComplete="current-password"
-          required
-        />
+        <div className={FIELD_BOX}>
+          <svg
+            aria-hidden="true"
+            width="17"
+            height="17"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="var(--tx3)"
+            strokeWidth="1.7"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <rect x="4" y="10" width="16" height="11" rx="2.5" />
+            <path d="M8 10V7a4 4 0 018 0v3" />
+          </svg>
+          <input
+            id="password"
+            name="password"
+            type="password"
+            autoComplete="current-password"
+            required
+            placeholder="••••••••"
+            className={FIELD_INPUT}
+          />
+        </div>
       </div>
       {error ? (
         <AuthAlert tone="danger" role="alert">
           {error}
         </AuthAlert>
       ) : null}
-      <Button className="w-full" disabled={isPending} type="submit">
+      <button
+        type="submit"
+        disabled={isPending}
+        className="mt-1 flex w-full items-center justify-center gap-2 rounded-[14px] bg-[var(--accent)] px-4 py-3 text-[14.5px] font-semibold text-[var(--on-accent)] shadow-[var(--soft)] transition hover:brightness-105 disabled:opacity-60"
+      >
         {isPending ? "Ingresando..." : "Ingresar"}
-      </Button>
+        <svg
+          aria-hidden="true"
+          width="17"
+          height="17"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M5 12h14M13 6l6 6-6 6" />
+        </svg>
+      </button>
     </form>
   );
 }
