@@ -1956,6 +1956,102 @@ const TOOLS: ToolDefinition[] = [
     },
   },
   {
+    // CONVERSACIÓN→EXPEDIENTE (casos 116/117/119/123): proponer el ALTA de un paciente como
+    // BORRADOR P1 con campos prellenados desde lo extraído. NUNCA autocrea: el alta pasa por la
+    // aprobación del médico. ANTES de crear, internamente DEDUPLICA (llama a la búsqueda de 0113):
+    // si hay una coincidencia fuerte y no se ha confirmado (acknowledge_duplicates), NO crea y
+    // devuelve las posibles coincidencias para que el médico elija un expediente existente.
+    // Valida formatos (CURP/teléfono/fecha) NOMBRANDO el campo inválido para que el agente pida
+    // corregirlo; los campos ausentes quedan VACÍOS (la ausencia no es una afirmación negativa).
+    name: "clinical.create_patient_draft",
+    description:
+      "Propone el ALTA de un paciente EN BORRADOR con los datos extraídos (nombre, fecha de " +
+      "nacimiento, sexo y, si están, teléfono/correo/CURP/dirección). Acción de escritura: " +
+      "requiere aprobación explícita del médico; nada se crea de forma autónoma. ANTES de crear " +
+      "BUSCA DUPLICADOS: si existe una coincidencia fuerte devuelve 'posibles coincidencias " +
+      "existentes — confirma antes de crear' SIN crear nada, para que el médico elija el " +
+      "expediente existente; para crear de todos modos, reenvía con acknowledge_duplicates=true. " +
+      "No inventes datos: deja vacío lo que no sepas (no rellenes valores por defecto). full_name, " +
+      "birth_date (AAAA-MM-DD) y sex son obligatorios.",
+    kind: "write",
+    inputSchema: {
+      type: "object",
+      properties: {
+        full_name: { type: "string", description: "Nombre completo del paciente." },
+        birth_date: {
+          type: "string",
+          description: "Fecha de nacimiento en formato AAAA-MM-DD.",
+          pattern: "^\\d{4}-\\d{2}-\\d{2}$",
+        },
+        sex: {
+          type: "string",
+          description: "Sexo registrado.",
+          enum: ["female", "male", "other", "unspecified"],
+        },
+        phone: {
+          type: "string",
+          description: "Teléfono (dígitos y separadores).",
+          pattern: "^[0-9()+\\-\\s]{7,20}$",
+        },
+        email: { type: "string", description: "Correo electrónico." },
+        curp: {
+          type: "string",
+          description: "CURP mexicana (18 caracteres).",
+          pattern: "^[A-Za-z][AEIOUXaeioux][A-Za-z]{2}[0-9]{6}[HMhm][A-Za-z]{5}[0-9A-Za-z][0-9]$",
+        },
+        address: { type: "string", description: "Dirección." },
+        acknowledge_duplicates: {
+          type: "boolean",
+          description: "Crear aunque existan posibles duplicados (sólo tras revisarlos el médico).",
+        },
+      },
+      required: ["full_name", "birth_date", "sex"],
+      additionalProperties: false,
+    },
+    approval: {
+      actionType: "create_patient_draft",
+      targetResource: "patients",
+      summarize: (args) =>
+        `Crear el expediente del paciente "${String(args.full_name ?? "—")}" ` +
+        `(nac. ${String(args.birth_date ?? "—")}).`,
+    },
+    execute: async (args, ctx) => {
+      // 1) Dedup interno (búsqueda de 0113) con las señales de identidad disponibles.
+      const search = new URLSearchParams();
+      search.set("name", String(args.full_name));
+      for (const key of ["phone", "curp", "birth_date", "email"]) {
+        const value = args[key];
+        if (typeof value === "string" && value !== "") search.set(key, value);
+      }
+      const dedup = (await ctx.api(
+        `/api/v1/patients/search?${search.toString()}`,
+      )) as { has_strong_match?: boolean; candidates?: unknown[] };
+
+      if (dedup.has_strong_match && args.acknowledge_duplicates !== true) {
+        // Coincidencia fuerte: NO se crea. Se devuelven los candidatos para que el médico
+        // elija un expediente existente o confirme la creación reenviando acknowledge_duplicates.
+        return {
+          created: false,
+          message:
+            "Posibles coincidencias existentes — confirma antes de crear. Para usar un " +
+            "paciente existente, elígelo; para crear de todos modos, reenvía con " +
+            "acknowledge_duplicates=true.",
+          possible_duplicates: dedup.candidates ?? [],
+        };
+      }
+
+      // 2) Sin duplicado fuerte (o ya confirmado): se crea el expediente. ``acknowledge_duplicates``
+      // no es un campo del paciente: se excluye del cuerpo (PatientCreate rechaza extras).
+      const body: Record<string, unknown> = {};
+      for (const key of ["full_name", "birth_date", "sex", "phone", "email", "curp", "address"]) {
+        const value = args[key];
+        if (value !== undefined && value !== null && value !== "") body[key] = value;
+      }
+      const patient = await ctx.api(`/api/v1/patients`, { method: "POST", body });
+      return { created: true, patient };
+    },
+  },
+  {
     // EPIC DOCS fase 1: componer una nota SOAP de una consulta y guardarla como BORRADOR que
     // el médico aprueba (P1). NUNCA se autofinaliza: nace en estado draft.
     //

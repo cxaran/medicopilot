@@ -14,6 +14,9 @@ export interface PropSchema {
   minimum?: number;
   maximum?: number;
   format?: "uuid";
+  // Restricción de forma para cadenas (p. ej. CURP, teléfono, fecha ISO). Si el valor no
+  // casa, el error NOMBRA el campo para que el agente pida corregirlo (nunca asume un valor).
+  pattern?: string;
   additionalProperties?: boolean;
 }
 
@@ -68,6 +71,9 @@ function checkProp(key: string, prop: PropSchema, value: unknown): string | null
   }
   if (prop.format === "uuid" && !UUID_RE.test(value)) {
     return `El campo '${key}' debe ser un UUID válido.`;
+  }
+  if (prop.pattern && !new RegExp(prop.pattern, "u").test(value)) {
+    return `El campo '${key}' no tiene el formato esperado.`;
   }
   if (prop.enum && !prop.enum.includes(value)) {
     return `El campo '${key}' tiene un valor no permitido.`;
