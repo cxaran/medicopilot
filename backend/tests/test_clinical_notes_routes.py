@@ -52,6 +52,7 @@ from backend.app.main import app  # noqa: E402
 from backend.app.models import Base  # noqa: E402
 from backend.app.models.clinical_note import ClinicalNote  # noqa: E402
 from backend.app.models.consultation import Consultation  # noqa: E402
+from backend.app.models.enums import ClinicalNoteKind  # noqa: E402
 from backend.app.models.doctor import Doctor  # noqa: E402
 from backend.app.models.enums import Sex  # noqa: E402
 from backend.app.models.patient import Patient  # noqa: E402
@@ -93,6 +94,31 @@ class ClinicalNotesPermissionsTest(unittest.TestCase):
         # Las secciones sin datos se marcan; no se inventa contenido.
         self.assertIn("_(sin información registrada)_", md)
         self.assertIn("## O — Objetivo", md)
+
+    def test_markdown_render_constancia(self) -> None:
+        note = ClinicalNote(kind=ClinicalNoteKind.CONSTANCIA, details={
+            "patient_name": "Juan Pérez", "attended_on": "2026-06-01",
+            "motivo": "Cuadro gripal", "physician_name": "Dra. House", "physician_license": "12345678"})
+        md = note.content_markdown
+        self.assertIn("# Constancia médica", md)
+        self.assertIn("Juan Pérez", md)
+        self.assertIn("2026-06-01", md)
+        self.assertIn("Cuadro gripal", md)
+        self.assertIn("12345678", md)
+
+    def test_markdown_render_incapacidad_computes_end_date(self) -> None:
+        note = ClinicalNote(kind=ClinicalNoteKind.INCAPACIDAD, details={
+            "patient_name": "Ana López", "diagnosis": "Lumbalgia",
+            "rest_start_date": "2026-06-01", "rest_days": 3,
+            "physician_name": "Dra. House", "physician_license": "12345678"})
+        md = note.content_markdown
+        self.assertIn("# Incapacidad", md)
+        self.assertIn("Ana López", md)
+        self.assertIn("Lumbalgia", md)
+        self.assertIn("3 día(s)", md)
+        # Fin inclusivo: inicio 2026-06-01 + 3 días = 2026-06-03.
+        self.assertIn("2026-06-01", md)
+        self.assertIn("2026-06-03", md)
 
 
 @unittest.skipUnless(
@@ -225,6 +251,78 @@ class ClinicalNotesRoutesTest(unittest.TestCase):
         self.assertEqual(patch.status_code, 200, patch.text)
         self.assertIn("Alta con indicaciones", patch.json()["plan"])
         self.assertIn("Alta con indicaciones", patch.json()["content_markdown"])
+
+    # --- constancia / incapacidad (fase 2) ---
+
+    def test_create_medical_certificate_persists_draft(self) -> None:
+        resp = self.client.post("/api/v1/clinical-notes/medical-certificate",
+                                json={"consultation_id": str(self.consultation_id),
+                                      "motivo": "Cuadro respiratorio"})
+        self.assertEqual(resp.status_code, 201, resp.text)
+        body = resp.json()
+        self.assertEqual(body["kind"], "constancia")
+        self.assertEqual(body["status"], "draft")  # NUNCA autofinalizada
+        self.assertEqual(body["patient_id"], str(self.patient_id))
+        # Snapshot de datos REALES de la consulta (paciente, médico, cédula, fecha).
+        self.assertEqual(body["details"]["patient_name"], "Paciente Nota")
+        self.assertEqual(body["details"]["physician_name"], "Dra. House")
+        self.assertEqual(body["details"]["attended_on"], "2026-01-01")
+        self.assertIn("# Constancia médica", body["content_markdown"])
+        self.assertIn("Cuadro respiratorio", body["content_markdown"])
+
+    def test_create_sick_leave_persists_draft_with_rest_period(self) -> None:
+        resp = self.client.post("/api/v1/clinical-notes/sick-leave",
+                                json={"consultation_id": str(self.consultation_id),
+                                      "diagnosis": "Lumbalgia aguda",
+                                      "rest_start_date": "2026-01-02", "rest_days": 5})
+        self.assertEqual(resp.status_code, 201, resp.text)
+        body = resp.json()
+        self.assertEqual(body["kind"], "incapacidad")
+        self.assertEqual(body["status"], "draft")
+        self.assertEqual(body["details"]["rest_days"], 5)
+        self.assertEqual(body["details"]["rest_start_date"], "2026-01-02")
+        self.assertIn("# Incapacidad", body["content_markdown"])
+        self.assertIn("Lumbalgia aguda", body["content_markdown"])
+        self.assertIn("5 día(s)", body["content_markdown"])
+
+    def test_sick_leave_requires_rest_days_never_fabricated(self) -> None:
+        # Sin rest_days -> 422: el número de días es decisión médica; jamás se inventa.
+        resp = self.client.post("/api/v1/clinical-notes/sick-leave",
+                                json={"consultation_id": str(self.consultation_id),
+                                      "diagnosis": "Lumbalgia", "rest_start_date": "2026-01-02"})
+        self.assertEqual(resp.status_code, 422, resp.text)
+
+    def test_sick_leave_rejects_non_positive_rest_days(self) -> None:
+        resp = self.client.post("/api/v1/clinical-notes/sick-leave",
+                                json={"consultation_id": str(self.consultation_id),
+                                      "diagnosis": "Lumbalgia", "rest_start_date": "2026-01-02",
+                                      "rest_days": 0})
+        self.assertEqual(resp.status_code, 422, resp.text)
+
+    def test_certificate_rejects_nonexistent_consultation(self) -> None:
+        resp = self.client.post("/api/v1/clinical-notes/medical-certificate",
+                                json={"consultation_id": str(uuid.uuid4())})
+        self.assertEqual(resp.status_code, 404, resp.text)
+
+    def test_list_filter_by_kind(self) -> None:
+        self.assertEqual(self._create().status_code, 201)  # nota_soap
+        self.client.post("/api/v1/clinical-notes/medical-certificate",
+                         json={"consultation_id": str(self.consultation_id)}).raise_for_status()
+        const = self.client.get(
+            f"/api/v1/clinical-notes?patient_id={self.patient_id}&kind=constancia"
+        ).json()
+        kinds = {i["kind"] for i in const["items"]}
+        self.assertEqual(kinds, {"constancia"})
+        soap = self.client.get(
+            f"/api/v1/clinical-notes?patient_id={self.patient_id}&kind=nota_soap"
+        ).json()
+        self.assertTrue(all(i["kind"] == "nota_soap" for i in soap["items"]))
+
+    def test_certificate_requires_create_permission(self) -> None:
+        self._as("clinical_notes:read")
+        resp = self.client.post("/api/v1/clinical-notes/medical-certificate",
+                                json={"consultation_id": str(self.consultation_id)})
+        self.assertEqual(resp.status_code, 403)
 
     def test_read_requires_read_permission(self) -> None:
         self._as()

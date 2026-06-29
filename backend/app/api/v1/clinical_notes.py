@@ -26,13 +26,17 @@ from backend.app.auth.auth_dependencies import CurrentUser
 from backend.app.core.database import SessionDep
 from backend.app.models.clinical_note import ClinicalNote
 from backend.app.models.consultation import Consultation
-from backend.app.models.enums import ClinicalNoteStatus
+from backend.app.models.doctor import Doctor
+from backend.app.models.enums import ClinicalNoteKind, ClinicalNoteStatus
+from backend.app.models.patient import Patient
 from backend.app.resources.registry import CLINICAL_NOTES
 from backend.app.schemas.clinical_note import (
     ClinicalNoteCreate,
     ClinicalNoteListItem,
     ClinicalNoteRead,
     ClinicalNoteUpdate,
+    MedicalCertificateCreate,
+    SickLeaveCreate,
 )
 from backend.app.schemas.pagination import OffsetPage
 from backend.app.security.groups.clinical_notes import ClinicalNotePermissions
@@ -103,6 +107,94 @@ def create_clinical_note(
         },
         conflict_message=_CONFLICT,
     )
+    return serialize(ClinicalNoteRead, note)
+
+
+def _consultation_snapshot(session: Session, consultation: Consultation) -> dict:
+    """Toma de la consulta los datos REALES para el documento (snapshot a la emisión).
+
+    Captura nombre del paciente, médico tratante y su cédula, y la fecha de asistencia. No se
+    inventa nada: si un dato no existe en el expediente, queda ausente y el render lo marca.
+    """
+    patient = session.get(Patient, consultation.patient_id)
+    doctor = session.get(Doctor, consultation.attending_doctor_id)
+    return {
+        "patient_name": patient.full_name if patient is not None else None,
+        "attended_on": consultation.consulted_at.date().isoformat(),
+        "physician_name": doctor.professional_name if doctor is not None else None,
+        "physician_license": (
+            doctor.professional_license_number if doctor is not None else None
+        ),
+    }
+
+
+@router.post(
+    "/medical-certificate",
+    response_model=ClinicalNoteRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_medical_certificate(
+    payload: MedicalCertificateCreate,
+    session: SessionDep,
+    current_user: CurrentUser,
+    _: ClinicalNotePermissions.CREATE.requiere,
+) -> ClinicalNoteRead:
+    """Crea una CONSTANCIA/justificante de asistencia EN BORRADOR, compuesta de la consulta."""
+    consultation = _get_active_consultation(session, payload.consultation_id)
+    details = _consultation_snapshot(session, consultation)
+    details["motivo"] = payload.motivo
+    note = ClinicalNote(
+        patient_id=consultation.patient_id,
+        consultation_id=consultation.id,
+        kind=ClinicalNoteKind.CONSTANCIA,
+        status=ClinicalNoteStatus.DRAFT,
+        details=details,
+        created_by=current_user.id,
+        updated_by=current_user.id,
+    )
+    session.add(note)
+    session.commit()
+    session.refresh(note)
+    return serialize(ClinicalNoteRead, note)
+
+
+@router.post(
+    "/sick-leave",
+    response_model=ClinicalNoteRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_sick_leave(
+    payload: SickLeaveCreate,
+    session: SessionDep,
+    current_user: CurrentUser,
+    _: ClinicalNotePermissions.CREATE.requiere,
+) -> ClinicalNoteRead:
+    """Crea una INCAPACIDAD/justificante de reposo EN BORRADOR.
+
+    El número de días de reposo es decisión médica EXPLÍCITA (``rest_days`` obligatorio, ≥1 por
+    schema): nunca se asume ni se inventa.
+    """
+    consultation = _get_active_consultation(session, payload.consultation_id)
+    details = _consultation_snapshot(session, consultation)
+    details.update(
+        {
+            "diagnosis": payload.diagnosis,
+            "rest_start_date": payload.rest_start_date.isoformat(),
+            "rest_days": payload.rest_days,
+        }
+    )
+    note = ClinicalNote(
+        patient_id=consultation.patient_id,
+        consultation_id=consultation.id,
+        kind=ClinicalNoteKind.INCAPACIDAD,
+        status=ClinicalNoteStatus.DRAFT,
+        details=details,
+        created_by=current_user.id,
+        updated_by=current_user.id,
+    )
+    session.add(note)
+    session.commit()
+    session.refresh(note)
     return serialize(ClinicalNoteRead, note)
 
 

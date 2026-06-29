@@ -802,6 +802,49 @@ export interface paths {
         patch: operations["update_clinical_note_api_v1_clinical_notes__note_id__patch"];
         trace?: never;
     };
+    "/api/v1/clinical-notes/medical-certificate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Medical Certificate
+         * @description Crea una CONSTANCIA/justificante de asistencia EN BORRADOR, compuesta de la consulta.
+         */
+        post: operations["create_medical_certificate_api_v1_clinical_notes_medical_certificate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clinical-notes/sick-leave": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Sick Leave
+         * @description Crea una INCAPACIDAD/justificante de reposo EN BORRADOR.
+         *
+         *     El número de días de reposo es decisión médica EXPLÍCITA (``rest_days`` obligatorio, ≥1 por
+         *     schema): nunca se asume ni se inventa.
+         */
+        post: operations["create_sick_leave_api_v1_clinical_notes_sick_leave_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/clinical-scales": {
         parameters: {
             query?: never;
@@ -2965,6 +3008,16 @@ export interface components {
             plan?: string | null;
         };
         /**
+         * ClinicalNoteKind
+         * @description Tipo de documento clínico estructurado almacenado como ``ClinicalNote``.
+         *
+         *     ``nota_soap`` es la nota SOAP (fase 1); ``constancia`` es la constancia/justificante de
+         *     asistencia; ``incapacidad`` es el justificante de reposo laboral. Todos se componen de
+         *     datos REALES de la consulta y se guardan como borrador (nunca autofirmados).
+         * @enum {string}
+         */
+        ClinicalNoteKind: "nota_soap" | "constancia" | "incapacidad";
+        /**
          * ClinicalNoteListItem
          * @description Versión de listado.
          *
@@ -2987,6 +3040,8 @@ export interface components {
              * Format: uuid
              */
             consultation_id: string;
+            /** Tipo */
+            kind: components["schemas"]["ClinicalNoteKind"];
             /** Estado */
             status: components["schemas"]["ClinicalNoteStatus"];
             /**
@@ -3017,6 +3072,7 @@ export interface components {
              * Format: uuid
              */
             consultation_id: string;
+            kind: components["schemas"]["ClinicalNoteKind"];
             /** Subjective */
             subjective?: string | null;
             /** Objective */
@@ -3025,6 +3081,10 @@ export interface components {
             assessment?: string | null;
             /** Plan */
             plan?: string | null;
+            /** Details */
+            details?: {
+                [key: string]: unknown;
+            } | null;
             status: components["schemas"]["ClinicalNoteStatus"];
             /** Content Markdown */
             content_markdown: string;
@@ -4237,6 +4297,27 @@ export interface components {
              * Format: password
              */
             password: string;
+        };
+        /**
+         * MedicalCertificateCreate
+         * @description Alta de una constancia/justificante de asistencia (borrador P1).
+         *
+         *     Sólo se acepta la consulta y un motivo opcional: el servidor toma de la consulta la
+         *     identidad del paciente, la fecha de asistencia y el médico + cédula (snapshot), y fija
+         *     ``kind='constancia'`` y ``status='draft'``. No inventa hechos de asistencia.
+         */
+        MedicalCertificateCreate: {
+            /**
+             * Consulta
+             * Format: uuid
+             * @description Consulta a la que asistió el paciente.
+             */
+            consultation_id: string;
+            /**
+             * Motivo
+             * @description Motivo/diagnóstico a declarar, si aplica.
+             */
+            motivo?: string | null;
         };
         /**
          * MedicalHistoryVersionCreate
@@ -6018,6 +6099,38 @@ export interface components {
          * @enum {string}
          */
         Sex: "female" | "male" | "other" | "unspecified";
+        /**
+         * SickLeaveCreate
+         * @description Alta de una incapacidad/justificante de reposo (borrador P1).
+         *
+         *     El servidor toma de la consulta la identidad del paciente y el médico + cédula. El
+         *     DIAGNÓSTICO y el periodo de reposo son decisión médica: ``rest_days`` es OBLIGATORIO y
+         *     debe ser ≥ 1; NUNCA se asume ni se inventa. Fija ``kind='incapacidad'``, ``status='draft'``.
+         */
+        SickLeaveCreate: {
+            /**
+             * Consulta
+             * Format: uuid
+             * @description Consulta de la que deriva la incapacidad.
+             */
+            consultation_id: string;
+            /**
+             * Diagnóstico/motivo
+             * @description Diagnóstico o motivo del reposo.
+             */
+            diagnosis: string;
+            /**
+             * Inicio del reposo
+             * Format: date
+             * @description Fecha de inicio del reposo.
+             */
+            rest_start_date: string;
+            /**
+             * Días de reposo
+             * @description Número de días de reposo (decisión médica).
+             */
+            rest_days: number;
+        };
         /** SortCapability */
         SortCapability: {
             /** Default Sort */
@@ -8587,6 +8700,7 @@ export interface operations {
                 sort?: string;
                 patient_id?: string | null;
                 consultation_id?: string | null;
+                kind?: components["schemas"]["ClinicalNoteKind"] | null;
                 status?: components["schemas"]["ClinicalNoteStatus"] | null;
                 id_in?: string[] | null;
                 created_at_on?: string | null;
@@ -8743,6 +8857,76 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClinicalNoteRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_medical_certificate_api_v1_clinical_notes_medical_certificate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MedicalCertificateCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClinicalNoteRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_sick_leave_api_v1_clinical_notes_sick_leave_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SickLeaveCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };

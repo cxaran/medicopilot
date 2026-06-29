@@ -1,8 +1,9 @@
 import uuid
-from datetime import datetime
-from typing import Optional
+from datetime import date, datetime, timedelta
+from typing import Any, Optional
 
 from sqlalchemy import (
+    JSON,
     DateTime,
     Enum as SAEnum,
     ForeignKey,
@@ -10,11 +11,12 @@ from sqlalchemy import (
     Text,
     func,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.app.models.base import Base
-from backend.app.models.enums import ClinicalNoteStatus, enum_values
+from backend.app.models.enums import ClinicalNoteKind, ClinicalNoteStatus, enum_values
 
 
 class ClinicalNote(Base):
@@ -48,6 +50,20 @@ class ClinicalNote(Base):
         nullable=False,
         comment="Consulta de la que se compone la nota SOAP.",
     )
+    kind: Mapped[ClinicalNoteKind] = mapped_column(
+        SAEnum(
+            ClinicalNoteKind,
+            name="clinical_note_kind",
+            native_enum=False,
+            create_constraint=True,
+            validate_strings=True,
+            values_callable=enum_values,
+        ),
+        nullable=False,
+        default=ClinicalNoteKind.NOTA_SOAP,
+        server_default=ClinicalNoteKind.NOTA_SOAP.value,
+        comment="Tipo de documento: nota_soap, constancia o incapacidad.",
+    )
     subjective: Mapped[Optional[str]] = mapped_column(
         Text, nullable=True, comment="Sección S (Subjetivo): motivo, padecimiento, interrogatorio."
     )
@@ -59,6 +75,15 @@ class ClinicalNote(Base):
     )
     plan: Mapped[Optional[str]] = mapped_column(
         Text, nullable=True, comment="Sección P (Plan): tratamiento, indicaciones, seguimiento."
+    )
+    details: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSON().with_variant(JSONB, "postgresql"),
+        nullable=True,
+        comment=(
+            "Datos snapshot por tipo (JSON portable): constancia/incapacidad guardan aquí "
+            "nombre del paciente, médico y cédula, fecha de asistencia, diagnóstico/motivo y, "
+            "para incapacidad, inicio y número de días de reposo. La nota SOAP no lo usa."
+        ),
     )
     status: Mapped[ClinicalNoteStatus] = mapped_column(
         SAEnum(
@@ -122,7 +147,14 @@ class ClinicalNote(Base):
 
     @property
     def content_markdown(self) -> str:
-        """Renderiza la nota SOAP a Markdown. Las secciones sin datos se marcan, no se inventan."""
+        """Renderiza el documento a Markdown según su tipo. Lo ausente se marca; no se inventa."""
+        if self.kind == ClinicalNoteKind.CONSTANCIA:
+            return self._render_constancia()
+        if self.kind == ClinicalNoteKind.INCAPACIDAD:
+            return self._render_incapacidad()
+        return self._render_soap()
+
+    def _render_soap(self) -> str:
         empty = "_(sin información registrada)_"
         sections = (
             ("S — Subjetivo", self.subjective),
@@ -135,3 +167,46 @@ class ClinicalNote(Base):
             text = body.strip() if body and body.strip() else empty
             parts.append(f"## {title}\n\n{text}")
         return "\n\n".join(parts)
+
+    def _render_constancia(self) -> str:
+        d = self.details or {}
+        paciente = d.get("patient_name") or "_(paciente no especificado)_"
+        fecha = d.get("attended_on") or "_(fecha no especificada)_"
+        medico = d.get("physician_name") or "_(médico no especificado)_"
+        cedula = d.get("physician_license") or "_(sin cédula)_"
+        parts = [
+            "# Constancia médica (borrador)",
+            f"Se hace constar que **{paciente}** asistió a consulta médica el **{fecha}**.",
+        ]
+        motivo = (d.get("motivo") or "").strip()
+        if motivo:
+            parts.append(f"Motivo de la atención: {motivo}.")
+        parts.append(f"Atendió: **{medico}**, cédula profesional {cedula}.")
+        return "\n\n".join(parts)
+
+    def _render_incapacidad(self) -> str:
+        d = self.details or {}
+        paciente = d.get("patient_name") or "_(paciente no especificado)_"
+        diagnostico = (d.get("diagnosis") or "").strip() or "_(diagnóstico no especificado)_"
+        medico = d.get("physician_name") or "_(médico no especificado)_"
+        cedula = d.get("physician_license") or "_(sin cédula)_"
+        inicio = d.get("rest_start_date")
+        dias = d.get("rest_days")
+        if isinstance(dias, int) and inicio:
+            try:
+                fin = (date.fromisoformat(str(inicio)) + timedelta(days=dias - 1)).isoformat()
+            except ValueError:
+                fin = inicio
+            reposo = f"Se indica reposo por **{dias} día(s)**, del **{inicio}** al **{fin}**."
+        else:
+            # El número de días de reposo es una decisión médica explícita; jamás se inventa.
+            reposo = "_(periodo de reposo no especificado)_"
+        return "\n\n".join(
+            [
+                "# Incapacidad / Justificante médico (borrador)",
+                f"Paciente: **{paciente}**.",
+                f"Diagnóstico/motivo: {diagnostico}.",
+                reposo,
+                f"Atendió: **{medico}**, cédula profesional {cedula}.",
+            ]
+        )

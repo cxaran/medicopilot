@@ -447,12 +447,12 @@ CLINICAL_NOTES = ResourceQuery(
     model=ClinicalNote,
     schema=ClinicalNoteListItem,
     options=QueryOptions(
-        # ``patient_id``/``consultation_id`` (UUID) y ``status`` (enum no-nativo) por
-        # igualdad: las notas se consultan por paciente o por consulta y se acotan por
-        # estado (draft/approved). ``created_at`` admite rango de calendario. Sin búsqueda
-        # libre (las secciones son texto clínico sensible). Los listados excluyen las
-        # eliminadas (``deleted_at``) vía stmt base en el router.
-        filter_fields=("patient_id", "consultation_id", "status"),
+        # ``patient_id``/``consultation_id`` (UUID), ``kind`` (nota_soap/constancia/
+        # incapacidad) y ``status`` (enum no-nativo) por igualdad: las notas/documentos se
+        # consultan por paciente o consulta y se acotan por tipo y estado. ``created_at``
+        # admite rango de calendario. Sin búsqueda libre (texto clínico sensible). Los
+        # listados excluyen las eliminadas (``deleted_at``) vía stmt base en el router.
+        filter_fields=("patient_id", "consultation_id", "kind", "status"),
         sort_fields=("created_at", "updated_at"),
         in_fields=("id",),
         field_operators={"created_at": _CREATED_AT_OPERATORS},

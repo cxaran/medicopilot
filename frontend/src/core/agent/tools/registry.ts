@@ -1578,6 +1578,96 @@ const TOOLS: ToolDefinition[] = [
       ctx.api(`/api/v1/clinical-notes`, { method: "POST", body: args as Record<string, unknown> }),
   },
   {
+    // EPIC DOCS fase 2: constancia/justificante de asistencia EN BORRADOR. El servidor toma de
+    // la consulta la identidad del paciente, la fecha de asistencia y el médico + cédula
+    // (snapshot); no se inventan hechos de asistencia. Nace en draft (nunca autofirmada).
+    //
+    // COMPOSICIÓN: identifica la consulta del paciente; si procede, indica el motivo/diagnóstico
+    // a declarar. NO envíes paciente, fecha ni médico: el servidor los toma de la consulta.
+    name: "clinical.create_medical_certificate_draft",
+    description:
+      "Genera una CONSTANCIA/justificante médico de asistencia EN BORRADOR a partir de una " +
+      "consulta. Acción de escritura: requiere confirmación explícita del médico antes de " +
+      "guardarse y queda en BORRADOR (nunca autofirmada). El servidor toma de la consulta el " +
+      "paciente, la fecha de asistencia y el médico + cédula; no inventa hechos de asistencia. " +
+      "Sólo se envía la consulta y, si aplica, el motivo a declarar.",
+    kind: "write",
+    inputSchema: {
+      type: "object",
+      properties: {
+        consultation_id: {
+          type: "string",
+          description: "Id (UUID) de la consulta a la que asistió el paciente.",
+          format: "uuid",
+        },
+        motivo: { type: "string", description: "Motivo/diagnóstico a declarar (opcional)." },
+      },
+      required: ["consultation_id"],
+      additionalProperties: false,
+    },
+    approval: {
+      actionType: "create_medical_certificate_draft",
+      targetResource: "clinical_notes",
+      summarize: (args) =>
+        `Generar una constancia médica EN BORRADOR para la consulta ${String(args.consultation_id ?? "—")} ` +
+        `(el médico la revisa y firma; no se autofirma).`,
+    },
+    execute: (args, ctx) =>
+      ctx.api(`/api/v1/clinical-notes/medical-certificate`, {
+        method: "POST",
+        body: args as Record<string, unknown>,
+      }),
+  },
+  {
+    // EPIC DOCS fase 2: incapacidad/justificante de reposo EN BORRADOR. El número de DÍAS DE
+    // REPOSO es una decisión médica EXPLÍCITA: es obligatorio y debe ser ≥1; NUNCA lo inventes
+    // ni asumas un valor por defecto — si el médico no lo indicó, PREGÚNTALO. El servidor toma
+    // de la consulta el paciente y el médico + cédula. Nace en draft (nunca autofirmada).
+    name: "clinical.create_sick_leave_draft",
+    description:
+      "Genera una INCAPACIDAD/justificante de reposo laboral EN BORRADOR a partir de una " +
+      "consulta. Acción de escritura: requiere confirmación explícita del médico y queda en " +
+      "BORRADOR (nunca autofirmada). Debes indicar el diagnóstico/motivo, la fecha de inicio y " +
+      "el NÚMERO DE DÍAS de reposo (rest_days, ≥1): es una decisión médica; NUNCA la inventes ni " +
+      "uses un valor por defecto — si no la tienes, pregúntala al médico. El servidor toma de la " +
+      "consulta el paciente y el médico + cédula.",
+    kind: "write",
+    inputSchema: {
+      type: "object",
+      properties: {
+        consultation_id: {
+          type: "string",
+          description: "Id (UUID) de la consulta de la que deriva la incapacidad.",
+          format: "uuid",
+        },
+        diagnosis: { type: "string", description: "Diagnóstico o motivo del reposo." },
+        rest_start_date: {
+          type: "string",
+          description: "Fecha de inicio del reposo (ISO 8601, YYYY-MM-DD).",
+        },
+        rest_days: {
+          type: "integer",
+          description: "Número de días de reposo (decisión médica explícita; ≥1, nunca inventado).",
+          minimum: 1,
+        },
+      },
+      required: ["consultation_id", "diagnosis", "rest_start_date", "rest_days"],
+      additionalProperties: false,
+    },
+    approval: {
+      actionType: "create_sick_leave_draft",
+      targetResource: "clinical_notes",
+      summarize: (args) =>
+        `Generar una incapacidad EN BORRADOR (${String(args.rest_days ?? "—")} día[s] de reposo) ` +
+        `para la consulta ${String(args.consultation_id ?? "—")} (el médico la revisa y firma).`,
+    },
+    execute: (args, ctx) =>
+      ctx.api(`/api/v1/clinical-notes/sick-leave`, {
+        method: "POST",
+        body: args as Record<string, unknown>,
+      }),
+  },
+  {
     name: "clinical.create_study_order_draft",
     description:
       "Crea una orden de estudio/laboratorio EN BORRADOR para un paciente. Acción de escritura: " +

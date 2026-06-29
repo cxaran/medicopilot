@@ -7,12 +7,12 @@ secciones sin datos de origen quedan vacías (no se inventan). El servidor deriv
 """
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Optional
 
 from pydantic import Field, model_validator
 
-from backend.app.models.enums import ClinicalNoteStatus
+from backend.app.models.enums import ClinicalNoteKind, ClinicalNoteStatus
 from backend.app.schemas.base import ApiPatchSchema, ApiReadSchema, ApiWriteSchema
 
 _TEXTAREA_UI: dict[str, Any] = {"ui": {"form": True, "widget": "textarea"}}
@@ -75,16 +75,56 @@ class ClinicalNoteUpdate(ApiPatchSchema):
     )
 
 
+class MedicalCertificateCreate(ApiWriteSchema):
+    """Alta de una constancia/justificante de asistencia (borrador P1).
+
+    Sólo se acepta la consulta y un motivo opcional: el servidor toma de la consulta la
+    identidad del paciente, la fecha de asistencia y el médico + cédula (snapshot), y fija
+    ``kind='constancia'`` y ``status='draft'``. No inventa hechos de asistencia.
+    """
+
+    consultation_id: uuid.UUID = Field(
+        title="Consulta", description="Consulta a la que asistió el paciente."
+    )
+    motivo: Optional[str] = Field(
+        default=None, title="Motivo", description="Motivo/diagnóstico a declarar, si aplica."
+    )
+
+
+class SickLeaveCreate(ApiWriteSchema):
+    """Alta de una incapacidad/justificante de reposo (borrador P1).
+
+    El servidor toma de la consulta la identidad del paciente y el médico + cédula. El
+    DIAGNÓSTICO y el periodo de reposo son decisión médica: ``rest_days`` es OBLIGATORIO y
+    debe ser ≥ 1; NUNCA se asume ni se inventa. Fija ``kind='incapacidad'``, ``status='draft'``.
+    """
+
+    consultation_id: uuid.UUID = Field(
+        title="Consulta", description="Consulta de la que deriva la incapacidad."
+    )
+    diagnosis: str = Field(
+        min_length=1, title="Diagnóstico/motivo", description="Diagnóstico o motivo del reposo."
+    )
+    rest_start_date: date = Field(
+        title="Inicio del reposo", description="Fecha de inicio del reposo."
+    )
+    rest_days: int = Field(
+        ge=1, title="Días de reposo", description="Número de días de reposo (decisión médica)."
+    )
+
+
 class ClinicalNoteRead(ApiReadSchema):
     """Representación pública completa de una nota (incluye render Markdown)."""
 
     id: uuid.UUID
     patient_id: uuid.UUID
     consultation_id: uuid.UUID
+    kind: ClinicalNoteKind
     subjective: Optional[str] = None
     objective: Optional[str] = None
     assessment: Optional[str] = None
     plan: Optional[str] = None
+    details: Optional[dict[str, Any]] = None
     status: ClinicalNoteStatus
     content_markdown: str
     created_at: datetime
@@ -101,6 +141,9 @@ class ClinicalNoteListItem(ApiReadSchema):
     id: uuid.UUID
     patient_id: uuid.UUID = Field(title="Paciente")
     consultation_id: uuid.UUID = Field(title="Consulta")
+    kind: ClinicalNoteKind = Field(
+        title="Tipo", json_schema_extra={"ui": {"list": True}}
+    )
     status: ClinicalNoteStatus = Field(
         title="Estado", json_schema_extra={"ui": {"list": True}}
     )

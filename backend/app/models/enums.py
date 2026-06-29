@@ -91,6 +91,18 @@ class ClinicalNoteStatus(str, Enum):
     APPROVED = "approved"
 
 
+class ClinicalNoteKind(str, Enum):
+    """Tipo de documento clínico estructurado almacenado como ``ClinicalNote``.
+
+    ``nota_soap`` es la nota SOAP (fase 1); ``constancia`` es la constancia/justificante de
+    asistencia; ``incapacidad`` es el justificante de reposo laboral. Todos se componen de
+    datos REALES de la consulta y se guardan como borrador (nunca autofirmados)."""
+
+    NOTA_SOAP = "nota_soap"
+    CONSTANCIA = "constancia"
+    INCAPACIDAD = "incapacidad"
+
+
 class ConsultationDiagnosisKind(str, Enum):
     """Tipo clínico de un diagnóstico o impresión diagnóstica de la consulta."""
 
