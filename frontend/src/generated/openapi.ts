@@ -1352,6 +1352,43 @@ export interface paths {
         patch: operations["update_patient_history_item_api_v1_patient_history_items__item_id__patch"];
         trace?: never;
     };
+    "/api/v1/patient-immunizations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Patient Immunizations */
+        get: operations["list_patient_immunizations_api_v1_patient_immunizations_get"];
+        put?: never;
+        /** Create Patient Immunization */
+        post: operations["create_patient_immunization_api_v1_patient_immunizations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/patient-immunizations/{item_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Patient Immunization */
+        get: operations["get_patient_immunization_api_v1_patient_immunizations__item_id__get"];
+        put?: never;
+        post?: never;
+        /** Delete Patient Immunization */
+        delete: operations["delete_patient_immunization_api_v1_patient_immunizations__item_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Patient Immunization */
+        patch: operations["update_patient_immunization_api_v1_patient_immunizations__item_id__patch"];
+        trace?: never;
+    };
     "/api/v1/patients": {
         parameters: {
             query?: never;
@@ -4156,6 +4193,18 @@ export interface components {
          */
         HttpMethod: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
         /**
+         * ImmunizationRoute
+         * @description Vía de administración de una vacuna (opcional).
+         * @enum {string}
+         */
+        ImmunizationRoute: "intramuscular" | "subcutanea" | "intradermica" | "oral" | "intranasal";
+        /**
+         * ImmunizationStatus
+         * @description Estado de registro de una inmunización.
+         * @enum {string}
+         */
+        ImmunizationStatus: "aplicada" | "no_aplicada" | "contraindicada";
+        /**
          * InstitutionalSettingCreate
          * @description Alta de una configuración institucional.
          */
@@ -4991,6 +5040,12 @@ export interface components {
             items: components["schemas"]["PatientHistoryItemListItem"][];
             pagination: components["schemas"]["OffsetPagination"];
         };
+        /** OffsetPage[PatientImmunizationListItem] */
+        OffsetPage_PatientImmunizationListItem_: {
+            /** Items */
+            items: components["schemas"]["PatientImmunizationListItem"][];
+            pagination: components["schemas"]["OffsetPagination"];
+        };
         /** OffsetPage[PatientListItem] */
         OffsetPage_PatientListItem_: {
             /** Items */
@@ -5391,6 +5446,134 @@ export interface components {
             onset_age?: number | null;
             /** Fecha del evento */
             occurred_on?: string | null;
+            /** Notas */
+            notes?: string | null;
+        };
+        /**
+         * PatientImmunizationCreate
+         * @description Alta de una inmunización del paciente.
+         *
+         *     ``patient_id`` se fija en la creación y es inmutable después (no se edita por PATCH).
+         */
+        PatientImmunizationCreate: {
+            /**
+             * Paciente
+             * Format: uuid
+             * @description Paciente al que pertenece la inmunización (no se reasigna después).
+             */
+            patient_id: string;
+            /** Vacuna */
+            vaccine_name: string;
+            /** Número de dosis */
+            dose_number?: number | null;
+            /** Fecha de aplicación */
+            administered_on?: string | null;
+            /**
+             * Estado
+             * @default aplicada
+             */
+            status: components["schemas"]["ImmunizationStatus"];
+            /** Vía */
+            route?: components["schemas"]["ImmunizationRoute"] | null;
+            /** Lote */
+            lot_number?: string | null;
+            /** Sitio de aplicación */
+            site?: string | null;
+            /** Notas */
+            notes?: string | null;
+        };
+        /**
+         * PatientImmunizationListItem
+         * @description Versión de listado compatible con ``ResourceQuery``.
+         */
+        PatientImmunizationListItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Paciente
+             * Format: uuid
+             */
+            patient_id: string;
+            /** Vacuna */
+            vaccine_name: string;
+            /** Dosis */
+            dose_number?: number | null;
+            /** Fecha de aplicación */
+            administered_on?: string | null;
+            /** Estado */
+            status: components["schemas"]["ImmunizationStatus"];
+            /** Vía */
+            route?: components["schemas"]["ImmunizationRoute"] | null;
+            /**
+             * Creado
+             * Format: date-time
+             */
+            created_at: string;
+            /** Actualizado */
+            updated_at?: string | null;
+        };
+        /**
+         * PatientImmunizationRead
+         * @description Representación completa de una inmunización del paciente.
+         */
+        PatientImmunizationRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Patient Id
+             * Format: uuid
+             */
+            patient_id: string;
+            /** Vaccine Name */
+            vaccine_name: string;
+            /** Dose Number */
+            dose_number?: number | null;
+            /** Administered On */
+            administered_on?: string | null;
+            status: components["schemas"]["ImmunizationStatus"];
+            route?: components["schemas"]["ImmunizationRoute"] | null;
+            /** Lot Number */
+            lot_number?: string | null;
+            /** Site */
+            site?: string | null;
+            /** Notes */
+            notes?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /**
+         * PatientImmunizationUpdate
+         * @description Actualización parcial de una inmunización (PATCH).
+         *
+         *     ``patient_id`` es inmutable: no se declara aquí, por lo que enviarlo da 422
+         *     (``extra="forbid"``). La auditoría tampoco es editable desde el cliente.
+         */
+        PatientImmunizationUpdate: {
+            /** Vacuna */
+            vaccine_name?: string | null;
+            /** Número de dosis */
+            dose_number?: number | null;
+            /** Fecha de aplicación */
+            administered_on?: string | null;
+            /** Estado */
+            status?: components["schemas"]["ImmunizationStatus"] | null;
+            /** Vía */
+            route?: components["schemas"]["ImmunizationRoute"] | null;
+            /** Lote */
+            lot_number?: string | null;
+            /** Sitio de aplicación */
+            site?: string | null;
             /** Notas */
             notes?: string | null;
         };
@@ -11632,6 +11815,184 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PatientHistoryItemRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_patient_immunizations_api_v1_patient_immunizations_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+                /** @description Campos de orden separados por coma. Use '-' para orden descendente. */
+                sort?: string;
+                patient_id?: string | null;
+                status?: components["schemas"]["ImmunizationStatus"] | null;
+                id_in?: string[] | null;
+                q?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OffsetPage_PatientImmunizationListItem_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_patient_immunization_api_v1_patient_immunizations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatientImmunizationCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PatientImmunizationRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_patient_immunization_api_v1_patient_immunizations__item_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PatientImmunizationRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_patient_immunization_api_v1_patient_immunizations__item_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PatientImmunizationRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_patient_immunization_api_v1_patient_immunizations__item_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatientImmunizationUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PatientImmunizationRead"];
                 };
             };
             /** @description Validation Error */

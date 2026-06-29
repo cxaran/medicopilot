@@ -264,6 +264,24 @@ class FamilyRelationship(str, Enum):
     OTRO = "otro"
 
 
+class ImmunizationRoute(str, Enum):
+    """Vía de administración de una vacuna (opcional)."""
+
+    INTRAMUSCULAR = "intramuscular"
+    SUBCUTANEA = "subcutanea"
+    INTRADERMICA = "intradermica"
+    ORAL = "oral"
+    INTRANASAL = "intranasal"
+
+
+class ImmunizationStatus(str, Enum):
+    """Estado de registro de una inmunización."""
+
+    APLICADA = "aplicada"
+    NO_APLICADA = "no_aplicada"
+    CONTRAINDICADA = "contraindicada"
+
+
 class AiProvider(str, Enum):
     """Proveedor de IA de una credencial registrada por el usuario."""
 

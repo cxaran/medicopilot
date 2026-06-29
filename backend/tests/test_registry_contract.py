@@ -274,6 +274,9 @@ _CLIENT_WRITABLE_EXCEPTIONS = frozenset(
         ("clinical_events", "status"),
         ("study_orders", "status"),
         ("clinical_tasks", "status"),
+        # ``status`` de registro de la inmunización (aplicada/no_aplicada/contraindicada) que el
+        # médico fija directamente; no hay acciones de ciclo de vida sobre la vacuna.
+        ("patient_immunizations", "status"),
         # Marcas temporales CLÍNICAS que captura el médico (no son auditoría). La
         # auditoría real (created_at/updated_at/deleted_at) queda cubierta por los
         # prefijos y nunca se expone en los write schemas.

@@ -30,6 +30,7 @@ from backend.app.models.medication_template import MedicationTemplate
 from backend.app.models.patient import Patient
 from backend.app.models.patient_clinical_item import PatientClinicalItem
 from backend.app.models.patient_history_item import PatientHistoryItem
+from backend.app.models.patient_immunization import PatientImmunization
 from backend.app.models.prescription import Prescription, PrescriptionItem
 from backend.app.models.scale_result import ScaleResult
 from backend.app.models.study_order import StudyOrder
@@ -140,6 +141,11 @@ from backend.app.schemas.patient_history_item import (
     PatientHistoryItemListItem,
     PatientHistoryItemUpdate,
 )
+from backend.app.schemas.patient_immunization import (
+    PatientImmunizationCreate,
+    PatientImmunizationListItem,
+    PatientImmunizationUpdate,
+)
 from backend.app.schemas.prescription import (
     PrescriptionCreate,
     PrescriptionItemCreate,
@@ -194,6 +200,9 @@ from backend.app.security.groups.patient_clinical_items import (
 )
 from backend.app.security.groups.patient_history_items import (
     PatientHistoryItemPermissions,
+)
+from backend.app.security.groups.patient_immunizations import (
+    PatientImmunizationPermissions,
 )
 from backend.app.security.groups.patients import PatientPermissions
 from backend.app.security.groups.vital_signs import VitalSignPermissions
@@ -371,6 +380,23 @@ PATIENT_HISTORY_ITEMS = ResourceQuery(
         search_fields=("description", "related_condition"),
         in_fields=("id",),
         default_sort="-created_at",
+    ),
+)
+
+PATIENT_IMMUNIZATIONS = ResourceQuery(
+    name="PatientImmunizationQuery",
+    model=PatientImmunization,
+    schema=PatientImmunizationListItem,
+    options=QueryOptions(
+        # ``patient_id`` (UUID) y ``status`` (enum no-nativo) por igualdad: el esquema de
+        # vacunación se consulta por paciente y opcionalmente por estado. ``administered_on``
+        # admite rango de calendario. Búsqueda libre sobre el nombre de la vacuna. Los listados
+        # excluyen eliminados (``deleted_at``) vía stmt base.
+        filter_fields=("patient_id", "status"),
+        sort_fields=("administered_on", "created_at", "updated_at"),
+        search_fields=("vaccine_name",),
+        in_fields=("id",),
+        default_sort="-administered_on",
     ),
 )
 
@@ -1167,6 +1193,40 @@ RESOURCE_REGISTRY: tuple[ResourceDefinition, ...] = (
                 confirmation=ConfirmationDef(
                     title="Eliminar antecedente",
                     message="El antecedente se dará de baja lógica.",
+                    confirm_label="Eliminar",
+                    destructive=True,
+                ),
+            ),
+        ),
+    ),
+    ResourceDefinition(
+        name="patient_immunizations",
+        label="Inmunizaciones del paciente",
+        api_path="/api/v1/patient-immunizations",
+        view=ResourceView.TABLE,
+        read_permission=PatientImmunizationPermissions.READ,
+        list_query=PATIENT_IMMUNIZATIONS,
+        list_schema=PatientImmunizationListItem,
+        # Columnas tipadas (sin JSON): el alta/edición se exponen como formulario genérico. El
+        # copiloto crea inmunizaciones como BORRADOR que el médico aprueba (P1) vía la tool
+        # clinical.create_immunization_draft.
+        create_schema=PatientImmunizationCreate,
+        update_schema=PatientImmunizationUpdate,
+        create_permission=PatientImmunizationPermissions.CREATE,
+        update_permission=PatientImmunizationPermissions.UPDATE,
+        detail_url_template="/api/v1/patient-immunizations/{id}",
+        actions=(
+            ActionDef(
+                name="delete",
+                label="Eliminar",
+                method=HttpMethod.DELETE,
+                url_template="/api/v1/patient-immunizations/{id}",
+                scope=ActionScope.ITEM,
+                danger=True,
+                permission=PatientImmunizationPermissions.DELETE,
+                confirmation=ConfirmationDef(
+                    title="Eliminar inmunización",
+                    message="La inmunización se dará de baja lógica.",
                     confirm_label="Eliminar",
                     destructive=True,
                 ),

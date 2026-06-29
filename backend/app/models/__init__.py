@@ -34,6 +34,8 @@ from backend.app.models.enums import (
     ConsultationDiagnosisKind,
     ConsultationStatus,
     FamilyRelationship,
+    ImmunizationRoute,
+    ImmunizationStatus,
     LabResultAbnormalFlag,
     MedicalHistoryVersionStatus,
     PatientClinicalItemType,
@@ -53,6 +55,7 @@ from backend.app.models.medication_template import MedicationTemplate
 from backend.app.models.patient import Patient
 from backend.app.models.patient_clinical_item import PatientClinicalItem
 from backend.app.models.patient_history_item import PatientHistoryItem
+from backend.app.models.patient_immunization import PatientImmunization
 from backend.app.models.prescription import Prescription, PrescriptionItem
 from backend.app.models.scale_result import ScaleResult
 from backend.app.models.setup import PlatformSetup
@@ -96,6 +99,8 @@ __all__ = [
     "ConsultationStatus",
     "Doctor",
     "FamilyRelationship",
+    "ImmunizationRoute",
+    "ImmunizationStatus",
     "InstitutionalSetting",
     "LabResult",
     "LabResultAbnormalFlag",
@@ -107,6 +112,7 @@ __all__ = [
     "PatientClinicalItemType",
     "PatientHistoryItem",
     "PatientHistoryItemCategory",
+    "PatientImmunization",
     "PatientStatus",
     "PregnancyStatus",
     "PlatformSetup",

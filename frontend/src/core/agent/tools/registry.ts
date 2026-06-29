@@ -1779,6 +1779,99 @@ const TOOLS: ToolDefinition[] = [
       }),
   },
   {
+    // VACCINATION TRACKING: listar las inmunizaciones (vacunas administradas) de un paciente.
+    // Solo lectura; FastAPI exige patient_immunizations:read. Filtrable por estado.
+    name: "clinical.list_immunizations",
+    description:
+      "Lista las INMUNIZACIONES (vacunas) registradas de un paciente. Se consultan por paciente " +
+      "(patient_id) y pueden filtrarse por estado (aplicada/no_aplicada/contraindicada). Cada " +
+      "registro incluye la vacuna, el número de dosis, la fecha de aplicación, la vía, el lote y " +
+      "el sitio cuando se conocen. Solo lectura.",
+    kind: "read",
+    inputSchema: clinicalListSchema({
+      patient_id: PATIENT_FILTER_PROP,
+      status: {
+        type: "string",
+        description: "Estado para filtrar.",
+        enum: ["aplicada", "no_aplicada", "contraindicada"],
+      },
+    }),
+    execute: (args, ctx) =>
+      ctx.api(
+        `/api/v1/patient-immunizations${clinicalListQuery(args, {
+          eq: ["patient_id", "status"],
+        })}`,
+      ),
+  },
+  {
+    // VACCINATION TRACKING: crear una inmunización como BORRADOR que el médico aprueba (P1).
+    // Acción de escritura gateada por aprobación: nada se guarda de forma autónoma. Funda el dato
+    // en lo que dijo el paciente / el expediente; no inventes vacunas, fechas ni lotes.
+    name: "clinical.create_immunization_draft",
+    description:
+      "Guarda una INMUNIZACIÓN (vacuna) EN BORRADOR para un paciente. Acción de escritura: " +
+      "requiere confirmación explícita del médico antes de guardarse; nada se guarda de forma " +
+      "autónoma. vaccine_name es obligatorio. Campos opcionales: número de dosis (1-50), fecha de " +
+      "aplicación (AAAA-MM-DD), vía (intramuscular/subcutanea/intradermica/oral/intranasal), lote, " +
+      "sitio anatómico y notas. status por defecto 'aplicada'. No inventes datos: funda el " +
+      "registro en lo referido o documentado.",
+    kind: "write",
+    inputSchema: {
+      type: "object",
+      properties: {
+        patient_id: { type: "string", description: "Id (UUID) del paciente.", format: "uuid" },
+        vaccine_name: {
+          type: "string",
+          description: "Nombre de la vacuna (p. ej. 'Influenza estacional', 'Hepatitis B').",
+        },
+        status: {
+          type: "string",
+          description: "Estado del registro (por defecto 'aplicada').",
+          enum: ["aplicada", "no_aplicada", "contraindicada"],
+        },
+        dose_number: {
+          type: "number",
+          description: "Número de dosis aplicada (1-50, opcional).",
+          minimum: 1,
+          maximum: 50,
+        },
+        administered_on: {
+          type: "string",
+          description: "Fecha de aplicación en formato AAAA-MM-DD (opcional).",
+        },
+        route: {
+          type: "string",
+          description: "Vía de administración (opcional).",
+          enum: ["intramuscular", "subcutanea", "intradermica", "oral", "intranasal"],
+        },
+        lot_number: {
+          type: "string",
+          description: "Número de lote del biológico (opcional).",
+        },
+        site: {
+          type: "string",
+          description: "Sitio anatómico de aplicación (p. ej. 'deltoides izquierdo', opcional).",
+        },
+        notes: { type: "string", description: "Notas o contexto adicional (opcional)." },
+      },
+      required: ["patient_id", "vaccine_name"],
+      additionalProperties: false,
+    },
+    approval: {
+      actionType: "create_immunization_draft",
+      targetResource: "patient_immunizations",
+      summarize: (args) =>
+        `Guardar la inmunización "${String(args.vaccine_name ?? "—")}" para el paciente ${String(
+          args.patient_id ?? "—",
+        )}.`,
+    },
+    execute: (args, ctx) =>
+      ctx.api(`/api/v1/patient-immunizations`, {
+        method: "POST",
+        body: args as Record<string, unknown>,
+      }),
+  },
+  {
     // EPIC DOCS fase 1: componer una nota SOAP de una consulta y guardarla como BORRADOR que
     // el médico aprueba (P1). NUNCA se autofinaliza: nace en estado draft.
     //
