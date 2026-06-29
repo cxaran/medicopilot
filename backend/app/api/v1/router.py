@@ -43,6 +43,7 @@ from backend.app.api.v1.reports import router as reports_router
 from backend.app.api.v1.research import router as research_router
 from backend.app.api.v1.resources import router as resources_router
 from backend.app.api.v1.roles import router as roles_router
+from backend.app.api.v1.scale_results import router as scale_results_router
 from backend.app.api.v1.study_orders import router as study_orders_router
 from backend.app.api.v1.users import router as users_router
 from backend.app.api.v1.users_admin import router as users_admin_router
@@ -81,6 +82,7 @@ router.include_router(reports_router)
 router.include_router(research_router)
 router.include_router(resources_router)
 router.include_router(roles_router)
+router.include_router(scale_results_router)
 router.include_router(study_orders_router)
 router.include_router(users_router)
 router.include_router(users_admin_router)

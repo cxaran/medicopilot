@@ -28,6 +28,7 @@ from backend.app.security.groups.population import PopulationPermissions
 from backend.app.security.groups.prescriptions import PrescriptionPermissions
 from backend.app.security.groups.reports import ReportsPermissions
 from backend.app.security.groups.roles import RolePermissions
+from backend.app.security.groups.scale_results import ScaleResultPermissions
 from backend.app.security.groups.study_orders import StudyOrderPermissions
 from backend.app.security.groups.users import UserPermissions
 from backend.app.security.groups.vital_signs import VitalSignPermissions
@@ -57,6 +58,7 @@ SECURITY_GROUPS: list[type[SecurityGroup]] = [
     InstitutionalSettingPermissions,
     ClinicalCodePermissions,
     ClinicalScalePermissions,
+    ScaleResultPermissions,
     PermissionPermissions,
 ]
 

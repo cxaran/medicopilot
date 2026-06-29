@@ -184,6 +184,7 @@ def _group_name(class_name: str) -> str:
         "institutionalsetting": "institutional_settings",
         "clinicalcode": "clinical_codes",
         "clinicalscale": "clinical_scales",
+        "scaleresult": "scale_results",
         "permission": "permissions",
     }.get(singular, singular)
 
@@ -212,5 +213,6 @@ def _group_label(group_name: str) -> str:
         "institutional_settings": "Configuración institucional",
         "clinical_codes": "Códigos clínicos",
         "clinical_scales": "Escalas clínicas",
+        "scale_results": "Resultados de escalas clínicas",
         "permissions": "Permisos",
     }.get(group_name, group_name.capitalize())

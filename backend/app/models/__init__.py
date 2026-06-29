@@ -48,6 +48,7 @@ from backend.app.models.medication_template import MedicationTemplate
 from backend.app.models.patient import Patient
 from backend.app.models.patient_clinical_item import PatientClinicalItem
 from backend.app.models.prescription import Prescription, PrescriptionItem
+from backend.app.models.scale_result import ScaleResult
 from backend.app.models.setup import PlatformSetup
 from backend.app.models.study_order import StudyOrder
 from backend.app.models.user import Role, RoleAccess, User, UserRole
@@ -103,6 +104,7 @@ __all__ = [
     "RecordStatus",
     "Role",
     "RoleAccess",
+    "ScaleResult",
     "SettingCategory",
     "Sex",
     "StudyOrder",

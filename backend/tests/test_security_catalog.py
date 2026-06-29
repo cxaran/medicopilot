@@ -76,6 +76,9 @@ from backend.app.security.groups.prescriptions import (  # noqa: E402
 )
 from backend.app.security.groups.reports import ReportsPermissions  # noqa: E402
 from backend.app.security.groups.roles import RolePermissions  # noqa: E402
+from backend.app.security.groups.scale_results import (  # noqa: E402
+    ScaleResultPermissions,
+)
 from backend.app.security.groups.study_orders import (  # noqa: E402
     StudyOrderPermissions,
 )
@@ -111,6 +114,7 @@ class SecurityCatalogTest(unittest.TestCase):
                 InstitutionalSettingPermissions,
                 ClinicalCodePermissions,
                 ClinicalScalePermissions,
+                ScaleResultPermissions,
                 PermissionPermissions,
             ],
         )
@@ -210,6 +214,10 @@ class SecurityCatalogTest(unittest.TestCase):
                 "clinical_codes:update",
                 "clinical_codes:delete",
                 "clinical_scales:read",
+                "scale_results:read",
+                "scale_results:create",
+                "scale_results:update",
+                "scale_results:delete",
                 "permissions:read",
             ],
         )

@@ -29,6 +29,7 @@ from backend.app.models.medication_template import MedicationTemplate
 from backend.app.models.patient import Patient
 from backend.app.models.patient_clinical_item import PatientClinicalItem
 from backend.app.models.prescription import Prescription, PrescriptionItem
+from backend.app.models.scale_result import ScaleResult
 from backend.app.models.study_order import StudyOrder
 from backend.app.models.user import Role, User
 from backend.app.models.vital_sign import VitalSign
@@ -142,6 +143,7 @@ from backend.app.schemas.vital_sign import (
     VitalSignUpdate,
 )
 from backend.app.schemas.role import RoleCreate, RoleListItem, RoleRead, RoleUpdate
+from backend.app.schemas.scale_result import ScaleResultListItem
 from backend.app.schemas.study_order import (
     StudyOrderCreate,
     StudyOrderListItem,
@@ -181,6 +183,7 @@ from backend.app.security.groups.patients import PatientPermissions
 from backend.app.security.groups.vital_signs import VitalSignPermissions
 from backend.app.security.groups.permissions import PermissionPermissions
 from backend.app.security.groups.roles import RolePermissions
+from backend.app.security.groups.scale_results import ScaleResultPermissions
 from backend.app.security.groups.users import UserPermissions
 from backend.app.security.security_group import SecurityGroup
 
@@ -411,6 +414,24 @@ LAB_RESULTS = ResourceQuery(
             "measured_at": _CREATED_AT_OPERATORS,
         },
         default_sort="-measured_at",
+    ),
+)
+
+SCALE_RESULTS = ResourceQuery(
+    name="ScaleResultQuery",
+    model=ScaleResult,
+    schema=ScaleResultListItem,
+    options=QueryOptions(
+        # ``patient_id``/``consultation_id`` (UUID) y ``scale_id`` (texto, el id del
+        # registro) por igualdad: los resultados se consultan por paciente y se acotan por
+        # escala. ``computed_at`` admite rango de calendario. Sin búsqueda libre (los
+        # insumos pueden ser sensibles). Los listados excluyen los eliminados
+        # (``deleted_at``) vía stmt base en el router.
+        filter_fields=("patient_id", "consultation_id", "scale_id"),
+        sort_fields=("computed_at", "created_at", "updated_at", "scale_id"),
+        in_fields=("id",),
+        field_operators={"computed_at": _CREATED_AT_OPERATORS},
+        default_sort="-computed_at",
     ),
 )
 
@@ -1262,6 +1283,40 @@ RESOURCE_REGISTRY: tuple[ResourceDefinition, ...] = (
                 confirmation=ConfirmationDef(
                     title="Eliminar resultado de laboratorio",
                     message="El resultado se dará de baja lógica.",
+                    confirm_label="Eliminar",
+                    destructive=True,
+                ),
+            ),
+        ),
+    ),
+    ResourceDefinition(
+        name="scale_results",
+        label="Resultados de escalas clínicas",
+        api_path="/api/v1/scale-results",
+        view=ResourceView.TABLE,
+        read_permission=ScaleResultPermissions.READ,
+        list_query=SCALE_RESULTS,
+        list_schema=ScaleResultListItem,
+        # El alta/edición NO se exponen como formulario genérico: un resultado de escala se
+        # crea por RE-CÓMPUTO determinista en el servidor desde ``scale_id`` + ``inputs``
+        # (insumos JSON estructurados que arma el copiloto y el médico aprueba, P1), vía el
+        # endpoint dedicado /api/v1/scale-results. Se conservan los permisos create/update
+        # para gobernar ese endpoint (RBAC), y el recurso publica lista/detalle/baja.
+        create_permission=ScaleResultPermissions.CREATE,
+        update_permission=ScaleResultPermissions.UPDATE,
+        detail_url_template="/api/v1/scale-results/{id}",
+        actions=(
+            ActionDef(
+                name="delete",
+                label="Eliminar",
+                method=HttpMethod.DELETE,
+                url_template="/api/v1/scale-results/{id}",
+                scope=ActionScope.ITEM,
+                danger=True,
+                permission=ScaleResultPermissions.DELETE,
+                confirmation=ConfirmationDef(
+                    title="Eliminar resultado de escala",
+                    message="El resultado de la escala se dará de baja lógica.",
                     confirm_label="Eliminar",
                     destructive=True,
                 ),

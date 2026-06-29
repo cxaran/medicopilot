@@ -1051,6 +1051,31 @@ const TOOLS: ToolDefinition[] = [
     },
   },
   {
+    // EPIC ESCALAS fase 2: listar los resultados de escalas YA persistidos de un paciente
+    // (los borradores que el médico aprobó). Solo lectura; FastAPI exige scale_results:read.
+    // Útil para mostrar puntajes previos antes de proponer uno nuevo.
+    name: "clinical.list_scale_results",
+    description:
+      "Lista los resultados de escalas clínicas ya guardados de un paciente (puntajes que el " +
+      "médico aprobó). Se consultan por paciente (patient_id) y pueden filtrarse por escala " +
+      "(scale_id). El puntaje guardado fue re-computado por el servidor; es apoyo a la decisión, " +
+      "no un diagnóstico. Solo lectura.",
+    kind: "read",
+    inputSchema: clinicalListSchema({
+      patient_id: PATIENT_FILTER_PROP,
+      scale_id: {
+        type: "string",
+        description: "Id de la escala para filtrar (p. ej. 'cha2ds2_vasc').",
+      },
+    }),
+    execute: (args, ctx) =>
+      ctx.api(
+        `/api/v1/scale-results${clinicalListQuery(args, {
+          eq: ["patient_id", "scale_id"],
+        })}`,
+      ),
+  },
+  {
     // Acceso clínico estructurado estilo FHIR: equivalente NATIVO a un MCP-server FHIR
     // (p.ej. wso2/fhir-mcp-server) respetando la AUTORIDAD CLÍNICA. Se ejecuta en el
     // NAVEGADOR con la cookie del médico (ctx.api -> credentials:include); FastAPI valida
@@ -1426,6 +1451,56 @@ const TOOLS: ToolDefinition[] = [
     },
     execute: (args, ctx) =>
       ctx.api(`/api/v1/clinical-events`, { method: "POST", body: args as Record<string, unknown> }),
+  },
+  {
+    // EPIC ESCALAS fase 2: persistir un resultado de escala como BORRADOR que el médico
+    // aprueba (P1). El servidor RE-COMPUTA el puntaje desde scale_id + inputs (no confía en
+    // ningún puntaje del cliente). Flujo del agente: clinical.compute_scale (fase 1) para
+    // mostrar el puntaje + interpretación + fuentes -> proponer ESTA acción con patient_id +
+    // scale_id + los MISMOS inputs para aprobación. Si faltan/invalidan insumos, el servidor
+    // responde 422 nombrando el campo: pregunta el dato, no lo asumas.
+    name: "clinical.create_scale_result_draft",
+    description:
+      "Guarda el resultado de una escala clínica EN BORRADOR para un paciente (CHA2DS2-VASc, " +
+      "Wells, etc.), ligándolo opcionalmente a una consulta. Acción de escritura: requiere " +
+      "confirmación explícita del médico antes de guardarse. El servidor recomputa el puntaje " +
+      "desde scale_id + inputs (no se confía en un puntaje provisto); el médico aprueba el dato " +
+      "exacto. Antes, computa con clinical.compute_scale y muestra puntaje, interpretación y " +
+      "fuentes. Si faltan insumos, pregúntalos; nada se guarda de forma autónoma.",
+    kind: "write",
+    inputSchema: {
+      type: "object",
+      properties: {
+        patient_id: { type: "string", description: "Id (UUID) del paciente.", format: "uuid" },
+        scale_id: {
+          type: "string",
+          description: "Id de la escala (de clinical.list_scales; p. ej. 'cha2ds2_vasc').",
+        },
+        inputs: {
+          type: "object",
+          description:
+            "Insumos requeridos por la escala (los MISMOS con los que computaste). El " +
+            "servidor los valida y recomputa el puntaje.",
+          additionalProperties: true,
+        },
+        consultation_id: {
+          type: "string",
+          description: "Id (UUID) de la consulta asociada (opcional).",
+          format: "uuid",
+        },
+      },
+      required: ["patient_id", "scale_id", "inputs"],
+      additionalProperties: false,
+    },
+    approval: {
+      actionType: "create_scale_result_draft",
+      targetResource: "scale_results",
+      summarize: (args) =>
+        `Guardar el resultado de la escala "${String(args.scale_id ?? "—")}" para el paciente ` +
+        `${String(args.patient_id ?? "—")} (el servidor recomputa el puntaje).`,
+    },
+    execute: (args, ctx) =>
+      ctx.api(`/api/v1/scale-results`, { method: "POST", body: args as Record<string, unknown> }),
   },
   {
     name: "clinical.create_study_order_draft",

@@ -1545,6 +1545,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/scale-results": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Scale Results */
+        get: operations["list_scale_results_api_v1_scale_results_get"];
+        put?: never;
+        /** Create Scale Result */
+        post: operations["create_scale_result_api_v1_scale_results_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/scale-results/{result_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Scale Result */
+        get: operations["get_scale_result_api_v1_scale_results__result_id__get"];
+        put?: never;
+        post?: never;
+        /** Delete Scale Result */
+        delete: operations["delete_scale_result_api_v1_scale_results__result_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Scale Result */
+        patch: operations["update_scale_result_api_v1_scale_results__result_id__patch"];
+        trace?: never;
+    };
     "/api/v1/study-orders": {
         parameters: {
             query?: never;
@@ -4478,6 +4515,12 @@ export interface components {
             items: components["schemas"]["RoleRead"][];
             pagination: components["schemas"]["OffsetPagination"];
         };
+        /** OffsetPage[ScaleResultListItem] */
+        OffsetPage_ScaleResultListItem_: {
+            /** Items */
+            items: components["schemas"]["ScaleResultListItem"][];
+            pagination: components["schemas"]["OffsetPagination"];
+        };
         /** OffsetPage[StudyOrderListItem] */
         OffsetPage_StudyOrderListItem_: {
             /** Items */
@@ -5637,6 +5680,139 @@ export interface components {
             min?: number | null;
             /** Max */
             max?: number | null;
+        };
+        /**
+         * ScaleResultCreate
+         * @description Alta de un resultado de escala (borrador que el médico aprueba, P1).
+         *
+         *     Solo se aceptan ``patient_id``, ``consultation_id`` (opcional), ``scale_id`` e
+         *     ``inputs``: el servidor recomputa el puntaje/interpretación/fuente y fija
+         *     ``computed_at``. Enviar un puntaje u otros campos calculados da 422 (extra forbid).
+         */
+        ScaleResultCreate: {
+            /**
+             * Paciente
+             * Format: uuid
+             * @description Paciente al que pertenece el resultado.
+             */
+            patient_id: string;
+            /**
+             * Consulta
+             * @description Consulta asociada, si aplica.
+             */
+            consultation_id?: string | null;
+            /**
+             * Escala
+             * @description Id de la escala en el registro (p. ej. 'cha2ds2_vasc').
+             */
+            scale_id: string;
+            /**
+             * Insumos
+             * @description Insumos requeridos por la escala; el servidor los valida y recomputa.
+             */
+            inputs: {
+                [key: string]: unknown;
+            };
+        };
+        /**
+         * ScaleResultListItem
+         * @description Versión de listado.
+         *
+         *     Declara los campos de filtro (``patient_id``, ``scale_id``, ``computed_at``) que el
+         *     motor de query exige presentes en el schema de listado.
+         */
+        ScaleResultListItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Paciente
+             * Format: uuid
+             */
+            patient_id: string;
+            /** Consulta */
+            consultation_id?: string | null;
+            /** Escala */
+            scale_id: string;
+            /** Puntaje */
+            score: number;
+            /** Interpretación */
+            interpretation_label: string;
+            /**
+             * Computado
+             * Format: date-time
+             */
+            computed_at: string;
+            /**
+             * Creado
+             * Format: date-time
+             */
+            created_at: string;
+            /** Actualizado */
+            updated_at?: string | null;
+        };
+        /**
+         * ScaleResultRead
+         * @description Representación pública completa de un resultado de escala.
+         */
+        ScaleResultRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Patient Id
+             * Format: uuid
+             */
+            patient_id: string;
+            /** Consultation Id */
+            consultation_id?: string | null;
+            /** Scale Id */
+            scale_id: string;
+            /** Inputs */
+            inputs: {
+                [key: string]: unknown;
+            };
+            /** Score */
+            score: number;
+            /** Interpretation Label */
+            interpretation_label: string;
+            /** Source */
+            source: string;
+            /**
+             * Computed At
+             * Format: date-time
+             */
+            computed_at: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /**
+         * ScaleResultUpdate
+         * @description Edición parcial (PATCH).
+         *
+         *     Permite re-vincular la consulta y/o recomputar con nuevos ``inputs`` (el servidor
+         *     vuelve a calcular puntaje/interpretación/fuente desde la escala guardada). El puntaje
+         *     y los campos calculados no se aceptan como entrada.
+         */
+        ScaleResultUpdate: {
+            /** Consulta */
+            consultation_id?: string | null;
+            /**
+             * Insumos
+             * @description Nuevos insumos; si se envían, el servidor recomputa el resultado.
+             */
+            inputs?: {
+                [key: string]: unknown;
+            } | null;
         };
         /** SearchCapability */
         SearchCapability: {
@@ -11232,6 +11408,189 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RoleDetailRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_scale_results_api_v1_scale_results_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+                /** @description Campos de orden separados por coma. Use '-' para orden descendente. */
+                sort?: string;
+                patient_id?: string | null;
+                consultation_id?: string | null;
+                scale_id?: string | null;
+                id_in?: string[] | null;
+                computed_at_on?: string | null;
+                computed_at_before?: string | null;
+                computed_at_after?: string | null;
+                computed_at_from?: string | null;
+                computed_at_to?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OffsetPage_ScaleResultListItem_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_scale_result_api_v1_scale_results_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScaleResultCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScaleResultRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_scale_result_api_v1_scale_results__result_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                result_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScaleResultRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_scale_result_api_v1_scale_results__result_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                result_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScaleResultRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_scale_result_api_v1_scale_results__result_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                result_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScaleResultUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScaleResultRead"];
                 };
             };
             /** @description Validation Error */
