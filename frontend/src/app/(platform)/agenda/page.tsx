@@ -109,6 +109,8 @@ export default async function AgendaPage({ searchParams }: PageProps) {
       modeHrefs={modeHrefs}
       newHref={NEW_APPOINTMENT_HREF}
       canCreate={data.canCreate}
+      actions={data.actions}
+      actionPlaceholder={data.actionPlaceholder}
       unavailable={data.unavailable}
       day={mode === "day" ? bucketDay(appointments, data.anchor) : []}
       week={mode === "week" ? bucketWeek(appointments, data.anchor, data.timeZone) : []}

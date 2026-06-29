@@ -9,6 +9,7 @@ import {
 import type { FilterableOperatorControl } from "@/core/resources/filterable";
 import { getResourceListPage } from "@/core/resources/resource-list-client";
 import type { ResourceRow } from "@/core/resources/list-types";
+import type { ResourceActionCapability } from "@/core/api/contracts";
 import { buildPatientLabelMap, type PatientLabelMap } from "@/core/chat-shell/dashboard";
 
 import {
@@ -45,6 +46,13 @@ export interface AgendaData {
   labels: PatientLabelMap;
   /** ``true`` si el rol puede crear citas (gate del botón "Nueva cita"). */
   canCreate: boolean;
+  /**
+   * Acciones de transición proyectadas por el contrato (sólo las que el rol puede ejecutar; el backend
+   * las omite sin permiso). Se cablean en la tarjeta con el MISMO ``ResourceRowActions`` de la tabla.
+   */
+  actions: ResourceActionCapability[];
+  /** Token ``{placeholder}`` de las URLs de acción (de ``item_reference``; por defecto "id"). */
+  actionPlaceholder: string;
   /** ``true`` si el recurso de citas no está disponible/proyectado para el rol. */
   unavailable: boolean;
 }
@@ -58,6 +66,8 @@ function emptyData(mode: AgendaMode, anchor: CivilDate): AgendaData {
     rows: [],
     labels: new Map(),
     canCreate: false,
+    actions: [],
+    actionPlaceholder: "id",
     unavailable: true,
   };
 }
@@ -166,6 +176,8 @@ export async function getAgendaData(mode: AgendaMode, rawAnchor?: string): Promi
     rows: page?.items ?? [],
     labels,
     canCreate: Boolean(capability.forms?.create),
+    actions: capability.actions ?? [],
+    actionPlaceholder: capability.item_reference?.placeholder ?? "id",
     unavailable: false,
   };
 }

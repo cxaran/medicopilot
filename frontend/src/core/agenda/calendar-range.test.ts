@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   addDays,
   addMonths,
+  applicableAppointmentActions,
   avatarColor,
   bucketDay,
   bucketMonth,
@@ -20,6 +21,7 @@ import {
   type CivilDate,
 } from "./calendar-range.ts";
 import type { ResourceRow } from "../resources/list-types.ts";
+import type { ResourceActionCapability } from "../api/contracts.ts";
 
 // AGENDA en calendario (MP-CTRL-0135): módulo PURO. Toda la matemática de fechas es sobre fechas
 // CIVILES y DST-safe (se suma sobre UTC). Las citas se reparten por su DÍA CIVIL en la zona dada y los
@@ -210,4 +212,49 @@ test("avatarColor: estable por semilla y dentro de la paleta", () => {
   const b = avatarColor("p1");
   assert.equal(a, b); // determinista
   assert.ok(typeof a === "string" && a.length > 0);
+});
+
+// Acciones de transición espejo del contrato de appointments (sólo name + visible_when, que es lo que
+// evalúa el filtrado por estado). El RBAC y enabled_when no se prueban aquí: el backend proyecta por
+// permiso y ResourceRowActions resuelve enabled_when (mismo camino gobernado que la tabla).
+function action(name: string, statuses: string[]): ResourceActionCapability {
+  return {
+    name,
+    visible_when: {
+      all: [{ field: "status", operator: "in", value: statuses }],
+    },
+  } as unknown as ResourceActionCapability;
+}
+
+const APPOINTMENT_ACTIONS: ResourceActionCapability[] = [
+  action("confirm", ["pending"]),
+  action("cancel", ["pending", "confirmed"]),
+  action("no_show", ["confirmed"]),
+  action("reschedule", ["pending", "confirmed"]),
+];
+
+function names(list: readonly ResourceActionCapability[]): string[] {
+  return list.map((a) => a.name);
+}
+
+test("applicableAppointmentActions: deriva del contrato qué transiciones aplican por estado", () => {
+  // Pendiente: confirmar, cancelar, reagendar (NO no_show).
+  assert.deepEqual(names(applicableAppointmentActions(APPOINTMENT_ACTIONS, "pending")), [
+    "confirm",
+    "cancel",
+    "reschedule",
+  ]);
+  // Confirmada: cancelar, no_show, reagendar (NO confirmar de nuevo).
+  assert.deepEqual(names(applicableAppointmentActions(APPOINTMENT_ACTIONS, "confirmed")), [
+    "cancel",
+    "no_show",
+    "reschedule",
+  ]);
+  // Cancelada / atendida: ninguna transición disponible (no se ofrece nada sobre una cita cerrada).
+  assert.deepEqual(applicableAppointmentActions(APPOINTMENT_ACTIONS, "cancelled"), []);
+  assert.deepEqual(applicableAppointmentActions(APPOINTMENT_ACTIONS, "attended"), []);
+});
+
+test("applicableAppointmentActions: sin acciones proyectadas (rol sin permiso) -> vacío", () => {
+  assert.deepEqual(applicableAppointmentActions([], "pending"), []);
 });

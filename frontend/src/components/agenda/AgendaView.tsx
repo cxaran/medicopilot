@@ -4,8 +4,11 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 import { useChatNav } from "@/components/chat-shell/ChatNavProvider";
+import { ResourceRowActions } from "@/components/resources/ResourceRowActions";
+import type { ResourceActionCapability } from "@/core/api/contracts";
 import { formatTimeHM } from "@/core/chat-shell/dashboard";
 import {
+  applicableAppointmentActions,
   avatarColor,
   type AgendaAppointment,
   type AgendaCell,
@@ -41,6 +44,9 @@ export interface AgendaViewProps {
   modeHrefs: Readonly<Record<AgendaMode, string>>;
   newHref: string;
   canCreate: boolean;
+  /** Acciones de transición del contrato (ya proyectadas por permiso); se montan en la tarjeta del día. */
+  actions: readonly ResourceActionCapability[];
+  actionPlaceholder: string;
   unavailable: boolean;
   day: readonly AgendaAppointment[];
   week: readonly AgendaCell[];
@@ -180,7 +186,13 @@ export function AgendaView(props: Readonly<AgendaViewProps>) {
           No tienes acceso a la agenda de citas.
         </p>
       ) : props.mode === "day" ? (
-        <DayList items={props.day} timeZone={props.timeZone} onOpen={openPatient} />
+        <DayList
+          items={props.day}
+          timeZone={props.timeZone}
+          onOpen={openPatient}
+          actions={props.actions}
+          actionPlaceholder={props.actionPlaceholder}
+        />
       ) : props.mode === "week" ? (
         <WeekGrid cells={props.week} weekdayLabels={props.weekdayLabels} timeZone={props.timeZone} onOpen={openPatient} />
       ) : (
@@ -194,10 +206,14 @@ function DayList({
   items,
   timeZone,
   onOpen,
+  actions,
+  actionPlaceholder,
 }: Readonly<{
   items: readonly AgendaAppointment[];
   timeZone: string;
   onOpen: (item: AgendaAppointment) => void;
+  actions: readonly ResourceActionCapability[];
+  actionPlaceholder: string;
 }>) {
   if (items.length === 0) {
     return (
@@ -208,41 +224,63 @@ function DayList({
   }
   return (
     <div className="flex flex-col gap-2.5">
-      {items.map((item) => (
-        <button
-          key={item.id}
-          type="button"
-          onClick={() => onOpen(item)}
-          disabled={!item.patientId}
-          title={item.patientId ? `Abrir el chat de ${item.patientLabel}` : undefined}
-          className={`flex w-full items-center gap-4 rounded-[14px] border border-[var(--border)] bg-[var(--panel)] px-4 py-3.5 text-left transition ${
-            item.patientId ? "cursor-pointer hover:border-[var(--accent-bd)]" : "cursor-default"
-          }`}
-        >
-          <div className="w-[52px] shrink-0 text-center">
-            <div className="text-[15px] font-semibold tabular-nums text-[var(--tx)]">
-              {formatTimeHM(item.scheduledAt, timeZone) || "--:--"}
-            </div>
-            {item.durationMinutes !== null ? (
-              <div className="text-[11px] text-[var(--tx3)]">{item.durationMinutes} min</div>
-            ) : null}
-          </div>
-          <div className="h-9 w-px shrink-0 self-stretch bg-[var(--border)]" />
-          <span
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[11px] text-[13px] font-bold text-white"
-            style={{ backgroundColor: avatarColor(item.patientId ?? item.patientLabel) }}
+      {items.map((item) => {
+        // Acciones de transición aplicables al estado de ESTA cita (del contrato; el RBAC ya lo aplicó
+        // el backend al proyectarlas). Vacío -> la tarjeta queda navegacional.
+        const rowActions = applicableAppointmentActions(actions, item.statusKey);
+        return (
+          <div
+            key={item.id}
+            className="flex w-full flex-wrap items-center gap-x-4 gap-y-2 rounded-[14px] border border-[var(--border)] bg-[var(--panel)] px-4 py-3.5"
           >
-            {item.initial}
-          </span>
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-[15px] font-semibold text-[var(--tx)]">{item.patientLabel}</div>
-            {item.reason ? (
-              <div className="truncate text-[12.5px] text-[var(--tx2)]">{item.reason}</div>
-            ) : null}
+            {/* Zona clicable: abre el chat del paciente (botón propio, no anida acciones). */}
+            <button
+              type="button"
+              onClick={() => onOpen(item)}
+              disabled={!item.patientId}
+              title={item.patientId ? `Abrir el chat de ${item.patientLabel}` : undefined}
+              className={`flex min-w-0 flex-1 items-center gap-4 text-left transition ${
+                item.patientId ? "cursor-pointer hover:opacity-80" : "cursor-default"
+              }`}
+            >
+              <div className="w-[52px] shrink-0 text-center">
+                <div className="text-[15px] font-semibold tabular-nums text-[var(--tx)]">
+                  {formatTimeHM(item.scheduledAt, timeZone) || "--:--"}
+                </div>
+                {item.durationMinutes !== null ? (
+                  <div className="text-[11px] text-[var(--tx3)]">{item.durationMinutes} min</div>
+                ) : null}
+              </div>
+              <div className="h-9 w-px shrink-0 self-stretch bg-[var(--border)]" />
+              <span
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[11px] text-[13px] font-bold text-white"
+                style={{ backgroundColor: avatarColor(item.patientId ?? item.patientLabel) }}
+              >
+                {item.initial}
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[15px] font-semibold text-[var(--tx)]">
+                  {item.patientLabel}
+                </div>
+                {item.reason ? (
+                  <div className="truncate text-[12.5px] text-[var(--tx2)]">{item.reason}</div>
+                ) : null}
+              </div>
+            </button>
+            <div className="flex items-center gap-3">
+              <StatusPill label={item.statusLabel} tone={item.statusTone} />
+              {rowActions.length > 0 ? (
+                <ResourceRowActions
+                  placeholder={actionPlaceholder}
+                  id={item.id}
+                  actions={rowActions}
+                  item={{ id: item.id, status: item.statusKey }}
+                />
+              ) : null}
+            </div>
           </div>
-          <StatusPill label={item.statusLabel} tone={item.statusTone} />
-        </button>
-      ))}
+        );
+      })}
     </div>
   );
 }

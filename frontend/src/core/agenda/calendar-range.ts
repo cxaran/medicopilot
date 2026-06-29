@@ -7,6 +7,8 @@
 // contrato (p. ej. el nombre del paciente) se resuelve por el mapa o cae a un texto neutro.
 
 import type { ResourceRow } from "@/core/resources/list-types";
+import type { ResourceActionCapability } from "@/core/api/contracts";
+import { visibleActionsForRow } from "@/core/resources/resource-action";
 
 export type AgendaMode = "day" | "week" | "month";
 
@@ -376,4 +378,18 @@ export function avatarColor(seed: string): string {
     hash = (hash * 31 + seed.charCodeAt(i)) | 0;
   }
   return AVATAR_PALETTE[Math.abs(hash) % AVATAR_PALETTE.length];
+}
+
+/**
+ * Acciones de transición aplicables a una cita SEGÚN SU ESTADO, derivadas del CONTRATO (no
+ * hardcodeadas): delega en ``visibleActionsForRow`` (evalúa ``visible_when`` contra ``status``), el
+ * MISMO filtrado que usa la tabla genérica. El RBAC ya lo aplicó el backend (sólo proyecta las
+ * acciones cuyo permiso tiene el rol); ``enabled_when`` lo resuelve después ``ResourceRowActions``. No
+ * hay ruta de acción paralela: las escrituras siguen pasando por ese cliente (diálogo + P1 + auditoría).
+ */
+export function applicableAppointmentActions(
+  actions: readonly ResourceActionCapability[],
+  statusKey: string,
+): ResourceActionCapability[] {
+  return visibleActionsForRow(actions, { status: statusKey });
 }
