@@ -6,6 +6,51 @@
  * para que las rebanadas siguientes (R2+) las consuman. No restylea componentes aqui.
  */
 
+/*
+ * Extension de tema de Tailwind v4 (MP-CTRL-0121): mapea los tokens del diseno a
+ * utilidades semanticas (bg-bg, bg-panel, text-tx, text-accent, border-border,
+ * shadow-soft, font-sans...). Se usa `inline` para que la utilidad resuelva a la
+ * CSS var EN TIEMPO DE EJECUCION (no se hornea el valor), conservando el cambio
+ * light/dark por [data-theme]. Es ADITIVO: no reemplaza las utilidades por defecto
+ * de Tailwind ni rompe los valores arbitrarios `[var(--x)]` que ya usan los componentes.
+ */
+@theme inline {
+  --color-bg: var(--bg);
+  --color-bg2: var(--bg2);
+  --color-panel: var(--panel);
+  --color-panel2: var(--panel2);
+  --color-elev: var(--elev);
+  --color-border: var(--border);
+  --color-border2: var(--border2);
+  --color-tx: var(--tx);
+  --color-tx2: var(--tx2);
+  --color-tx3: var(--tx3);
+  --color-accent: var(--accent);
+  --color-accent-tx: var(--accent-tx);
+  --color-accent-dim: var(--accent-dim);
+  --color-accent-bd: var(--accent-bd);
+  --color-on-accent: var(--on-accent);
+  --color-danger: var(--danger);
+  --color-warn: var(--warn);
+  --color-ok: var(--ok);
+  --color-info: var(--info);
+  --color-purple: var(--purple);
+
+  /* Fuente del diseno (Geist) ya cableada por next/font como --font-geist. */
+  --font-sans: var(--font-geist), system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  /* Sombras del diseno -> utilidades shadow-*. (--shadow del diseno = shadow-overlay). */
+  --shadow-soft: var(--soft);
+  --shadow-soft2: var(--soft2);
+  --shadow-overlay: var(--shadow);
+  --shadow-glow: var(--glow);
+}
+
+/*
+ * El tema CLARO es el predeterminado en :root (aplica aunque no haya atributo
+ * data-theme, p. ej. en SSR o entornos de prueba); [data-theme="dark"] lo sobreescribe.
+ */
+:root,
 [data-theme="light"] {
   color-scheme: light;
   --bg: #faf9f8;

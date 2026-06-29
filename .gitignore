@@ -12,3 +12,6 @@ dist/
 coverage/
 test-results/
 *.tsbuildinfo
+
+# Artefacto de referencia del rediseno visual (solo consulta; nunca se versiona). MP-CTRL-0121.
+frontend/design-reference/
