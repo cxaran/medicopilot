@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from backend.app.api.v1.agent import router as agent_router
 from backend.app.api.v1.agent_internal import router as agent_internal_router
+from backend.app.api.v1.agent_templates import router as agent_templates_router
 from backend.app.api.v1.agent_memories import router as agent_memories_router
 from backend.app.api.v1.agent_oauth import router as agent_oauth_router
 from backend.app.api.v1.agent_persona import router as agent_persona_router
@@ -65,6 +66,7 @@ from backend.app.api.v1.vital_signs import router as vital_signs_router
 
 router = APIRouter(prefix="/v1")
 router.include_router(agent_router)
+router.include_router(agent_templates_router)
 router.include_router(agent_internal_router)
 router.include_router(agent_memories_router)
 router.include_router(agent_oauth_router)

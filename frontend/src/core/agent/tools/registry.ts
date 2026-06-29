@@ -1956,6 +1956,23 @@ const TOOLS: ToolDefinition[] = [
     },
   },
   {
+    // UI HÍBRIDA (paso 1-2 de la política): ANTES de componer UI dinámica, consulta el catálogo
+    // de PLANTILLAS REGISTRADAS y elige una. Devuelve, filtradas por el RBAC del médico, las
+    // plantillas (recurso) con sus modos (create/edit/review), el contrato de prellenado (qué
+    // campos puede sugerir el agente y cuáles son obligatorios a confirmar) y las acciones
+    // permitidas. Solo lectura; la plataforma renderiza/valida/audita. El agente PROPONE.
+    name: "clinical.list_templates",
+    description:
+      "Lista las PLANTILLAS REGISTRADAS que el médico puede usar (flujos comunes/clínicos/" +
+      "regulados), filtradas por sus permisos. Para cada una: id estable, etiqueta, modos " +
+      "permitidos (create/edit/review), contrato de prellenado (campos sugeribles y campos " +
+      "obligatorios a confirmar) y acciones permitidas. ÚSALA PRIMERO: elige una plantilla " +
+      "registrada y propón abrirla con prellenado en vez de inventar UI. Solo lectura.",
+    kind: "read",
+    inputSchema: { type: "object", properties: {}, required: [], additionalProperties: false },
+    execute: (_args, ctx) => ctx.api(`/api/v1/agent/templates`),
+  },
+  {
     // CONVERSACIÓN→EXPEDIENTE (casos 116/117/119/123): proponer el ALTA de un paciente como
     // BORRADOR P1 con campos prellenados desde lo extraído. NUNCA autocrea: el alta pasa por la
     // aprobación del médico. ANTES de crear, internamente DEDUPLICA (llama a la búsqueda de 0113):

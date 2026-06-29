@@ -62,6 +62,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/agent/templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Agent Templates */
+        get: operations["list_agent_templates_api_v1_agent_templates_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/internal/agent/credential-lease": {
         parameters: {
             query?: never;
@@ -2296,6 +2313,69 @@ export interface components {
             language_locale?: string | null;
             /** Estilo de consulta */
             consultation_style?: string | null;
+        };
+        /**
+         * AgentTemplate
+         * @description Una plantilla registrada que el agente puede proponer abrir (con prellenado).
+         */
+        AgentTemplate: {
+            /**
+             * Id
+             * @description Id estable de la plantilla (= nombre del recurso del registry, p. ej. 'patients').
+             */
+            id: string;
+            /**
+             * Label
+             * @description Etiqueta legible en español.
+             */
+            label: string;
+            /**
+             * Resource
+             * @description Recurso del registry al que mapea la plantilla.
+             */
+            resource: string;
+            /**
+             * Modes
+             * @description Modos de apertura permitidos al usuario: create | edit | review.
+             */
+            modes?: string[];
+            /** @description Contrato de prellenado de la plantilla. */
+            prefill: components["schemas"]["AgentTemplatePrefill"];
+            /**
+             * Actions
+             * @description Acciones permitidas (filtradas por el RBAC del usuario).
+             */
+            actions?: string[];
+            /**
+             * Create Path
+             * @description Ruta de creación (POST) cuando el modo create está permitido.
+             */
+            create_path?: string | null;
+            /**
+             * Detail Path
+             * @description Plantilla de ruta de detalle (GET) cuando el modo review está permitido.
+             */
+            detail_path?: string | null;
+        };
+        /**
+         * AgentTemplatePrefill
+         * @description Contrato de prellenado: qué campos acepta el agente sugerir y cuáles confirmar.
+         *
+         *     Derivado del esquema de creación/edición ya declarado (los campos del formulario). El médico
+         *     SIEMPRE revisa y aprueba; ``fields_requiring_confirmation`` son los obligatorios que no pueden
+         *     quedar vacíos al guardar.
+         */
+        AgentTemplatePrefill: {
+            /**
+             * Prefillable Fields
+             * @description Campos cuyo valor puede sugerir el agente (se prellenan para revisión).
+             */
+            prefillable_fields?: string[];
+            /**
+             * Fields Requiring Confirmation
+             * @description Campos obligatorios que el médico debe confirmar antes de guardar.
+             */
+            fields_requiring_confirmation?: string[];
         };
         /**
          * AiCredentialType
@@ -7773,6 +7853,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConnectionTicketRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_agent_templates_api_v1_agent_templates_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentTemplate"][];
                 };
             };
             /** @description Validation Error */
