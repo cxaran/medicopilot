@@ -127,15 +127,26 @@ test("ui.render_chart (tool): produce el spec normalizado", async () => {
   assert.equal((result.content as { kind: string }).kind, "chart");
 });
 
-test("ui.render_buttons (tool): produce el spec normalizado", async () => {
+test("ui.render_buttons (tool): produce el spec gobernado (consulta el catálogo para RBAC)", async () => {
+  // Tras MP-CTRL-0130 los botones se RESUELVEN contra el catálogo + RBAC, así que esta tool sí
+  // consulta /api/v1/resources (a diferencia de form/chart). El gobierno completo se prueba en
+  // button-actions-tools.test.ts; aquí sólo se verifica que produce un spec 'buttons' válido.
+  const buttonsCtx: ToolExecutionContext = {
+    api: (async (path: string) => {
+      if (path === "/api/v1/resources") return [];
+      throw new Error(`llamada inesperada: ${path}`);
+    }) as ToolExecutionContext["api"],
+    sandbox: async () => ({ ok: true, value: null, logs: [] }),
+  };
   const result = await executeTool(
     uiTool("ui.render_buttons"),
     { buttons: [{ label: "Ok", action: { type: "message", prompt: "ok" } }] },
-    ctx,
+    buttonsCtx,
   );
   assert.equal(result.status, "success");
   if (result.status !== "success") return;
   assert.equal((result.content as { kind: string }).kind, "buttons");
+  assert.equal((result.content as { buttons: Array<{ governance?: string }> }).buttons[0].governance, "read_only");
 });
 
 test("ui.render_form (tool): spec inválida -> error 'invalid_ui_spec'", async () => {

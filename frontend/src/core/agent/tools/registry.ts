@@ -4,7 +4,7 @@ import type { WireTool } from "@/core/agent/protocol";
 
 import type { ObjectSchema, PropSchema } from "./schema-validator";
 import { browserSandboxRunner, type SandboxRunner } from "./sandbox";
-import { parseButtonsSpec, parseChartSpec, parseFormSpec } from "./ui-spec";
+import { parseChartSpec, parseFormSpec } from "./ui-spec";
 import { validateDynamicForm } from "./dynamic-form";
 import {
   buildCloseOutPlan,
@@ -14,6 +14,12 @@ import {
   type DetectedActionsSpec,
 } from "./detected-actions";
 import { buildTaskPlan, type TaskPlanInput, type TaskPlanSpec } from "./task-plan";
+import {
+  buildButtonsModel,
+  type ButtonReviewContext,
+  type ButtonToolEntry,
+  type ButtonsInput,
+} from "./button-actions";
 import {
   searchTools,
   describeTools,
@@ -2669,11 +2675,21 @@ const TOOLS: ToolDefinition[] = [
     },
   },
   {
+    // BOTONES ACCIONABLES GOBERNADOS (MP-CTRL-0130). Cada botón se RESUELVE contra el catálogo de
+    // tools + RBAC: una acción de mensaje o una tool de lectura es de sólo lectura; una tool de
+    // escritura permitida es ACCIONABLE y al hacer clic la ejecuta el modelo pasando por la
+    // aprobación P1 (no es un despacho directo ni una llamada arbitraria); una tool desconocida o una
+    // escritura sin permiso quedan BLOQUEADAS con motivo. Los argumentos fuera del esquema de la tool
+    // se descartan (no se inventan). Solo lectura: no ejecuta ni guarda nada, sólo arma el panel.
     name: "ui.render_buttons",
     description:
-      "Genera botones de acción. Recibe { title?, buttons: [{label, action}] } donde action " +
-      "es { type:'message', prompt } o { type:'tool', tool, args? }. Al hacer clic se continúa " +
-      "la conversación con el modelo (las acciones de escritura siguen requiriendo aprobación).",
+      "Genera botones para el chat. Recibe { title?, buttons: [{label, action}] } donde action es " +
+      "{ type:'message', prompt } o { type:'tool', tool, args? }. La plataforma RESUELVE cada botón " +
+      "contra el catálogo de herramientas + permisos: un mensaje o una herramienta de lectura es de " +
+      "sólo lectura; una herramienta de ESCRITURA permitida es accionable y al hacer clic se ejecuta " +
+      "pasando por tu aprobación (P1); una herramienta desconocida o una escritura sin permiso queda " +
+      "bloqueada con motivo. Los argumentos fuera del esquema de la herramienta se descartan (no se " +
+      "inventan). No se ejecuta ni guarda nada por sí mismo. Solo lectura.",
     kind: "read",
     inputSchema: PASSTHROUGH_SCHEMA,
     wireSchema: {
@@ -2684,19 +2700,43 @@ const TOOLS: ToolDefinition[] = [
           type: "array",
           items: {
             type: "object",
-            properties: { label: { type: "string" }, action: { type: "object" } },
+            properties: {
+              label: { type: "string" },
+              action: {
+                type: "object",
+                properties: {
+                  type: { type: "string", enum: ["message", "tool"] },
+                  prompt: { type: "string", description: "Para type='message': texto a continuar." },
+                  tool: { type: "string", description: "Para type='tool': nombre de la herramienta." },
+                  args: {
+                    type: "object",
+                    description: "Argumentos de la herramienta (se validan contra su esquema).",
+                    additionalProperties: true,
+                  },
+                },
+                required: ["type"],
+              },
+            },
             required: ["label", "action"],
           },
         },
       },
       required: ["buttons"],
     },
-    execute: async (args) => {
-      const parsed = parseButtonsSpec(args);
-      if (!parsed.ok) {
-        throw new ToolExecutionError("invalid_ui_spec", parsed.error);
+    execute: async (args, ctx) => {
+      // Catálogo de recursos proyectado por permiso (RBAC) — misma señal que 0120/0129 — + el
+      // catálogo de tools estático para resolver y sanear cada botón. buildButtonsModel valida la
+      // estructura, resuelve contra el catálogo + RBAC y clasifica (read_only/actionable/blocked).
+      const catalog = await ctx.api<readonly CatalogResourceLike[]>(`/api/v1/resources`);
+      const reviewCtx: ButtonReviewContext = {
+        tools: buttonToolCatalog(),
+        creatable: reviewContextFromCatalog(catalog).creatable,
+      };
+      const model = buildButtonsModel(args as unknown as ButtonsInput, reviewCtx);
+      if (!model.ok) {
+        throw new ToolExecutionError("invalid_ui_spec", model.error);
       }
-      return parsed.spec;
+      return model.spec;
     },
   },
   {
@@ -2977,6 +3017,28 @@ const TOOLS: ToolDefinition[] = [
 ];
 
 const TOOLS_BY_NAME = new Map<string, ToolDefinition>(TOOLS.map((tool) => [tool.name, tool]));
+
+// Catálogo de tools (estático) que necesita el gobierno de botones (MP-CTRL-0130): por cada tool, su
+// tipo (read/write), el recurso destino + owner-scoped de la aprobación (para el RBAC de escritura) y
+// el set de argumentos permitidos (propiedades del inputSchema; undefined si el esquema es permisivo,
+// p. ej. PASSTHROUGH, donde no se puede validar campo a campo). El gobierno lo usa para resolver y
+// sanear cada botón sin acoplar button-actions.ts al registro (evita ciclo de imports).
+function buttonToolCatalog(): Map<string, ButtonToolEntry> {
+  const map = new Map<string, ButtonToolEntry>();
+  for (const tool of TOOLS) {
+    const schema = tool.inputSchema;
+    const props = Object.keys(schema.properties ?? {});
+    // Esquema permisivo (additionalProperties true y sin propiedades declaradas) → no se valida.
+    const schemaProps =
+      schema.additionalProperties === true && props.length === 0 ? undefined : new Set(props);
+    const entry: ButtonToolEntry = { name: tool.name, kind: tool.kind };
+    if (tool.approval?.targetResource) entry.targetResource = tool.approval.targetResource;
+    if (tool.approval?.ownerScoped) entry.ownerScoped = true;
+    if (schemaProps) entry.schemaProps = schemaProps;
+    map.set(tool.name, entry);
+  }
+  return map;
+}
 
 export function getTool(name: string): ToolDefinition | undefined {
   return TOOLS_BY_NAME.get(name);

@@ -13,6 +13,7 @@ import {
   type FormSpec,
   type UiSpec,
 } from "@/core/agent/tools/ui-spec";
+import { GOVERNANCE_LABEL } from "@/core/agent/tools/button-actions";
 import {
   buildDynamicFormSubmission,
   type DynamicFormSpec,
@@ -852,6 +853,11 @@ function TaskCard({
   );
 }
 
+// Botones gobernados (MP-CTRL-0130): cada botón ya viene RESUELTO por button-actions (governance +
+// motivo + args saneados). Los bloqueados se pintan DESHABILITADOS con su motivo (no pueden disparar
+// nada); los accionables/lectura conservan el clic, que continúa la conversación (las escrituras del
+// modelo siguen pasando por la aprobación P1). Defensa en profundidad: aquí no se reconstruye ninguna
+// acción ni se ejecuta una tool directamente.
 function ButtonsView({
   spec,
   onAction,
@@ -860,11 +866,26 @@ function ButtonsView({
     <div className="flex flex-col gap-2">
       {spec.title && <div className="text-sm font-semibold text-[var(--tx)]">{spec.title}</div>}
       <div className="flex flex-wrap gap-2">
-        {spec.buttons.map((button, index) => (
-          <Button key={`${button.label}-${index}`} type="button" onClick={() => onAction(button.action)}>
-            {button.label}
-          </Button>
-        ))}
+        {spec.buttons.map((button, index) => {
+          const blocked = button.governance === "blocked";
+          if (blocked) {
+            return (
+              <span
+                key={`${button.label}-${index}`}
+                title={button.reason ?? GOVERNANCE_LABEL.blocked}
+                className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-[11px] border border-[var(--border2)] bg-[var(--bg2)] px-3 py-2 text-sm text-[var(--tx3)]"
+              >
+                <span aria-hidden="true">🚫</span>
+                {button.label}
+              </span>
+            );
+          }
+          return (
+            <Button key={`${button.label}-${index}`} type="button" onClick={() => onAction(button.action)}>
+              {button.label}
+            </Button>
+          );
+        })}
       </div>
     </div>
   );

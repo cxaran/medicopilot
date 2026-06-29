@@ -38,9 +38,21 @@ export type ButtonAction =
   | { type: "message"; prompt: string }
   | { type: "tool"; tool: string; args?: Record<string, unknown> };
 
+// Clasificación de gobierno de un botón (MP-CTRL-0130). La resolución la calcula button-actions.ts
+// (catálogo + RBAC); parseButtonsSpec sólo valida la ESTRUCTURA y NO la fija (queda undefined hasta
+// que el seam la resuelve). "read_only" = no puede mutar (mensaje o tool de lectura); "actionable" =
+// dispara una tool de escritura resuelta que pasa por la aprobación P1; "blocked" = no se permite.
+export type ButtonGovernance = "read_only" | "actionable" | "blocked";
+
 export interface ButtonSpec {
   label: string;
   action: ButtonAction;
+  /** Clasificación de gobierno (la fija el seam button-actions; ausente = sin resolver aún). */
+  governance?: ButtonGovernance;
+  /** Motivo cuando el botón queda bloqueado (tool desconocida / sin permiso); si no, ausente. */
+  reason?: string;
+  /** Argumentos propuestos descartados por estar fuera del esquema de la tool (no se inventan). */
+  dropped_args?: string[];
 }
 
 export interface ButtonsSpec {
