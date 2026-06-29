@@ -46,6 +46,10 @@ import {
   type ChecklistStatus,
   type CloseChecklistSpec,
 } from "@/core/agent/tools/close-checklist";
+import {
+  buildPromotionSubmission,
+  type TemplatePromotionSpec,
+} from "@/core/agent/tools/template-promotion";
 
 // Render seguro de UI generada por el modelo (B9, Parte B): specs declarativas mapeadas a
 // componentes React con los primitivos R2. NUNCA HTML/JS crudo del modelo.
@@ -75,6 +79,9 @@ export function GeneratedUi({
   }
   if (spec.kind === "close_checklist") {
     return <CloseChecklistPanel spec={spec} onSendFollowup={onSendFollowup} />;
+  }
+  if (spec.kind === "template_promotion_proposal") {
+    return <TemplatePromotionPanel spec={spec} onSendFollowup={onSendFollowup} />;
   }
   return <ButtonsView spec={spec} onAction={(action) => onSendFollowup(buttonActionToMessage(action))} />;
 }
@@ -992,6 +999,115 @@ function CloseChecklistPanel({
           }
         >
           {spec.confirm_label}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// PROPUESTA de promoción dinámica→plantilla (MP-CTRL-0132). Panel SÓLO LECTURA: muestra si la UI
+// dinámica califica para ser una plantilla registrada, los criterios cumplidos, la forma sugerida del
+// recurso (campos → tipos, cuáles regulados) y la justificación. NO registra nada — es una
+// recomendación para el equipo de desarrollo; el botón sólo envía el resumen al chat (sin mutar).
+const SUGGESTED_TYPE_LABEL: Record<string, string> = {
+  string: "texto",
+  text: "texto largo",
+  number: "número",
+  date: "fecha",
+  boolean: "sí/no",
+  enum: "opción",
+  enum_multi: "opción múltiple",
+};
+
+function TemplatePromotionPanel({
+  spec,
+  onSendFollowup,
+}: Readonly<{ spec: TemplatePromotionSpec; onSendFollowup: (text: string) => void }>) {
+  const { proposal } = spec;
+  const shape = proposal.suggested_template_shape;
+
+  return (
+    <div className="flex flex-col gap-3">
+      {spec.title && <div className="text-sm font-semibold text-[var(--tx)]">{spec.title}</div>}
+
+      <div
+        className={`rounded-[10px] border px-3 py-2 text-xs ${
+          proposal.qualifies
+            ? "border-[var(--accent-bd)] bg-[var(--accent-dim)] text-[var(--accent-tx)]"
+            : "border-[var(--border2)] bg-[var(--bg2)] text-[var(--tx2)]"
+        }`}
+      >
+        {proposal.qualifies
+          ? "Candidata a plantilla registrada — es una recomendación, no se registra sola."
+          : "No se recomienda promover por ahora (parece una UI puntual)."}
+      </div>
+
+      {proposal.matched_criteria.length > 0 && (
+        <div className="flex flex-col gap-1">
+          <span className="text-xs font-semibold text-[var(--tx2)]">Criterios cumplidos</span>
+          {proposal.matched_criteria.map((c) => (
+            <div key={c.key} className="rounded-[8px] border border-[var(--border2)] px-2 py-1 text-[11px] text-[var(--tx)]">
+              <span className="font-medium">{c.label}</span>
+              <span className="text-[var(--tx2)]"> — {c.detail}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {proposal.supporting_criteria.length > 0 && (
+        <div className="text-[11px] text-[var(--tx2)]">
+          Apoyo: {proposal.supporting_criteria.map((c) => c.label).join(", ")}.
+        </div>
+      )}
+
+      {!proposal.qualifies && proposal.reasons && (
+        <ul className="flex flex-col gap-1">
+          {proposal.reasons.map((reason, index) => (
+            <li key={index} className="text-[11px] text-[var(--tx2)]">
+              · {reason}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {shape && (
+        <div className="flex flex-col gap-1.5 rounded-[10px] border border-[var(--border2)] p-2">
+          <span className="text-xs font-semibold text-[var(--tx2)]">
+            Forma sugerida: recurso «{shape.suggested_resource_name}»
+            {shape.name_collision && (
+              <span className="text-[var(--danger)]"> (nombre en uso — renombrar)</span>
+            )}
+          </span>
+          {shape.fields.map((field) => (
+            <div key={field.name} className="flex items-center justify-between gap-2 text-[11px]">
+              <span className="text-[var(--tx)]">
+                {field.label}
+                {field.required && <span className="text-[var(--danger)]"> *</span>}
+                {field.regulated && (
+                  <span className="text-[var(--warn)]"> · regulado</span>
+                )}
+              </span>
+              <span className="text-[var(--tx2)]">
+                {SUGGESTED_TYPE_LABEL[field.suggested_type] ?? field.suggested_type}
+              </span>
+            </div>
+          ))}
+          {shape.notes.map((note, index) => (
+            <p key={index} className="text-[11px] italic text-[var(--tx2)]">
+              {note}
+            </p>
+          ))}
+        </div>
+      )}
+
+      <p className="text-[11px] text-[var(--tx2)]">{proposal.rationale}</p>
+
+      <div>
+        <Button
+          type="button"
+          onClick={() => onSendFollowup(buildPromotionSubmission(spec.follow_up_prompt, proposal))}
+        >
+          {spec.follow_up_label}
         </Button>
       </div>
     </div>

@@ -26,6 +26,11 @@ import {
   type CloseChecklistSpec,
 } from "./close-checklist";
 import {
+  buildPromotionProposal,
+  type PromotionSignals,
+  type TemplatePromotionSpec,
+} from "./template-promotion";
+import {
   searchTools,
   describeTools,
   type ToolDiscoveryContext,
@@ -3111,6 +3116,86 @@ const TOOLS: ToolDefinition[] = [
           typeof args.confirm_prompt === "string"
             ? args.confirm_prompt
             : "Checklist de cierre de la consulta revisada:",
+      };
+      if (typeof args.title === "string") spec.title = args.title;
+      return spec;
+    },
+  },
+  {
+    // PROMOCIÓN DINÁMICA→PLANTILLA (MP-CTRL-0132, UI híbrida sección 13): evalúa una UI DINÁMICA
+    // contra los criterios de promoción y, si califica, RECOMIENDA convertirla en plantilla
+    // registrada con una forma sugerida (campos→tipos, cuáles regulados, nombre de recurso). SÓLO
+    // PROPUESTA: NUNCA registra una ResourceDefinition ni muta el backend/registro — eso es un cambio
+    // de código del desarrollador. La spec se valida primero con la MISMA lista blanca de la UI
+    // dinámica (0117). El sistema NO persiste el reuso de las UIs dinámicas, así que la decisión se
+    // basa en los criterios ESTRUCTURALES de la spec + señales que el caller aporte explícitamente
+    // (la ausencia de una señal no cuenta). Solo lectura.
+    name: "ui.propose_template_promotion",
+    description:
+      "Evalúa si una UI DINÁMICA debería convertirse en PLANTILLA REGISTRADA (criterios: campos " +
+      "regulados, recetas/diagnósticos/órdenes/referencias, implicaciones legales, requiere " +
+      "validaciones, debe persistir estructurado, y —si el caller lo aporta— reuso frecuente/" +
+      "multiespecialidad/institucional). Indica spec: la especificación de la UI dinámica (misma " +
+      "forma que ui.render_dynamic_form) y opcional signals { reuse_count, regulated, " +
+      "multi_specialty, institutional, legal_implications, must_persist_structured }. Devuelve una " +
+      "RECOMENDACIÓN legible con los criterios cumplidos y la forma sugerida del recurso. NO registra " +
+      "ni cambia nada: registrar la plantilla es un cambio de código del desarrollador. Solo lectura.",
+    kind: "read",
+    inputSchema: PASSTHROUGH_SCHEMA,
+    wireSchema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Título del panel (opcional)." },
+        spec: {
+          type: "object",
+          description: "Especificación de la UI dinámica a evaluar (como ui.render_dynamic_form).",
+          additionalProperties: true,
+        },
+        signals: {
+          type: "object",
+          description: "Señales que el caller afirma explícitamente (su ausencia no cuenta).",
+          properties: {
+            reuse_count: { type: "number", description: "Veces que se ha usado esta UI (si se sabe)." },
+            regulated: { type: "boolean" },
+            multi_specialty: { type: "boolean" },
+            institutional: { type: "boolean" },
+            legal_implications: { type: "boolean" },
+            must_persist_structured: { type: "boolean" },
+          },
+          additionalProperties: false,
+        },
+        follow_up_label: { type: "string", description: "Etiqueta del botón de seguimiento." },
+        follow_up_prompt: { type: "string", description: "Encabezado del mensaje de seguimiento." },
+      },
+      required: ["spec"],
+      additionalProperties: false,
+    },
+    execute: async (args, ctx) => {
+      // 1) Validar la UI dinámica con la MISMA lista blanca (0117): así el contenido es seguro.
+      const validated = validateDynamicForm(args.spec);
+      if (!validated.ok) {
+        throw new ToolExecutionError("invalid_ui_spec", validated.error);
+      }
+      // 2) Recursos ya registrados (para no proponer un nombre que colisione).
+      const catalog = await ctx.api<readonly CatalogResourceLike[]>(`/api/v1/resources`);
+      const knownResources = new Set(catalog.map((resource) => resource.name));
+      const signals =
+        args.signals && typeof args.signals === "object"
+          ? (args.signals as PromotionSignals)
+          : undefined;
+      const result = buildPromotionProposal(validated.spec, { signals, knownResources });
+      if (!result.ok) {
+        throw new ToolExecutionError("invalid_template_promotion", result.error);
+      }
+      const spec: TemplatePromotionSpec = {
+        kind: "template_promotion_proposal",
+        proposal: result.proposal,
+        follow_up_label:
+          typeof args.follow_up_label === "string" ? args.follow_up_label : "Enviar recomendación",
+        follow_up_prompt:
+          typeof args.follow_up_prompt === "string"
+            ? args.follow_up_prompt
+            : "Recomendación de promoción a plantilla:",
       };
       if (typeof args.title === "string") spec.title = args.title;
       return spec;

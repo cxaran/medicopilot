@@ -69,6 +69,7 @@ import type { DynamicFormSpec } from "./dynamic-form";
 import type { DetectedActionsSpec } from "./detected-actions";
 import type { TaskPlanSpec } from "./task-plan";
 import type { CloseChecklistSpec } from "./close-checklist";
+import type { TemplatePromotionSpec } from "./template-promotion";
 
 export type UiSpec =
   | FormSpec
@@ -77,7 +78,8 @@ export type UiSpec =
   | DynamicFormSpec
   | DetectedActionsSpec
   | TaskPlanSpec
-  | CloseChecklistSpec;
+  | CloseChecklistSpec
+  | TemplatePromotionSpec;
 
 export type ParseResult<T> = { ok: true; spec: T } | { ok: false; error: string };
 
@@ -93,7 +95,8 @@ export function isUiSpec(value: unknown): value is UiSpec {
     kind === "dynamic_form" ||
     kind === "detected_actions" ||
     kind === "task_plan" ||
-    kind === "close_checklist"
+    kind === "close_checklist" ||
+    kind === "template_promotion_proposal"
   );
 }
 
