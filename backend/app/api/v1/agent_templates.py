@@ -12,6 +12,7 @@ from backend.app.agent_templates import (
     TemplateResolutionError,
     build_template_catalog,
     resolve_open_template,
+    resolve_prefill_from_extraction,
 )
 from backend.app.api.resource_actions import api_error
 from backend.app.auth.auth_dependencies import CurrentUser
@@ -19,6 +20,7 @@ from backend.app.schemas.agent_template import (
     AgentTemplate,
     OpenTemplateRequest,
     OpenTemplateResolved,
+    PrefillFromExtractionRequest,
 )
 
 router = APIRouter(prefix="/agent", tags=["agent-templates"])
@@ -50,5 +52,28 @@ def open_template_prefill(
     """
     try:
         return resolve_open_template(current_user, template_id, payload)
+    except TemplateResolutionError as error:
+        api_error(error.status_code, error.code, error.message)
+
+
+@router.post(
+    "/templates/{template_id}/prefill-from-extraction",
+    response_model=OpenTemplateResolved,
+    response_model_exclude_none=True,
+)
+def prefill_from_extraction(
+    template_id: str,
+    payload: PrefillFromExtractionRequest,
+    current_user: CurrentUser,
+) -> OpenTemplateResolved:
+    """Mapea un RESULTADO DE EXTRACCIÓN (transcripción/texto libre) a una plantilla prellenada.
+
+    Cierra el flujo 'hablar/dictar -> formulario registrado prellenado -> aprobar'. READ-ONLY: la
+    extracción LLM queda fuera de alcance; aquí entra su resultado ya estructurado y se reparte de
+    forma DETERMINISTA por confianza (prellenado/sugerido/descartado) contra el esquema de la
+    plantilla. No persiste nada: la aceptación del médico va por la ruta P1.
+    """
+    try:
+        return resolve_prefill_from_extraction(current_user, template_id, payload)
     except TemplateResolutionError as error:
         api_error(error.status_code, error.code, error.message)

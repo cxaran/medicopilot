@@ -2033,6 +2033,87 @@ const TOOLS: ToolDefinition[] = [
     },
   },
   {
+    // CONVERSACIÓN→EXPEDIENTE (seam EXTRACCIÓN->PREFILL, MP-CTRL-0118): cierra "hablar/dictar ->
+    // formulario registrado prellenado -> aprobar". El agente extrae los campos de la transcripción/
+    // texto libre (la extracción LLM es su trabajo) y aquí emite el RESULTADO ya estructurado:
+    // cada campo con confianza [0,1] y el fragmento de origen que lo respalda. La plataforma reparte
+    // DETERMINISTA por confianza (alta -> prellenado, media -> sugerido, baja -> descartado), descarta
+    // los campos ajenos al esquema (no inventa) y deja vacíos los ausentes (la ausencia no es un
+    // negativo clínico). Devuelve el MISMO plan que clinical.open_template: el formulario registrado
+    // se renderiza prellenado y el médico revisa/edita/aprueba por la ruta P1. NADA se guarda.
+    name: "clinical.prefill_from_extraction",
+    description:
+      "Mapea un RESULTADO DE EXTRACCIÓN (de una transcripción/texto libre) a una plantilla " +
+      "registrada PRELLENADA. Indica template_id (del catálogo), mode (create/edit/review) y " +
+      "extracted_fields: lista de campos extraídos, cada uno { field, value, confidence (0..1), " +
+      "source_fragment }. La plataforma reparte por confianza (alta -> prellenado, media -> " +
+      "sugerido, baja -> descartado), descarta los campos que no existan en el esquema (no inventes " +
+      "campos) y deja vacíos los ausentes (no afirmes un negativo por ausencia). NO guarda nada: " +
+      "muestra el formulario prellenado y el médico aprueba por la ruta de aprobación. Usa esto " +
+      "cuando partes de una transcripción/dictado; si ya separaste confianza alta/baja, usa " +
+      "clinical.open_template. Si template_id es desconocido o no permitido, se rechaza nombrándolo.",
+    kind: "read",
+    // El validador local acotado no cubre arrays; esquema permisivo + wireSchema rico (igual que las
+    // demás tools con listas). El execute arma defensivamente el cuerpo de la petición.
+    inputSchema: PASSTHROUGH_SCHEMA,
+    wireSchema: {
+      type: "object",
+      properties: {
+        template_id: { type: "string", description: "Id de la plantilla (del catálogo)." },
+        mode: {
+          type: "string",
+          description: "Modo de apertura.",
+          enum: ["create", "edit", "review"],
+        },
+        extracted_fields: {
+          type: "array",
+          description: "Campos extraídos con su confianza y fragmento de origen.",
+          items: {
+            type: "object",
+            properties: {
+              field: { type: "string", description: "Nombre del campo de la plantilla." },
+              value: { description: "Valor extraído (en bruto; el médico lo revisa)." },
+              confidence: {
+                type: "number",
+                description: "Confianza de la extracción en [0,1].",
+                minimum: 0,
+                maximum: 1,
+              },
+              source_fragment: {
+                type: "string",
+                description: "Fragmento de origen que respalda el valor (trazabilidad).",
+              },
+            },
+            required: ["field", "value", "confidence"],
+            additionalProperties: false,
+          },
+        },
+        source_overall: {
+          type: "string",
+          description: "Id/fragmento de la transcripción o fuente general (opcional).",
+        },
+        allowed_actions: {
+          type: "array",
+          description: "Acciones que se sugieren habilitar tras la revisión (se filtran por RBAC).",
+          items: { type: "string" },
+        },
+      },
+      required: ["template_id", "mode", "extracted_fields"],
+      additionalProperties: false,
+    },
+    execute: (args, ctx) => {
+      const id = encodeURIComponent(String(args.template_id));
+      const body: Record<string, unknown> = { mode: args.mode };
+      for (const key of ["extracted_fields", "source_overall", "allowed_actions"]) {
+        if (args[key] !== undefined) body[key] = args[key];
+      }
+      return ctx.api(`/api/v1/agent/templates/${id}/prefill-from-extraction`, {
+        method: "POST",
+        body,
+      });
+    },
+  },
+  {
     // CONVERSACIÓN→EXPEDIENTE (casos 116/117/119/123): proponer el ALTA de un paciente como
     // BORRADOR P1 con campos prellenados desde lo extraído. NUNCA autocrea: el alta pasa por la
     // aprobación del médico. ANTES de crear, internamente DEDUPLICA (llama a la búsqueda de 0113):

@@ -102,6 +102,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/agent/templates/{template_id}/prefill-from-extraction": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Prefill From Extraction
+         * @description Mapea un RESULTADO DE EXTRACCIÓN (transcripción/texto libre) a una plantilla prellenada.
+         *
+         *     Cierra el flujo 'hablar/dictar -> formulario registrado prellenado -> aprobar'. READ-ONLY: la
+         *     extracción LLM queda fuera de alcance; aquí entra su resultado ya estructurado y se reparte de
+         *     forma DETERMINISTA por confianza (prellenado/sugerido/descartado) contra el esquema de la
+         *     plantilla. No persiste nada: la aceptación del médico va por la ruta P1.
+         */
+        post: operations["prefill_from_extraction_api_v1_agent_templates__template_id__prefill_from_extraction_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/internal/agent/credential-lease": {
         parameters: {
             query?: never;
@@ -4263,6 +4288,37 @@ export interface components {
             status?: components["schemas"]["RecordStatus"] | null;
         };
         /**
+         * ExtractedField
+         * @description Un campo extraído por el agente desde una transcripción/texto libre (entrada al seam 0118).
+         *
+         *     La extracción REAL desde el texto crudo la hace el runtime del agente (MG-002); aquí sólo entra
+         *     su resultado ya estructurado. ``confidence`` decide el reparto determinista (alta -> prellenado,
+         *     media -> sugerido, baja -> descartado) y ``source_fragment`` da trazabilidad. Nunca se guarda
+         *     sin revisión del médico.
+         */
+        ExtractedField: {
+            /**
+             * Field
+             * @description Nombre del campo de la plantilla al que mapea (los ajenos al esquema se descartan).
+             */
+            field: string;
+            /**
+             * Value
+             * @description Valor extraído (en bruto; el médico revisa antes de guardar).
+             */
+            value: unknown;
+            /**
+             * Confidence
+             * @description Confianza de la extracción en [0,1]: alta -> prellenado, media -> sugerido, baja -> descartado.
+             */
+            confidence: number;
+            /**
+             * Source Fragment
+             * @description Fragmento de la transcripción/fuente que respalda el valor (trazabilidad).
+             */
+            source_fragment?: string | null;
+        };
+        /**
          * FamilyRelationship
          * @description Parentesco del familiar en un antecedente familiar (opcional).
          * @enum {string}
@@ -6189,6 +6245,37 @@ export interface components {
             description?: string | null;
         };
         /**
+         * PrefillFromExtractionRequest
+         * @description Resultado de extracción que el agente PROPONE mapear a una plantilla registrada (seam 0118).
+         *
+         *     Es el cierre de "hablar/dictar -> formulario registrado prellenado -> aprobar": el agente emite
+         *     los campos extraídos con su confianza y fragmento de origen, y la plataforma los reparte de forma
+         *     DETERMINISTA en prellenados/sugeridos/descartados contra el esquema de la plantilla (no inventa
+         *     ni guarda). El médico revisa/edita/aprueba por la ruta P1.
+         */
+        PrefillFromExtractionRequest: {
+            /**
+             * Mode
+             * @description Modo de apertura: create | edit | review.
+             */
+            mode: string;
+            /**
+             * Extracted Fields
+             * @description Campos extraídos con su valor, confianza y fragmento de origen.
+             */
+            extracted_fields?: components["schemas"]["ExtractedField"][];
+            /**
+             * Source Overall
+             * @description Id/fragmento de la transcripción o fuente general (trazabilidad).
+             */
+            source_overall?: string | null;
+            /**
+             * Allowed Actions
+             * @description Acciones que el agente sugiere habilitar tras la revisión (se filtran por RBAC).
+             */
+            allowed_actions?: string[];
+        };
+        /**
          * PregnancyStatus
          * @description Estado de embarazo/lactancia del paciente (relevante para seguridad del medicamento).
          * @enum {string}
@@ -8064,6 +8151,43 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["OpenTemplateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenTemplateResolved"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    prefill_from_extraction_api_v1_agent_templates__template_id__prefill_from_extraction_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                template_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PrefillFromExtractionRequest"];
             };
         };
         responses: {

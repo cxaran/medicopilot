@@ -44,10 +44,19 @@ from backend.app.agent_templates import (  # noqa: E402
     TemplateResolutionError,
     build_template_catalog,
     resolve_open_template,
+    resolve_prefill_from_extraction,
+)
+from backend.app.agent_templates.catalog import (  # noqa: E402
+    PREFILL_CONFIDENCE_THRESHOLD,
+    SUGGEST_CONFIDENCE_FLOOR,
 )
 from backend.app.auth.auth_dependencies import get_current_user  # noqa: E402
 from backend.app.main import app  # noqa: E402
-from backend.app.schemas.agent_template import OpenTemplateRequest  # noqa: E402
+from backend.app.schemas.agent_template import (  # noqa: E402
+    ExtractedField,
+    OpenTemplateRequest,
+    PrefillFromExtractionRequest,
+)
 from backend.app.schemas.user import SessionUser  # noqa: E402
 from backend.app.security.catalog import declared_permissions  # noqa: E402
 
@@ -190,6 +199,115 @@ class OpenTemplateResolveTest(unittest.TestCase):
         self.assertNotIn("delete", resolved.allowed_actions)
 
 
+class PrefillFromExtractionResolveTest(unittest.TestCase):
+    """Seam EXTRACCIÓN->PREFILL (MP-CTRL-0118): reparto determinista por confianza, reusando la
+    resolución de 0116. Función pura sobre el registry + el usuario (sin base de datos)."""
+
+    def _full(self) -> SessionUser:
+        return session_user(*declared_permissions())
+
+    def _req(self, *fields: ExtractedField, mode: str = "create") -> PrefillFromExtractionRequest:
+        return PrefillFromExtractionRequest(mode=mode, extracted_fields=list(fields))
+
+    def test_high_confidence_field_is_prefilled(self) -> None:
+        resolved = resolve_prefill_from_extraction(
+            self._full(),
+            "patients",
+            self._req(
+                ExtractedField(
+                    field="full_name",
+                    value="María López",
+                    confidence=PREFILL_CONFIDENCE_THRESHOLD,  # en el umbral -> prellenado
+                    source_fragment="la paciente María López",
+                ),
+            ),
+        )
+        self.assertEqual(resolved.resource, "patients")
+        self.assertEqual(resolved.method, "POST")
+        self.assertEqual(resolved.values["full_name"], "María López")
+        self.assertIn("full_name", resolved.prefilled_fields)
+        self.assertNotIn("full_name", resolved.suggested_fields)
+        # El fragmento de origen se conserva sólo de campos aceptados.
+        self.assertEqual(resolved.source_fragments["full_name"], "la paciente María López")
+
+    def test_medium_confidence_field_is_suggested(self) -> None:
+        resolved = resolve_prefill_from_extraction(
+            self._full(),
+            "patients",
+            self._req(
+                ExtractedField(
+                    field="full_name",
+                    value="Ana",
+                    confidence=SUGGEST_CONFIDENCE_FLOOR,  # en el piso -> sugerido (a confirmar)
+                ),
+            ),
+        )
+        self.assertIn("full_name", resolved.values)
+        self.assertIn("full_name", resolved.suggested_fields)
+        self.assertNotIn("full_name", resolved.prefilled_fields)
+
+    def test_below_floor_confidence_is_dropped(self) -> None:
+        # Por debajo del piso -> descartado por confianza insuficiente (no entra al formulario).
+        resolved = resolve_prefill_from_extraction(
+            self._full(),
+            "patients",
+            self._req(
+                ExtractedField(
+                    field="full_name", value="¿Ana?", confidence=SUGGEST_CONFIDENCE_FLOOR - 0.1
+                ),
+            ),
+        )
+        self.assertNotIn("full_name", resolved.values)
+        self.assertIn("full_name", resolved.dropped_fields)
+        self.assertNotIn("full_name", resolved.prefilled_fields)
+        self.assertNotIn("full_name", resolved.suggested_fields)
+
+    def test_field_not_in_schema_is_dropped_not_invented(self) -> None:
+        resolved = resolve_prefill_from_extraction(
+            self._full(),
+            "patients",
+            self._req(
+                ExtractedField(field="full_name", value="Ana", confidence=0.95),
+                ExtractedField(field="campo_inventado", value="x", confidence=0.99),
+            ),
+        )
+        self.assertIn("campo_inventado", resolved.dropped_fields)  # descartado, no inventado
+        self.assertNotIn("campo_inventado", resolved.values)
+        self.assertIn("full_name", resolved.values)
+
+    def test_field_in_schema_but_missing_from_extraction_stays_empty(self) -> None:
+        # birth_date es obligatorio pero no viene en la extracción: queda VACÍO (la ausencia no es un
+        # negativo) y sigue listado como a-confirmar para que el médico lo complete.
+        resolved = resolve_prefill_from_extraction(
+            self._full(),
+            "patients",
+            self._req(ExtractedField(field="full_name", value="Ana", confidence=0.95)),
+        )
+        self.assertNotIn("birth_date", resolved.values)  # no se fabrica un valor
+        self.assertIn("birth_date", resolved.fields_requiring_confirmation)
+
+    def test_unknown_template_rejected_naming_it(self) -> None:
+        with self.assertRaises(TemplateResolutionError) as ctx:
+            resolve_prefill_from_extraction(
+                self._full(), "no_existe", self._req()
+            )
+        self.assertEqual(ctx.exception.status_code, 404)
+        self.assertIn("no_existe", ctx.exception.message)
+
+    def test_rbac_forbidden_mode_rejected(self) -> None:
+        # Sólo lectura de pacientes: no puede crear -> plantilla no disponible (403).
+        with self.assertRaises(TemplateResolutionError) as ctx:
+            resolve_prefill_from_extraction(
+                session_user("patients:read"), "patients", self._req()
+            )
+        self.assertEqual(ctx.exception.status_code, 403)
+
+    def test_invalid_confidence_rejected_by_schema(self) -> None:
+        # confidence fuera de [0,1] lo rechaza la validación del esquema (no llega al resolutor).
+        with self.assertRaises(Exception):
+            ExtractedField(field="full_name", value="Ana", confidence=1.5)
+
+
 class AgentTemplatesEndpointTest(unittest.TestCase):
     def tearDown(self) -> None:
         app.dependency_overrides.clear()
@@ -243,6 +361,50 @@ class AgentTemplatesEndpointTest(unittest.TestCase):
         self._as("patients:read")  # sin create -> plantilla no disponible
         resp = client.post(
             "/api/v1/agent/templates/patients/prefill", json={"mode": "create"}
+        )
+        self.assertEqual(resp.status_code, 403)
+
+    def test_extraction_endpoint_maps_by_confidence(self) -> None:
+        client = TestClient(app)
+        self._as(*declared_permissions())
+        resp = client.post(
+            "/api/v1/agent/templates/patients/prefill-from-extraction",
+            json={
+                "mode": "create",
+                "extracted_fields": [
+                    {"field": "full_name", "value": "Ana Ruiz", "confidence": 0.95,
+                     "source_fragment": "la paciente Ana Ruiz"},
+                    {"field": "phone", "value": "5512345678", "confidence": 0.6},
+                    {"field": "campo_inventado", "value": "x", "confidence": 0.99},
+                ],
+                "source_overall": "transcripcion-123",
+            },
+        )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        body = resp.json()
+        self.assertEqual(body["values"]["full_name"], "Ana Ruiz")
+        self.assertIn("full_name", body["prefilled_fields"])  # alta confianza
+        self.assertIn("phone", body["suggested_fields"])  # confianza media
+        self.assertIn("campo_inventado", body["dropped_fields"])  # fuera de esquema -> descartado
+        self.assertNotIn("campo_inventado", body["values"])
+        self.assertEqual(body["source_overall"], "transcripcion-123")
+
+    def test_extraction_endpoint_unknown_template_404(self) -> None:
+        client = TestClient(app)
+        self._as(*declared_permissions())
+        resp = client.post(
+            "/api/v1/agent/templates/no_existe/prefill-from-extraction",
+            json={"mode": "create", "extracted_fields": []},
+        )
+        self.assertEqual(resp.status_code, 404)
+        self.assertIn("no_existe", resp.json()["message"])
+
+    def test_extraction_endpoint_rbac_forbidden(self) -> None:
+        client = TestClient(app)
+        self._as("patients:read")  # sin create -> plantilla no disponible
+        resp = client.post(
+            "/api/v1/agent/templates/patients/prefill-from-extraction",
+            json={"mode": "create", "extracted_fields": []},
         )
         self.assertEqual(resp.status_code, 403)
 

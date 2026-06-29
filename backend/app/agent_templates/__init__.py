@@ -10,10 +10,12 @@ from backend.app.agent_templates.catalog import (
     TemplateResolutionError,
     build_template_catalog,
     resolve_open_template,
+    resolve_prefill_from_extraction,
 )
 
 __all__ = [
     "TemplateResolutionError",
     "build_template_catalog",
     "resolve_open_template",
+    "resolve_prefill_from_extraction",
 ]

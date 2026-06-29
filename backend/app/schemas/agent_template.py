@@ -88,6 +88,54 @@ class OpenTemplateRequest(ApiWriteSchema):
     )
 
 
+class ExtractedField(ApiWriteSchema):
+    """Un campo extraído por el agente desde una transcripción/texto libre (entrada al seam 0118).
+
+    La extracción REAL desde el texto crudo la hace el runtime del agente (MG-002); aquí sólo entra
+    su resultado ya estructurado. ``confidence`` decide el reparto determinista (alta -> prellenado,
+    media -> sugerido, baja -> descartado) y ``source_fragment`` da trazabilidad. Nunca se guarda
+    sin revisión del médico.
+    """
+
+    field: str = Field(
+        description="Nombre del campo de la plantilla al que mapea (los ajenos al esquema se descartan)."
+    )
+    value: Any = Field(description="Valor extraído (en bruto; el médico revisa antes de guardar).")
+    confidence: float = Field(
+        ge=0.0,
+        le=1.0,
+        description="Confianza de la extracción en [0,1]: alta -> prellenado, media -> sugerido, baja -> descartado.",
+    )
+    source_fragment: Optional[str] = Field(
+        default=None,
+        description="Fragmento de la transcripción/fuente que respalda el valor (trazabilidad).",
+    )
+
+
+class PrefillFromExtractionRequest(ApiWriteSchema):
+    """Resultado de extracción que el agente PROPONE mapear a una plantilla registrada (seam 0118).
+
+    Es el cierre de "hablar/dictar -> formulario registrado prellenado -> aprobar": el agente emite
+    los campos extraídos con su confianza y fragmento de origen, y la plataforma los reparte de forma
+    DETERMINISTA en prellenados/sugeridos/descartados contra el esquema de la plantilla (no inventa
+    ni guarda). El médico revisa/edita/aprueba por la ruta P1.
+    """
+
+    mode: str = Field(description="Modo de apertura: create | edit | review.")
+    extracted_fields: list[ExtractedField] = Field(
+        default_factory=list,
+        description="Campos extraídos con su valor, confianza y fragmento de origen.",
+    )
+    source_overall: Optional[str] = Field(
+        default=None,
+        description="Id/fragmento de la transcripción o fuente general (trazabilidad).",
+    )
+    allowed_actions: list[str] = Field(
+        default_factory=list,
+        description="Acciones que el agente sugiere habilitar tras la revisión (se filtran por RBAC).",
+    )
+
+
 class OpenTemplateResolved(ApiReadSchema):
     """Plan resuelto y validado para abrir una plantilla PRELLENADA (read-only, nada guardado).
 
