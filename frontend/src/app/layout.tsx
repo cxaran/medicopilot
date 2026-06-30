@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist } from "next/font/google";
+import Script from "next/script";
 
 import "./globals.css";
 
@@ -23,10 +24,15 @@ const themeInitScript = `(function(){try{var t=localStorage.getItem("mp-theme");
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="es" data-theme="light" className={geist.variable}>
-      <head>
-        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
-      </head>
-      <body>{children}</body>
+      <body>
+        {/* Aplica el tema persistido antes del primer paint (no-flash). Con next/script y
+            ``beforeInteractive`` Next lo inyecta en el HTML inicial; evita el warning de React por
+            renderizar un <script> crudo dentro del árbol de componentes. */}
+        <Script id="mp-theme-init" strategy="beforeInteractive">
+          {themeInitScript}
+        </Script>
+        {children}
+      </body>
     </html>
   );
 }
