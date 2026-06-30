@@ -288,10 +288,9 @@ _CLIENT_WRITABLE_EXCEPTIONS = frozenset(
         ("clinical_events", "ended_at"),  # "Fin" del evento clínico que captura el médico
         ("study_orders", "ordered_at"),  # "Fecha de la orden" que captura el médico
         ("clinical_tasks", "due_at"),  # "Vencimiento" de la tarea que fija el usuario
-        ("appointments", "scheduled_date"),  # "Fecha" de la cita (obligatoria)
-        ("appointments", "scheduled_time"),  # "Hora" opcional de la cita
-        ("appointments.reschedule", "scheduled_date"),  # nueva fecha al reagendar
-        ("appointments.reschedule", "scheduled_time"),  # nueva hora (opcional) al reagendar
+        # NOTA: ``appointments.scheduled_date`` / ``scheduled_time`` NO necesitan excepción: al ya
+        # no terminar en ``_at`` (antes ``scheduled_at``) no disparan la heurística server-governed,
+        # así que son client-writable sin allowlist.
         # ``ordered_by`` (médico que ordena el estudio) NO es auditoría: es un dato clínico
         # que el cliente provee al crear la orden (qué médico la indica), distinto de
         # ``created_by`` (auditoría del servidor). Sólo se declara en el alta.

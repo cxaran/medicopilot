@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, time
 from decimal import Decimal
 from enum import Enum
 from types import UnionType
@@ -48,7 +48,10 @@ RESERVED_QUERY_FIELDS = frozenset({"limit", "offset", "sort", "q"})
 # su colisión real la detecta ``_guard_generated_collision`` al generar el parámetro.
 GENERATED_SUFFIXES = ("_gte", "_lte", "_in", "_isnull")
 RANGE_TYPES = (int, Decimal, date, datetime)
-EQUALITY_TYPES = (str, EmailStr, UUID, bool)
+# ``time`` (hora civil) es escalar de igualdad/orden, NO de rango: la hora de cita
+# (``scheduled_time``) se proyecta y ordena, pero no expone filtros de rango (el rango de
+# calendario lo lleva ``scheduled_date``, que sí es ``date``).
+EQUALITY_TYPES = (str, EmailStr, UUID, bool, time)
 
 # Operadores de fecha de calendario de un solo parámetro (``between`` se trata aparte).
 _DATE_SINGLE_OPERATORS = (Operator.ON, Operator.BEFORE, Operator.AFTER)
@@ -821,9 +824,10 @@ def _is_text_type(field_type: Any) -> bool:
 
 
 def _is_calendar_type(field_type: Any) -> bool:
-    """Los operadores de fecha de calendario (on/before/after/between) aplican solo a
-    columnas ``datetime`` (semántica de límites de día en la zona de aplicación)."""
-    return field_type is datetime
+    """Los operadores de fecha de calendario (on/before/after/between) aplican a columnas
+    ``datetime`` (semántica de límites de día en la zona de aplicación) y a columnas ``date``
+    (fecha civil, comparación directa). El compilador distingue ambos casos al aplicar el SQL."""
+    return field_type is datetime or field_type is date
 
 
 def _is_direct_model_column(value: Any) -> bool:

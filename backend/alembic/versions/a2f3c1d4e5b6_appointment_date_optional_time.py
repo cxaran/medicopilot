@@ -101,7 +101,7 @@ def upgrade() -> None:
     op.alter_column("appointments", "scheduled_date", existing_type=sa.Date(), nullable=False)
 
     # --- duración: pasa a NULLABLE y su CHECK admite NULL ---
-    op.drop_constraint(_DURATION_CHECK, "appointments", type_="check")
+    op.drop_constraint(op.f(_DURATION_CHECK), "appointments", type_="check")
     op.alter_column(
         "appointments",
         "duration_minutes",
@@ -114,7 +114,7 @@ def upgrade() -> None:
         existing_comment="Duración estimada de la cita en minutos (entre 5 y 480).",
     )
     op.create_check_constraint(
-        _DURATION_CHECK,
+        op.f(_DURATION_CHECK),
         "appointments",
         "duration_minutes IS NULL OR (duration_minutes >= 5 AND duration_minutes <= 480)",
     )
@@ -158,7 +158,7 @@ def downgrade() -> None:
 
     # --- duración: vuelve a NOT NULL (las nulas se rellenan a 30 min por defecto) ---
     op.execute("UPDATE appointments SET duration_minutes = 30 WHERE duration_minutes IS NULL")
-    op.drop_constraint(_DURATION_CHECK, "appointments", type_="check")
+    op.drop_constraint(op.f(_DURATION_CHECK), "appointments", type_="check")
     op.alter_column(
         "appointments",
         "duration_minutes",
@@ -171,7 +171,7 @@ def downgrade() -> None:
         ),
     )
     op.create_check_constraint(
-        _DURATION_CHECK,
+        op.f(_DURATION_CHECK),
         "appointments",
         "duration_minutes >= 5 AND duration_minutes <= 480",
     )
