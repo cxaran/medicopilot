@@ -12,8 +12,11 @@
 export type RecordTabId =
   | "historia"
   | "consultas"
+  | "notas"
   | "signos"
   | "recetas"
+  | "laboratorio"
+  | "seguimiento"
   | "archivos"
   | "citas";
 
@@ -32,6 +35,10 @@ export interface RecordTabDef {
   resources: readonly RecordTabResource[];
 }
 
+// Recursos por-paciente (patient_id es filtro EQ en el registry): historia, antecedentes, items
+// clínicos (alergias/problemas/medicación actual), inmunizaciones, notas, laboratorio, estudios,
+// escalas, tareas, eventos, documentos, citas. vital_signs y prescriptions se filtran por
+// consultation_id → scope "consultation" (la UI explica que se registran por consulta).
 export const RECORD_TABS: readonly RecordTabDef[] = [
   {
     id: "historia",
@@ -39,12 +46,19 @@ export const RECORD_TABS: readonly RecordTabDef[] = [
     resources: [
       { resourceName: "medical_history_versions", scope: "patient" },
       { resourceName: "patient_history_items", scope: "patient" },
+      { resourceName: "patient_clinical_items", scope: "patient" },
+      { resourceName: "patient_immunizations", scope: "patient" },
     ],
   },
   {
     id: "consultas",
     label: "Consultas",
     resources: [{ resourceName: "consultations", scope: "patient" }],
+  },
+  {
+    id: "notas",
+    label: "Notas",
+    resources: [{ resourceName: "clinical_notes", scope: "patient" }],
   },
   {
     id: "signos",
@@ -55,6 +69,23 @@ export const RECORD_TABS: readonly RecordTabDef[] = [
     id: "recetas",
     label: "Recetas",
     resources: [{ resourceName: "prescriptions", scope: "consultation" }],
+  },
+  {
+    id: "laboratorio",
+    label: "Laboratorio y estudios",
+    resources: [
+      { resourceName: "lab_results", scope: "patient" },
+      { resourceName: "study_orders", scope: "patient" },
+      { resourceName: "scale_results", scope: "patient" },
+    ],
+  },
+  {
+    id: "seguimiento",
+    label: "Seguimiento",
+    resources: [
+      { resourceName: "clinical_tasks", scope: "patient" },
+      { resourceName: "clinical_events", scope: "patient" },
+    ],
   },
   {
     id: "archivos",

@@ -11,10 +11,10 @@ import {
 // RECORD PANEL (MP-CTRL-0125): las pestañas mapean a recursos REGISTRADOS del contrato. Estos tests
 // fijan el mapeo verificado contra el registry y el ámbito de filtrado de cada recurso.
 
-test("RECORD_TABS: 6 pestañas en el orden del diseño", () => {
+test("RECORD_TABS: 9 pestañas en el orden del diseño", () => {
   assert.deepEqual(
     RECORD_TABS.map((tab) => tab.id),
-    ["historia", "consultas", "signos", "recetas", "archivos", "citas"],
+    ["historia", "consultas", "notas", "signos", "recetas", "laboratorio", "seguimiento", "archivos", "citas"],
   );
 });
 
@@ -22,13 +22,25 @@ test("RECORD_TABS: cada pestaña mapea a su(s) recurso(s) del contrato con su á
   const byId = Object.fromEntries(RECORD_TABS.map((tab) => [tab.id, tab]));
   assert.deepEqual(
     byId.historia.resources.map((r) => r.resourceName),
-    ["medical_history_versions", "patient_history_items"],
+    ["medical_history_versions", "patient_history_items", "patient_clinical_items", "patient_immunizations"],
   );
   assert.equal(byId.consultas.resources[0].resourceName, "consultations");
+  assert.equal(byId.notas.resources[0].resourceName, "clinical_notes");
+  assert.deepEqual(
+    byId.laboratorio.resources.map((r) => r.resourceName),
+    ["lab_results", "study_orders", "scale_results"],
+  );
+  assert.deepEqual(
+    byId.seguimiento.resources.map((r) => r.resourceName),
+    ["clinical_tasks", "clinical_events"],
+  );
   assert.equal(byId.archivos.resources[0].resourceName, "clinical_documents");
   assert.equal(byId.citas.resources[0].resourceName, "appointments");
   // Recursos patient-scoped vs consultation-scoped (verificado contra filter_fields del registry).
   assert.equal(byId.consultas.resources[0].scope, "patient");
+  assert.equal(byId.notas.resources[0].scope, "patient");
+  assert.equal(byId.laboratorio.resources[0].scope, "patient");
+  assert.equal(byId.seguimiento.resources[0].scope, "patient");
   assert.equal(byId.signos.resources[0].scope, "consultation");
   assert.equal(byId.recetas.resources[0].scope, "consultation");
   assert.equal(byId.citas.resources[0].scope, "patient");
@@ -45,5 +57,5 @@ test("resolveRecordTab: válido pasa; inválido/ausente cae al default", () => {
 
 test("recordTabDef: devuelve la definición por id (o la primera)", () => {
   assert.equal(recordTabDef("citas").label, "Citas");
-  assert.equal(recordTabDef("historia").resources.length, 2);
+  assert.equal(recordTabDef("historia").resources.length, 4);
 });

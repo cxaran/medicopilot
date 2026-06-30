@@ -89,6 +89,42 @@ function RolesIcon() {
   );
 }
 
+function DoctorIcon() {
+  return (
+    <svg {...iconProps} aria-hidden="true">
+      <path d="M7 3v5a5 5 0 0 0 10 0V3" />
+      <path d="M12 13v3a4 4 0 0 1-8 0v-1" />
+      <circle cx="18" cy="15" r="2.5" />
+    </svg>
+  );
+}
+
+function MedTemplateIcon() {
+  return (
+    <svg {...iconProps} aria-hidden="true">
+      <rect x="3.5" y="8.5" width="9" height="12" rx="2" transform="rotate(-45 8 14.5)" />
+      <path d="M8 11l5 5" />
+    </svg>
+  );
+}
+
+function CodesIcon() {
+  return (
+    <svg {...iconProps} aria-hidden="true">
+      <path d="M8 9l-3 3 3 3M16 9l3 3-3 3M13 6l-2 12" />
+    </svg>
+  );
+}
+
+function SettingsIcon() {
+  return (
+    <svg {...iconProps} aria-hidden="true">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M12 3v2.5M12 18.5V21M4.2 7l2.1 1.2M17.7 15.8l2.1 1.2M4.2 17l2.1-1.2M17.7 8.2l2.1-1.2" />
+    </svg>
+  );
+}
+
 type NavItem = {
   label: string;
   href: string;
@@ -122,8 +158,31 @@ const MAIN_NAV: NavItem[] = [
   { label: "Copiloto", href: "/copilot", icon: <CopilotIcon /> },
 ];
 
-// Navegación de ADMINISTRACIÓN (pie de la barra), también filtrada por catálogo.
+// Navegación de ADMINISTRACIÓN (pie de la barra), también filtrada por catálogo: cada item solo
+// aparece si el recurso está en el catálogo del usuario (RBAC). Incluye control de acceso
+// (usuarios/roles) y catálogos administrables (médicos, plantillas de medicamentos, códigos
+// clínicos y configuración institucional) que antes no tenían punto de entrada humano y solo eran
+// alcanzables tecleando la URL genérica.
 const ADMIN_NAV: NavItem[] = [
+  { label: "Médicos", href: "/resources/doctors", resource: "doctors", icon: <DoctorIcon /> },
+  {
+    label: "Plantillas de medicamentos",
+    href: "/resources/medication_templates",
+    resource: "medication_templates",
+    icon: <MedTemplateIcon />,
+  },
+  {
+    label: "Códigos clínicos",
+    href: "/resources/clinical_codes",
+    resource: "clinical_codes",
+    icon: <CodesIcon />,
+  },
+  {
+    label: "Configuración institucional",
+    href: "/resources/institutional_settings",
+    resource: "institutional_settings",
+    icon: <SettingsIcon />,
+  },
   { label: "Usuarios", href: "/resources/users", resource: "users", icon: <UsersIcon /> },
   { label: "Roles y permisos", href: "/resources/roles", resource: "roles", icon: <RolesIcon /> },
 ];
@@ -186,6 +245,30 @@ export function AppSidebar({
         <span className="text-[17px] font-semibold tracking-tight text-[var(--tx)]">
           MediCopilot
         </span>
+      </div>
+
+      {/* Nueva consulta: inicia una conversación nueva sin paciente (chat-first). Limpia el
+          contexto activo y lleva al inicio, donde el médico puede buscar/elegir paciente. */}
+      <div className="px-3.5 pb-2">
+        <button
+          type="button"
+          onClick={() => selectContext(null)}
+          className="flex w-full items-center justify-center gap-2.5 rounded-[14px] border border-[var(--accent-bd)] bg-[var(--accent-dim)] px-3.5 py-2.5 text-sm font-semibold text-[var(--accent-tx)] transition hover:bg-[var(--accent)] hover:text-[var(--on-accent)]"
+        >
+          <svg
+            aria-hidden="true"
+            width="17"
+            height="17"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.1"
+            strokeLinecap="round"
+          >
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+          Nueva consulta
+        </button>
       </div>
 
       {/* Agente global (inicio chat-first) */}
@@ -313,7 +396,15 @@ export function AppSidebar({
             <span className="block truncate text-sm font-semibold text-[var(--tx)]">
               {session.name}
             </span>
-            <span className="block truncate text-xs text-[var(--tx3)]">{session.email}</span>
+            {/* Estado de sesión: el médico autenticado está "En línea". El email queda
+                accesible desde el menú de cuenta. (El rol no viaja en la sesión.) */}
+            <span className="flex items-center gap-1.5 text-xs text-[var(--tx2)]">
+              <span
+                aria-hidden="true"
+                className="h-[7px] w-[7px] shrink-0 animate-pulse rounded-full bg-[var(--ok)]"
+              />
+              <span className="truncate">En línea</span>
+            </span>
           </span>
           <ThemeToggle />
         </div>
