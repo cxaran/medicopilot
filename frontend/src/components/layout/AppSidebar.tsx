@@ -125,6 +125,23 @@ function SettingsIcon() {
   );
 }
 
+function ReportsIcon() {
+  return (
+    <svg {...iconProps} aria-hidden="true">
+      <path d="M4 20h16M7 20V11M12 20V5M17 20v-6" />
+    </svg>
+  );
+}
+
+function AuditIcon() {
+  return (
+    <svg {...iconProps} aria-hidden="true">
+      <path d="M9 4h6l4 4v12H5V4z" />
+      <path d="M14 4v4h4M9 13l2 2 3.5-3.5" />
+    </svg>
+  );
+}
+
 type NavItem = {
   label: string;
   href: string;
@@ -156,6 +173,8 @@ const MAIN_NAV: NavItem[] = [
     icon: <PrescriptionIcon />,
   },
   { label: "Copiloto", href: "/copilot", icon: <CopilotIcon /> },
+  // Reportes agregados (sin recurso de catálogo: la página degrada con aviso si falta reports:read).
+  { label: "Reportes", href: "/reports", icon: <ReportsIcon /> },
 ];
 
 // Navegación de ADMINISTRACIÓN (pie de la barra), también filtrada por catálogo: cada item solo
@@ -182,6 +201,12 @@ const ADMIN_NAV: NavItem[] = [
     href: "/resources/institutional_settings",
     resource: "institutional_settings",
     icon: <SettingsIcon />,
+  },
+  {
+    label: "Auditoría",
+    href: "/resources/audit_events",
+    resource: "audit_events",
+    icon: <AuditIcon />,
   },
   { label: "Usuarios", href: "/resources/users", resource: "users", icon: <UsersIcon /> },
   { label: "Roles y permisos", href: "/resources/roles", resource: "roles", icon: <RolesIcon /> },
