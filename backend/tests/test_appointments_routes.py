@@ -14,7 +14,7 @@ Ejemplo::
 import os
 import unittest
 import uuid
-from datetime import date
+from datetime import date, time
 from urllib.parse import urlparse
 
 
@@ -224,15 +224,21 @@ class _AppointmentTestMixin(unittest.TestCase):
 
     # --- helpers de cita ---
 
+    # La cita se agenda por FECHA (obligatoria); la HORA es opcional. Estos helpers fijan una
+    # fecha común y una hora concreta para las pruebas de traslape (que sólo aplican a citas CON
+    # hora); las pruebas de cita sin hora omiten ``scheduled_time``/``duration_minutes``.
+    _DATE = "2026-07-01"
+
     @staticmethod
-    def _at(hour: int, minute: int = 0) -> str:
-        return f"2026-07-01T{hour:02d}:{minute:02d}:00"
+    def _time(hour: int, minute: int = 0) -> str:
+        return f"{hour:02d}:{minute:02d}:00"
 
     def _payload(self, **overrides: object) -> dict[str, object]:
         payload: dict[str, object] = {
             "patient_id": str(self.patient_id),
             "doctor_id": str(self.doctor_id),
-            "scheduled_at": self._at(10),
+            "scheduled_date": self._DATE,
+            "scheduled_time": self._time(10),
             "duration_minutes": 30,
             "reason": "Consulta general",
         }
@@ -264,12 +270,11 @@ class _AppointmentTestMixin(unittest.TestCase):
 
     def _appointment_row(self, *, hour: int, minute: int = 0,
                          status: AppointmentStatus = AppointmentStatus.PENDING) -> Appointment:
-        from datetime import datetime
-
         return Appointment(
             patient_id=self.patient_id,
             doctor_id=self.doctor_id,
-            scheduled_at=datetime(2026, 7, 1, hour, minute, 0),
+            scheduled_date=date(2026, 7, 1),
+            scheduled_time=time(hour, minute, 0),
             duration_minutes=30,
             reason="Directo",
             status=status,
@@ -278,25 +283,25 @@ class _AppointmentTestMixin(unittest.TestCase):
         )
 
     def _cancelled(self) -> str:
-        appointment_id = self._create_id(scheduled_at=self._at(8))
+        appointment_id = self._create_id(scheduled_time=self._time(8))
         self.assertEqual(self._cancel(appointment_id).status_code, 200)
         return appointment_id
 
     def _no_show_appt(self) -> str:
-        appointment_id = self._create_id(scheduled_at=self._at(16))
+        appointment_id = self._create_id(scheduled_time=self._time(16))
         self.assertEqual(self._no_show(appointment_id).status_code, 200)
         return appointment_id
 
     def _rescheduled_original(self) -> str:
-        appointment_id = self._create_id(scheduled_at=self._at(17))
+        appointment_id = self._create_id(scheduled_time=self._time(17))
         self.assertEqual(
-            self._reschedule(appointment_id, scheduled_at=self._at(18)).status_code, 201
+            self._reschedule(appointment_id, scheduled_time=self._time(18)).status_code, 201
         )
         return appointment_id
 
     def _attended(self) -> str:
         """Cita atendida: se vuelve attended al crear una consulta ligada."""
-        appointment_id = self._create_id(scheduled_at=self._at(7))
+        appointment_id = self._create_id(scheduled_time=self._time(7))
         self._as(*ALL_PERMS, "consultations:create")
         response = self.client.post(
             _CONSULTATIONS,
@@ -324,6 +329,28 @@ class AppointmentRoutesTest(_AppointmentTestMixin, unittest.TestCase):
         self.assertEqual(body["status"], "pending")
         self.assertEqual(body["duration_minutes"], 30)
         self.assertIsNone(body["rescheduled_from_id"])
+
+    def test_create_date_only_without_time(self) -> None:
+        # Caso central del dominio: la cita se agenda por FECHA, sin hora concreta (el paciente
+        # acude dentro del horario de consulta). La hora y la duración se omiten.
+        response = self._create(scheduled_time=None, duration_minutes=None)
+        self.assertEqual(response.status_code, 201, response.text)
+        body = response.json()
+        self.assertEqual(body["status"], "pending")
+        self.assertEqual(body["scheduled_date"], self._DATE)
+        self.assertIsNone(body["scheduled_time"])
+        self.assertIsNone(body["duration_minutes"])
+
+    def test_scheduled_date_required(self) -> None:
+        payload = self._payload()
+        del payload["scheduled_date"]
+        self.assertEqual(self.client.post(_BASE, json=payload).status_code, 422)
+
+    def test_untimed_appointments_do_not_block_the_day(self) -> None:
+        # Varias citas SIN hora el mismo día y médico son normales: la exclusión GiST de
+        # no-traslape sólo aplica a citas CON hora concreta.
+        self.assertEqual(self._create(scheduled_time=None, duration_minutes=None).status_code, 201)
+        self.assertEqual(self._create(scheduled_time=None, duration_minutes=None).status_code, 201)
 
     def test_status_not_accepted_as_input(self) -> None:
         self.assertEqual(self._create(status="confirmed").status_code, 422)
@@ -368,7 +395,7 @@ class AppointmentRoutesTest(_AppointmentTestMixin, unittest.TestCase):
     def test_list_get_and_filter(self) -> None:
         keep = self._create_id()
         other_patient = self._seed_patient()
-        self._create(patient_id=str(other_patient), scheduled_at=self._at(12))
+        self._create(patient_id=str(other_patient), scheduled_time=self._time(12))
         by_patient = self.client.get(_BASE, params={"patient_id": str(self.patient_id)}).json()
         self.assertEqual(by_patient["pagination"]["total"], 1)
         self.assertEqual(by_patient["items"][0]["id"], keep)
@@ -380,22 +407,22 @@ class AppointmentRoutesTest(_AppointmentTestMixin, unittest.TestCase):
 
     def test_filter_by_status(self) -> None:
         a = self._create_id()
-        self._create(scheduled_at=self._at(12))
+        self._create(scheduled_time=self._time(12))
         self.assertEqual(self._confirm(a).status_code, 200)
         confirmed = self.client.get(_BASE, params={"status": "confirmed"}).json()
         self.assertEqual(confirmed["pagination"]["total"], 1)
 
-    def test_scheduled_at_range_filters(self) -> None:
-        self._create_id(scheduled_at=self._at(9))
-        self._create_id(scheduled_at=self._at(15))
-        on = self.client.get(_BASE, params={"scheduled_at_on": "2026-07-01"}).json()
+    def test_scheduled_date_range_filters(self) -> None:
+        self._create_id(scheduled_time=self._time(9))
+        self._create_id(scheduled_time=self._time(15))
+        on = self.client.get(_BASE, params={"scheduled_date_on": "2026-07-01"}).json()
         self.assertEqual(on["pagination"]["total"], 2)
-        before = self.client.get(_BASE, params={"scheduled_at_before": "2026-07-01"}).json()
+        before = self.client.get(_BASE, params={"scheduled_date_before": "2026-07-01"}).json()
         self.assertEqual(before["pagination"]["total"], 0)
-        after = self.client.get(_BASE, params={"scheduled_at_after": "2026-07-02"}).json()
+        after = self.client.get(_BASE, params={"scheduled_date_after": "2026-07-02"}).json()
         self.assertEqual(after["pagination"]["total"], 0)
         between = self.client.get(
-            _BASE, params={"scheduled_at_from": "2026-07-01", "scheduled_at_to": "2026-07-01"}
+            _BASE, params={"scheduled_date_from": "2026-07-01", "scheduled_date_to": "2026-07-01"}
         ).json()
         self.assertEqual(between["pagination"]["total"], 2)
 
@@ -495,7 +522,7 @@ class AppointmentRoutesTest(_AppointmentTestMixin, unittest.TestCase):
         self.assertEqual(confirmed.status_code, 200, confirmed.text)
         self.assertEqual(confirmed.json()["status"], "confirmed")
 
-        other = self._create_id(scheduled_at=self._at(13))
+        other = self._create_id(scheduled_time=self._time(13))
         no_show = self.client.post(f"{_BASE}/{other}/no-show", json={})
         self.assertNotEqual(no_show.status_code, 422, no_show.text)
         self.assertEqual(no_show.status_code, 200, no_show.text)
@@ -504,7 +531,7 @@ class AppointmentRoutesTest(_AppointmentTestMixin, unittest.TestCase):
     def test_cancel_pending_or_confirmed(self) -> None:
         a = self._create_id()
         self.assertEqual(self._cancel(a).status_code, 200)
-        b = self._create_id(scheduled_at=self._at(12))
+        b = self._create_id(scheduled_time=self._time(12))
         self.assertEqual(self._confirm(b).status_code, 200)
         response = self._cancel(b, reason="Paciente lo solicitó")
         self.assertEqual(response.status_code, 200)
@@ -518,7 +545,7 @@ class AppointmentRoutesTest(_AppointmentTestMixin, unittest.TestCase):
     def test_no_show_from_pending_or_confirmed(self) -> None:
         a = self._create_id()
         self.assertEqual(self._no_show(a).status_code, 200)
-        b = self._create_id(scheduled_at=self._at(12))
+        b = self._create_id(scheduled_time=self._time(12))
         self.assertEqual(self._confirm(b).status_code, 200)
         self.assertEqual(self._no_show(b).status_code, 200)
 
@@ -532,7 +559,7 @@ class AppointmentRoutesTest(_AppointmentTestMixin, unittest.TestCase):
 
     def test_reschedule_creates_new_and_marks_original(self) -> None:
         original = self._create_id()
-        response = self._reschedule(original, scheduled_at=self._at(13))
+        response = self._reschedule(original, scheduled_time=self._time(13))
         self.assertEqual(response.status_code, 201, response.text)
         new_appt = response.json()
         self.assertEqual(new_appt["status"], "pending")
@@ -548,13 +575,13 @@ class AppointmentRoutesTest(_AppointmentTestMixin, unittest.TestCase):
 
     def test_reschedule_rejected_from_terminal(self) -> None:
         cancelled = self._cancelled()
-        self.assertEqual(self._reschedule(cancelled, scheduled_at=self._at(13)).status_code, 409)
+        self.assertEqual(self._reschedule(cancelled, scheduled_time=self._time(13)).status_code, 409)
 
     def test_reschedule_overlap_leaves_original_unchanged(self) -> None:
-        original = self._create_id(scheduled_at=self._at(10))
+        original = self._create_id(scheduled_time=self._time(10))
         # Otra cita activa a las 13:00 ocupa el horario destino.
-        self._create_id(scheduled_at=self._at(13))
-        response = self._reschedule(original, scheduled_at=self._at(13))
+        self._create_id(scheduled_time=self._time(13))
+        response = self._reschedule(original, scheduled_time=self._time(13))
         self.assertEqual(response.status_code, 409)
         self.assertEqual(
             self.client.get(f"{_BASE}/{original}").json()["status"], "pending"
@@ -578,33 +605,33 @@ class AppointmentRoutesTest(_AppointmentTestMixin, unittest.TestCase):
     # --- agenda sin traslapes ---
 
     def test_overlap_same_doctor_rejected(self) -> None:
-        self._create_id(scheduled_at=self._at(10), duration_minutes=30)
+        self._create_id(scheduled_time=self._time(10), duration_minutes=30)
         # 10:15-10:45 se solapa con 10:00-10:30.
         self.assertEqual(
-            self._create(scheduled_at=self._at(10, 15), duration_minutes=30).status_code, 409
+            self._create(scheduled_time=self._time(10, 15), duration_minutes=30).status_code, 409
         )
 
     def test_adjacent_slots_allowed(self) -> None:
-        self._create_id(scheduled_at=self._at(10), duration_minutes=30)
+        self._create_id(scheduled_time=self._time(10), duration_minutes=30)
         # 10:30-11:00 es adyacente ('[)'), no se solapa.
         self.assertEqual(
-            self._create(scheduled_at=self._at(10, 30), duration_minutes=30).status_code, 201
+            self._create(scheduled_time=self._time(10, 30), duration_minutes=30).status_code, 201
         )
 
     def test_non_active_states_free_the_slot(self) -> None:
-        a = self._create_id(scheduled_at=self._at(10), duration_minutes=30)
+        a = self._create_id(scheduled_time=self._time(10), duration_minutes=30)
         self.assertEqual(self._cancel(a).status_code, 200)
         # Cancelada no bloquea: el horario vuelve a estar libre.
         self.assertEqual(
-            self._create(scheduled_at=self._at(10), duration_minutes=30).status_code, 201
+            self._create(scheduled_time=self._time(10), duration_minutes=30).status_code, 201
         )
 
     def test_overlap_different_doctors_allowed(self) -> None:
-        self._create_id(scheduled_at=self._at(10), duration_minutes=30)
+        self._create_id(scheduled_time=self._time(10), duration_minutes=30)
         other_doctor = self._seed_doctor(self._seed_user())
         self.assertEqual(
             self._create(
-                doctor_id=str(other_doctor), scheduled_at=self._at(10), duration_minutes=30
+                doctor_id=str(other_doctor), scheduled_time=self._time(10), duration_minutes=30
             ).status_code,
             201,
         )
@@ -682,14 +709,14 @@ class ConsultationAppointmentIntegrationTest(_AppointmentTestMixin, unittest.Tes
 
     def test_reject_appointment_other_patient(self) -> None:
         other_patient = self._seed_patient()
-        appointment_id = self._create_id(patient_id=str(other_patient), scheduled_at=self._at(12))
+        appointment_id = self._create_id(patient_id=str(other_patient), scheduled_time=self._time(12))
         # appointment.patient != consulta.patient -> 409
         response = self._create_consultation(appointment_id=appointment_id)
         self.assertEqual(response.status_code, 409)
 
     def test_reject_appointment_other_doctor(self) -> None:
         other_doctor = self._seed_doctor(self._seed_user())
-        appointment_id = self._create_id(doctor_id=str(other_doctor), scheduled_at=self._at(12))
+        appointment_id = self._create_id(doctor_id=str(other_doctor), scheduled_time=self._time(12))
         response = self._create_consultation(appointment_id=appointment_id)
         self.assertEqual(response.status_code, 409)
 
@@ -735,7 +762,7 @@ class ConsultationAppointmentIntegrationTest(_AppointmentTestMixin, unittest.Tes
         self.assertEqual(self._cancel(appointment_id).status_code, 409)
         self.assertEqual(self._no_show(appointment_id).status_code, 409)
         self.assertEqual(
-            self._reschedule(appointment_id, scheduled_at=self._at(13)).status_code, 409
+            self._reschedule(appointment_id, scheduled_time=self._time(13)).status_code, 409
         )
         self.assertEqual(self.client.delete(f"{_BASE}/{appointment_id}").status_code, 409)
 
@@ -795,7 +822,7 @@ class AppointmentForbiddenTransitionsTest(_AppointmentTestMixin, unittest.TestCa
         self.assertEqual(self._confirm(appointment_id).status_code, 409)
         self.assertEqual(self._cancel(appointment_id).status_code, 409)
         self.assertEqual(
-            self._reschedule(appointment_id, scheduled_at=self._at(19)).status_code, 409
+            self._reschedule(appointment_id, scheduled_time=self._time(19)).status_code, 409
         )
         self.assertEqual(self.client.delete(f"{_BASE}/{appointment_id}").status_code, 409)
         self.assertEqual(self._status(appointment_id), "no_show")
@@ -806,7 +833,7 @@ class AppointmentForbiddenTransitionsTest(_AppointmentTestMixin, unittest.TestCa
         self.assertEqual(self._cancel(original).status_code, 409)
         self.assertEqual(self._no_show(original).status_code, 409)
         self.assertEqual(
-            self._reschedule(original, scheduled_at=self._at(19)).status_code, 409
+            self._reschedule(original, scheduled_time=self._time(19)).status_code, 409
         )
         self.assertEqual(self.client.delete(f"{_BASE}/{original}").status_code, 409)
         self.assertEqual(self._status(original), "rescheduled")
@@ -819,7 +846,7 @@ class AppointmentForbiddenTransitionsTest(_AppointmentTestMixin, unittest.TestCa
         self.assertEqual(self._cancel(appointment_id).status_code, 403)
         self.assertEqual(self._no_show(appointment_id).status_code, 403)
         self.assertEqual(
-            self._reschedule(appointment_id, scheduled_at=self._at(13)).status_code, 403
+            self._reschedule(appointment_id, scheduled_time=self._time(13)).status_code, 403
         )
         self._as(*ALL_PERMS)
         self.assertEqual(self._status(appointment_id), "pending")

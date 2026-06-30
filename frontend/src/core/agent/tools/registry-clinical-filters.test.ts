@@ -72,7 +72,7 @@ test("list_recent_consultations: parámetro no soportado -> args inválidos (no 
   assert.equal(resolved.outcome, "invalid_args");
 });
 
-test("list_appointments: patient_id + doctor_id + rango -> scheduled_at_from/to", async (t) => {
+test("list_appointments: patient_id + doctor_id + rango -> scheduled_date_from/to", async (t) => {
   const { url } = await callTool(t, "clinical.list_appointments", {
     patient_id: PATIENT_ID,
     doctor_id: DOCTOR_ID,
@@ -82,7 +82,7 @@ test("list_appointments: patient_id + doctor_id + rango -> scheduled_at_from/to"
   assert.equal(
     url,
     `/api/v1/appointments?patient_id=${PATIENT_ID}&doctor_id=${DOCTOR_ID}` +
-      `&scheduled_at_from=2026-03-01&scheduled_at_to=2026-03-31`,
+      `&scheduled_date_from=2026-03-01&scheduled_date_to=2026-03-31`,
   );
 });
 

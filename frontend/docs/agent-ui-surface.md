@@ -37,6 +37,9 @@ la entrada, resuelve contra el contrato + RBAC y devuelve la spec; **no escribe 
 | `task_plan`                    | `ui.review_task_plan`            | 0129     | `task-plan.ts`         |
 | `close_checklist`              | `ui.review_close_checklist`      | 0131     | `close-checklist.ts`   |
 | `template_promotion_proposal`  | `ui.propose_template_promotion`  | 0132     | `template-promotion.ts`|
+| `record_update`                | `ui.review_record_update`        | 0137     | `record-update.ts`     |
+| `open_record`                  | `ui.open_record`                 | 0138     | `open-record.ts`       |
+| `wizard`                       | `ui.review_wizard`               | 0139     | `wizard.ts`            |
 
 Notas honestas sobre el inventario:
 
@@ -66,6 +69,26 @@ Notas honestas sobre el inventario:
 - `template_promotion_proposal` (0132): SÓLO PROPUESTA. Recomienda convertir una UI dinámica en
   plantilla registrada; **nunca** registra una `ResourceDefinition` ni muta el backend (eso es un
   cambio de código del desarrollador).
+- `record_update` (0137): comparación **antes/después** dedicada para EDITAR un registro existente
+  (ajustar la dosis de una receta vigente, corregir un dato del paciente, conciliar medicación). A
+  diferencia de `detected_actions` (orientado a ALTAS, gateado por `creatable`), valida contra el
+  permiso de **EDICIÓN** (`updatable` = `forms.update` presente; recurso desconocido o sin permiso →
+  `blocked` con motivo), descarta los campos fuera del **esquema de edición** y reusa la misma aritmética
+  de diff (`computeDiff`). Read-only: al confirmar, el agente aplica la edición con la tool de
+  actualización del recurso, con aprobación **P1**.
+- `open_record` (0138): acción gobernada **"abrir expediente"**. Valida que el médico puede VER pacientes
+  (el recurso aparece en el catálogo proyectado; si no → `blocked` con motivo) y pinta una tarjeta con un
+  botón. Abrir el expediente **no** es una escritura clínica: sólo cambia el **contexto activo** del shell
+  (que monta el panel del paciente) cuando el médico hace clic. **Nada navega automáticamente** desde la
+  salida del modelo; el render usa el callback `onOpenRecord` del host (ausente en uso independiente = botón
+  inerte). Por eso esta `kind` no aparece en la tubería e2e de cierre (no es revisión sobre P1, es navegación).
+- `wizard` (0139): asistente **multi-paso ORDENADO** para flujos guiados de varias entidades (registrar
+  paciente → historia → abrir consulta; admisión; primera consulta pediátrica/prenatal). Es un hermano
+  ordenado de `task_plan`: valida cada paso contra el catálogo + RBAC (desconocido/sin permiso → `blocked`),
+  descarta campos fuera del esquema, marca requeridos faltantes y respeta **dependencias entre pasos**
+  (`depends_on`) para resolver el **paso actual** (el primero pendiente con dependencias hechas). Read-only:
+  el agente avanza **un paso a la vez** con la tool de escritura de ese paso (cada uno con aprobación **P1**,
+  nunca en lote ni salteando el orden).
 
 ## Invariantes que se sostienen en toda la cadena
 

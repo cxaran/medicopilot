@@ -142,11 +142,11 @@ class FollowUpsRoutesTest(unittest.TestCase):
                              ClinicalTaskPriority.HIGH, now - timedelta(days=1), deleted=True))
 
             # --- Citas ---
-            def appt(aid, status, scheduled_at, deleted=False):
+            def appt(aid, status, when, deleted=False):
                 return Appointment(
                     id=aid, patient_id=cls.patient_id, doctor_id=cls.doctor_id,
-                    scheduled_at=scheduled_at, duration_minutes=30, reason="Control",
-                    status=status, deleted_at=(now if deleted else None))
+                    scheduled_date=when.date(), scheduled_time=when.time(), duration_minutes=30,
+                    reason="Control", status=status, deleted_at=(now if deleted else None))
 
             session.add(appt(cls.appt_no_show_id, AppointmentStatus.NO_SHOW,
                              now - timedelta(days=3)))

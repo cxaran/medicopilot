@@ -316,7 +316,8 @@ def reschedule_appointment(
     new_appointment = Appointment(
         patient_id=original.patient_id,
         doctor_id=new_doctor_id,
-        scheduled_at=data.get("scheduled_at", original.scheduled_at),
+        scheduled_date=data.get("scheduled_date", original.scheduled_date),
+        scheduled_time=data.get("scheduled_time", original.scheduled_time),
         duration_minutes=data.get("duration_minutes", original.duration_minutes),
         reason=data.get("reason", original.reason),
         internal_notes=data.get("internal_notes", original.internal_notes),

@@ -730,7 +730,7 @@ class PrescriptionsAndAppointmentsCapabilityTest(unittest.TestCase):
         }
         self.assertEqual(
             reschedule_fields,
-            {"doctor_id", "scheduled_at", "duration_minutes", "reason", "internal_notes"},
+            {"doctor_id", "scheduled_date", "scheduled_time", "duration_minutes", "reason", "internal_notes"},
         )
         self.assertEqual(
             actions["no_show"]["url_template"], "/api/v1/appointments/{id}/no-show"

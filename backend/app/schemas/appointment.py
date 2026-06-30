@@ -1,8 +1,8 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, time
 from typing import Any, Optional
 
-from pydantic import Field, field_validator
+from pydantic import Field
 
 from backend.app.models.enums import AppointmentStatus
 from backend.app.schemas.base import ApiPatchSchema, ApiReadSchema, ApiWriteSchema
@@ -28,17 +28,29 @@ _STATUS_LIST_FILTER_UI: dict[str, Any] = {
         },
     }
 }
-# ``scheduled_at`` es columna de lista; su filtro de rango de calendario (on/before/
-# after/between) lo publica ``filterable_fields`` desde ``field_operators`` del recurso,
-# no el bloque ``ui.filter`` legacy (que sólo admite un operador único válido).
-_SCHEDULED_AT_LIST_FILTER_UI: dict[str, Any] = {"ui": {"list": True}}
+# ``scheduled_date`` (date) es columna de lista; su filtro de RANGO de fecha civil
+# (gte/lte) lo publica ``filterable_fields`` desde ``filter_fields`` del recurso
+# (operadores por defecto de las columnas date, sin zona horaria: la fecha YA es civil).
+_SCHEDULED_DATE_LIST_FILTER_UI: dict[str, Any] = {"ui": {"list": True}}
 
-_DURATION = Field(
-    ge=5,
-    le=480,
-    title="Duración (min)",
-    json_schema_extra={"ui": {"form": True, "widget": "number"}},
+# La cita se agenda por FECHA (obligatoria); la HORA es opcional: muchas veces el médico
+# cita "tal día" y el paciente acude dentro del horario de consulta, sin hora concreta.
+_DATE_FIELD = Field(
+    title="Fecha",
+    json_schema_extra={"ui": {"form": True, "widget": "date"}},
 )
+_DATE_FIELD_OPT = Field(
+    default=None,
+    title="Fecha",
+    json_schema_extra={"ui": {"form": True, "widget": "date"}},
+)
+_TIME_FIELD_OPT = Field(
+    default=None,
+    title="Hora (opcional)",
+    description="Hora concreta de la cita; omítela si el paciente acude dentro del horario de consulta.",
+    json_schema_extra={"ui": {"form": True, "widget": "time"}},
+)
+# La duración sólo tiene sentido cuando hay hora concreta; opcional en todos los cuerpos.
 _DURATION_OPT = Field(
     default=None,
     ge=5,
@@ -48,18 +60,12 @@ _DURATION_OPT = Field(
 )
 
 
-def _naive_utc(value: datetime) -> datetime:
-    """Normaliza a UTC sin tzinfo, coherente con las columnas ``DateTime`` del dominio."""
-    if value.tzinfo is not None:
-        return value.astimezone(timezone.utc).replace(tzinfo=None)
-    return value
-
-
 class AppointmentCreate(ApiWriteSchema):
     """Alta de una cita; siempre nace en ``pending``.
 
-    El estado, ``rescheduled_from_id``, la auditoría y el soft-delete los gobierna el
-    servidor; no se aceptan.
+    Sólo ``scheduled_date`` es obligatoria entre los campos de agenda: la cita se
+    programa por fecha y la hora puede omitirse. El estado, ``rescheduled_from_id``, la
+    auditoría y el soft-delete los gobierna el servidor; no se aceptan.
     """
 
     patient_id: uuid.UUID = Field(
@@ -71,11 +77,9 @@ class AppointmentCreate(ApiWriteSchema):
         title="Médico",
         json_schema_extra={"ui": {"form": True, "widget": "text"}},
     )
-    scheduled_at: datetime = Field(
-        title="Fecha y hora",
-        json_schema_extra={"ui": {"form": True, "widget": "datetime"}},
-    )
-    duration_minutes: int = _DURATION
+    scheduled_date: date = _DATE_FIELD
+    scheduled_time: Optional[time] = _TIME_FIELD_OPT
+    duration_minutes: Optional[int] = _DURATION_OPT
     reason: str = Field(
         min_length=1,
         title="Motivo",
@@ -86,11 +90,6 @@ class AppointmentCreate(ApiWriteSchema):
         title="Notas internas",
         json_schema_extra={"ui": {"form": True, "widget": "textarea"}},
     )
-
-    @field_validator("scheduled_at")
-    @classmethod
-    def normalize_scheduled_at(cls, value: datetime) -> datetime:
-        return _naive_utc(value)
 
 
 class AppointmentUpdate(ApiPatchSchema):
@@ -105,11 +104,8 @@ class AppointmentUpdate(ApiPatchSchema):
         title="Médico",
         json_schema_extra={"ui": {"form": True, "widget": "text"}},
     )
-    scheduled_at: Optional[datetime] = Field(
-        default=None,
-        title="Fecha y hora",
-        json_schema_extra={"ui": {"form": True, "widget": "datetime"}},
-    )
+    scheduled_date: Optional[date] = _DATE_FIELD_OPT
+    scheduled_time: Optional[time] = _TIME_FIELD_OPT
     duration_minutes: Optional[int] = _DURATION_OPT
     reason: Optional[str] = Field(
         default=None,
@@ -122,11 +118,6 @@ class AppointmentUpdate(ApiPatchSchema):
         title="Notas internas",
         json_schema_extra={"ui": {"form": True, "widget": "textarea"}},
     )
-
-    @field_validator("scheduled_at")
-    @classmethod
-    def normalize_scheduled_at(cls, value: Optional[datetime]) -> Optional[datetime]:
-        return _naive_utc(value) if value is not None else None
 
 
 class AppointmentConfirm(ApiWriteSchema):
@@ -152,8 +143,9 @@ class AppointmentReschedule(ApiWriteSchema):
     """Cuerpo de la reprogramación.
 
     El paciente se conserva (no se acepta ``patient_id``). ``doctor_id``,
-    ``scheduled_at``, ``duration_minutes``, ``reason`` e ``internal_notes`` se heredan
-    de la cita original cuando no se envían (semántica de PATCH).
+    ``scheduled_date``, ``scheduled_time``, ``duration_minutes``, ``reason`` e
+    ``internal_notes`` se heredan de la cita original cuando no se envían (semántica de
+    PATCH).
     """
 
     doctor_id: Optional[uuid.UUID] = Field(
@@ -161,11 +153,8 @@ class AppointmentReschedule(ApiWriteSchema):
         title="Médico",
         json_schema_extra={"ui": {"form": True, "widget": "text"}},
     )
-    scheduled_at: Optional[datetime] = Field(
-        default=None,
-        title="Fecha y hora",
-        json_schema_extra={"ui": {"form": True, "widget": "datetime"}},
-    )
+    scheduled_date: Optional[date] = _DATE_FIELD_OPT
+    scheduled_time: Optional[time] = _TIME_FIELD_OPT
     duration_minutes: Optional[int] = _DURATION_OPT
     reason: Optional[str] = Field(
         default=None,
@@ -179,11 +168,6 @@ class AppointmentReschedule(ApiWriteSchema):
         json_schema_extra={"ui": {"form": True, "widget": "textarea"}},
     )
 
-    @field_validator("scheduled_at")
-    @classmethod
-    def normalize_scheduled_at(cls, value: Optional[datetime]) -> Optional[datetime]:
-        return _naive_utc(value) if value is not None else None
-
 
 class AppointmentRead(ApiReadSchema):
     """Representación completa de una cita médica."""
@@ -191,8 +175,9 @@ class AppointmentRead(ApiReadSchema):
     id: uuid.UUID
     patient_id: uuid.UUID
     doctor_id: uuid.UUID
-    scheduled_at: datetime
-    duration_minutes: int
+    scheduled_date: date
+    scheduled_time: Optional[time] = None
+    duration_minutes: Optional[int] = None
     reason: str
     internal_notes: Optional[str] = None
     status: AppointmentStatus
@@ -207,11 +192,14 @@ class AppointmentListItem(ApiReadSchema):
     id: uuid.UUID
     patient_id: uuid.UUID = Field(title="Paciente")
     doctor_id: uuid.UUID = Field(title="Médico")
-    scheduled_at: datetime = Field(
-        title="Programada", json_schema_extra=_SCHEDULED_AT_LIST_FILTER_UI
+    scheduled_date: date = Field(
+        title="Fecha", json_schema_extra=_SCHEDULED_DATE_LIST_FILTER_UI
     )
-    duration_minutes: int = Field(
-        title="Duración (min)", json_schema_extra={"ui": {"list": True}}
+    scheduled_time: Optional[time] = Field(
+        default=None, title="Hora", json_schema_extra={"ui": {"list": True}}
+    )
+    duration_minutes: Optional[int] = Field(
+        default=None, title="Duración (min)", json_schema_extra={"ui": {"list": True}}
     )
     reason: str = Field(title="Motivo", json_schema_extra={"ui": {"list": True}})
     status: AppointmentStatus = Field(

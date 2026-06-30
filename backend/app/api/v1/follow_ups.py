@@ -89,16 +89,19 @@ def _pending_tasks(session: Session) -> list[ClinicalTask]:
 
 def _missed_appointments(session: Session, lookback_days: int) -> list[Appointment]:
     """Citas no asistidas (no_show) o canceladas dentro de la ventana reciente, no eliminadas."""
-    since = utc_now() - timedelta(days=lookback_days)
+    # La cita se agenda por FECHA civil (la hora es opcional): la ventana reciente se aplica
+    # sobre ``scheduled_date``. El orden desc deja primero las más recientes; dentro del mismo
+    # día, las que tienen hora antes que las sin hora (nulls last en desc de PostgreSQL).
+    since_date = (utc_now() - timedelta(days=lookback_days)).date()
     return list(
         session.execute(
             select(Appointment)
             .where(
                 Appointment.status.in_(_MISSED_STATUSES),
-                Appointment.scheduled_at >= since,
+                Appointment.scheduled_date >= since_date,
                 Appointment.deleted_at.is_(None),
             )
-            .order_by(Appointment.scheduled_at.desc())
+            .order_by(Appointment.scheduled_date.desc(), Appointment.scheduled_time.desc())
         ).scalars().all()
     )
 
@@ -164,7 +167,8 @@ def get_follow_ups_summary(
             patient_id=appt.patient_id,
             patient_label=_label(appt.patient_id),
             doctor_id=appt.doctor_id,
-            scheduled_at=appt.scheduled_at,
+            scheduled_date=appt.scheduled_date,
+            scheduled_time=appt.scheduled_time,
             # El query ya restringe a no_show/cancelled (ver _MISSED_STATUSES).
             status=cast(Literal["no_show", "cancelled"], appt.status.value),
             reason=appt.reason,

@@ -52,11 +52,11 @@ const CONSULTATIONS_LIMIT = 6;
 const PATIENTS_LIMIT = 200;
 const FALLBACK_TZ = "UTC";
 
-/** Parámetro real del filtro "en la fecha" (operador ``on``) de ``scheduled_at``, si existe. */
+/** Parámetro real del filtro "en la fecha" (operador ``on``) de ``scheduled_date``, si existe. */
 function scheduledOnOperator(
   controls: FilterableControls,
 ): { parameter: string; timeZone: string } | null {
-  const field = controls.ordered.find((entry) => entry.key === "scheduled_at");
+  const field = controls.ordered.find((entry) => entry.key === "scheduled_date");
   if (!field) {
     return null;
   }
@@ -88,7 +88,7 @@ async function fetchTodayAppointments(): Promise<{ rows: ResourceRow[]; timeZone
     const onOperator = scheduledOnOperator(controls);
     const timeZone = onOperator?.timeZone ?? FALLBACK_TZ;
     const synthetic: Record<string, string> = {
-      sort: "scheduled_at",
+      sort: "scheduled_date",
       limit: String(AGENDA_LIMIT),
     };
     if (onOperator) {
@@ -176,7 +176,7 @@ export async function getDashboardData(): Promise<DashboardData> {
       fetchFollowUpSummary(),
     ]);
     return buildDashboardData({
-      agenda: toAgendaItems(appointments.rows, labels, appointments.timeZone),
+      agenda: toAgendaItems(appointments.rows, labels),
       consultations: toConsultationItems(consultations, labels, appointments.timeZone),
       alerts: toAlertItems(summary),
     });

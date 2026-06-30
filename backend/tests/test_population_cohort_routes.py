@@ -293,7 +293,7 @@ class CohortRoutesTest(unittest.TestCase):
         patient_id: uuid.UUID,
         *,
         status: AppointmentStatus = AppointmentStatus.NO_SHOW,
-        scheduled_at: datetime = datetime(2026, 2, 1, 9, 0, 0),
+        scheduled_date: date = date(2026, 2, 1),
     ) -> None:
         with Session(self.engine) as session:
             session.add(
@@ -301,7 +301,7 @@ class CohortRoutesTest(unittest.TestCase):
                     id=uuid.uuid4(),
                     patient_id=patient_id,
                     doctor_id=self.doctor_id,
-                    scheduled_at=scheduled_at,
+                    scheduled_date=scheduled_date,
                     duration_minutes=30,
                     reason="Seguimiento",
                     status=status,
@@ -423,9 +423,9 @@ class CohortRoutesTest(unittest.TestCase):
 
     def test_appointment_no_show_and_window(self) -> None:
         no_show = self._patient(full_name="Inasistió")
-        self._appointment(no_show, status=AppointmentStatus.NO_SHOW, scheduled_at=datetime(2026, 2, 1, 9, 0))
+        self._appointment(no_show, status=AppointmentStatus.NO_SHOW, scheduled_date=date(2026, 2, 1))
         attended = self._patient(full_name="Asistió")
-        self._appointment(attended, status=AppointmentStatus.ATTENDED, scheduled_at=datetime(2026, 2, 1, 9, 0))
+        self._appointment(attended, status=AppointmentStatus.ATTENDED, scheduled_date=date(2026, 2, 1))
 
         any_date = self._cohort({"appointment_no_show": {}})
         self.assertEqual(any_date["count"], 1)

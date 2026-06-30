@@ -87,6 +87,10 @@ export interface ReviewContext {
   schemaFields?: ReadonlyMap<string, ReadonlySet<string>>;
   /** Campos REQUERIDOS del formulario de creación por recurso (para marcar lo que falta). */
   requiredFields?: ReadonlyMap<string, ReadonlySet<string>>;
+  /** Recursos en los que el rol PUEDE editar (forms.update presente). Lo usa record-update (0137). */
+  updatable?: ReadonlySet<string>;
+  /** Campos del formulario de EDICIÓN por recurso (para descartar campos ajenos en una actualización). */
+  updateSchemaFields?: ReadonlyMap<string, ReadonlySet<string>>;
 }
 
 export type CloseOutResult = { ok: true; plan: CloseOutPlan } | { ok: false; error: string };
@@ -125,8 +129,12 @@ function valuesEqual(a: unknown, b: unknown): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
-/** Diff read-only de los valores efectivos contra el estado actual (nunca inventa ausentes). */
-function computeDiff(
+/**
+ * Diff read-only de los valores efectivos contra el estado actual (nunca inventa ausentes). Se
+ * exporta porque la comparación dedicada de ACTUALIZACIÓN (record-update, MP-CTRL-0137) reusa la
+ * MISMA aritmética de diff (campo agregado/cambiado), sin duplicar la lógica.
+ */
+export function computeDiff(
   values: Record<string, unknown>,
   current: Record<string, unknown> | undefined,
 ): FieldDiff[] {
@@ -283,14 +291,19 @@ export function buildCloseOutPlan(
 /** Entrada mínima del catálogo de recursos que necesita el seam (subconjunto de ResourceCatalog). */
 export interface CatalogResourceLike {
   name: string;
-  forms?: { create?: { fields?: ReadonlyArray<{ name: string; required?: boolean }> } | null } | null;
+  forms?: {
+    create?: { fields?: ReadonlyArray<{ name: string; required?: boolean }> } | null;
+    update?: { fields?: ReadonlyArray<{ name: string; required?: boolean }> } | null;
+  } | null;
 }
 
 /**
  * Deriva el contexto de validación del catálogo de recursos (``/api/v1/resources``), ya proyectado
- * por permiso: ``forms.create`` sólo está presente si el rol puede crear ese recurso (MISMA señal
- * que el gating de tools). Read-only; no infiere permisos ajenos al catálogo. ``requiredFields``
- * lista los campos requeridos de la creación (aditivo: 0120 no lo usa; 0129 marca lo que falta).
+ * por permiso: ``forms.create`` sólo está presente si el rol puede crear ese recurso y ``forms.update``
+ * sólo si puede editarlo (MISMA señal que el gating de tools). Read-only; no infiere permisos ajenos al
+ * catálogo. ``requiredFields`` lista los requeridos de la creación (0129 marca lo que falta); ``updatable``/
+ * ``updateSchemaFields`` derivan de ``forms.update`` para la comparación de actualización (0137). Todo
+ * aditivo: los consumidores previos (0120/0129/0131) ignoran las señales de edición.
  */
 export function reviewContextFromCatalog(
   catalog: ReadonlyArray<CatalogResourceLike>,
@@ -299,6 +312,8 @@ export function reviewContextFromCatalog(
   const knownResources = new Set<string>();
   const schemaFields = new Map<string, ReadonlySet<string>>();
   const requiredFields = new Map<string, ReadonlySet<string>>();
+  const updatable = new Set<string>();
+  const updateSchemaFields = new Map<string, ReadonlySet<string>>();
   for (const resource of catalog) {
     knownResources.add(resource.name);
     const create = resource.forms?.create;
@@ -311,8 +326,14 @@ export function reviewContextFromCatalog(
         new Set(fields.filter((field) => field.required).map((field) => field.name)),
       );
     }
+    const update = resource.forms?.update;
+    if (update) {
+      updatable.add(resource.name);
+      const fields = update.fields ?? [];
+      updateSchemaFields.set(resource.name, new Set(fields.map((field) => field.name)));
+    }
   }
-  return { creatable, knownResources, schemaFields, requiredFields };
+  return { creatable, knownResources, schemaFields, requiredFields, updatable, updateSchemaFields };
 }
 
 /** Especificación de UI del panel de cierre (se integra a la unión UiSpec; se pinta en GeneratedUi). */

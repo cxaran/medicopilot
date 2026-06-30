@@ -70,6 +70,9 @@ import type { DetectedActionsSpec } from "./detected-actions";
 import type { TaskPlanSpec } from "./task-plan";
 import type { CloseChecklistSpec } from "./close-checklist";
 import type { TemplatePromotionSpec } from "./template-promotion";
+import type { RecordUpdateSpec } from "./record-update";
+import type { OpenRecordSpec } from "./open-record";
+import type { WizardSpec } from "./wizard";
 
 export type UiSpec =
   | FormSpec
@@ -79,7 +82,10 @@ export type UiSpec =
   | DetectedActionsSpec
   | TaskPlanSpec
   | CloseChecklistSpec
-  | TemplatePromotionSpec;
+  | TemplatePromotionSpec
+  | RecordUpdateSpec
+  | OpenRecordSpec
+  | WizardSpec;
 
 export type ParseResult<T> = { ok: true; spec: T } | { ok: false; error: string };
 
@@ -96,7 +102,10 @@ export function isUiSpec(value: unknown): value is UiSpec {
     kind === "detected_actions" ||
     kind === "task_plan" ||
     kind === "close_checklist" ||
-    kind === "template_promotion_proposal"
+    kind === "template_promotion_proposal" ||
+    kind === "record_update" ||
+    kind === "open_record" ||
+    kind === "wizard"
   );
 }
 

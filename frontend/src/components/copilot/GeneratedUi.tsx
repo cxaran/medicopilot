@@ -50,13 +50,31 @@ import {
   buildPromotionSubmission,
   type TemplatePromotionSpec,
 } from "@/core/agent/tools/template-promotion";
+import {
+  buildRecordUpdateSubmission,
+  type RecordUpdateSpec,
+} from "@/core/agent/tools/record-update";
+import { openRecordToContext, type OpenRecordSpec } from "@/core/agent/tools/open-record";
+import {
+  buildWizardSubmission,
+  type WizardSpec,
+  type WizardStepState,
+} from "@/core/agent/tools/wizard";
+import type { ActiveClinicalContext } from "@/core/agent/active-context";
 
 // Render seguro de UI generada por el modelo (B9, Parte B): specs declarativas mapeadas a
 // componentes React con los primitivos R2. NUNCA HTML/JS crudo del modelo.
 export function GeneratedUi({
   spec,
   onSendFollowup,
-}: Readonly<{ spec: UiSpec; onSendFollowup: (text: string) => void }>) {
+  onOpenRecord,
+}: Readonly<{
+  spec: UiSpec;
+  onSendFollowup: (text: string) => void;
+  // Apertura GOBERNADA del expediente (MP-CTRL-0138): el host cambia el contexto activo (que monta el
+  // panel del paciente). Opcional: sin handler (uso independiente) la tarjeta open_record no actúa.
+  onOpenRecord?: (context: ActiveClinicalContext) => void;
+}>) {
   if (spec.kind === "form") {
     return <FormView spec={spec} onSubmit={(values) => onSendFollowup(buildFormSubmissionMessage(spec, values))} />;
   }
@@ -82,6 +100,15 @@ export function GeneratedUi({
   }
   if (spec.kind === "template_promotion_proposal") {
     return <TemplatePromotionPanel spec={spec} onSendFollowup={onSendFollowup} />;
+  }
+  if (spec.kind === "record_update") {
+    return <RecordUpdatePanel spec={spec} onSendFollowup={onSendFollowup} />;
+  }
+  if (spec.kind === "open_record") {
+    return <OpenRecordCard spec={spec} onOpenRecord={onOpenRecord} />;
+  }
+  if (spec.kind === "wizard") {
+    return <WizardView spec={spec} onSendFollowup={onSendFollowup} />;
   }
   return <ButtonsView spec={spec} onAction={(action) => onSendFollowup(buttonActionToMessage(action))} />;
 }
@@ -1147,6 +1174,210 @@ function ButtonsView({
             </Button>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+// COMPARACIÓN antes/después de una ACTUALIZACIÓN (MP-CTRL-0137). Muestra, para un registro existente, el
+// diff campo-a-campo (actual → nuevo) que el agente propone; si está bloqueada (sin permiso de edición /
+// recurso desconocido) se pinta fija con su motivo. Al confirmar, envía un seguimiento para que el agente
+// aplique la edición con la tool de actualización del recurso por la aprobación P1. No escribe nada.
+function RecordUpdatePanel({
+  spec,
+  onSendFollowup,
+}: Readonly<{ spec: RecordUpdateSpec; onSendFollowup: (text: string) => void }>) {
+  const blocked = spec.disposition === "blocked";
+  return (
+    <div className="flex flex-col gap-3">
+      {spec.title && <div className="text-sm font-semibold text-[var(--tx)]">{spec.title}</div>}
+
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs font-medium text-[var(--tx)]">{spec.label}</span>
+        <span className="text-[10px] text-[var(--tx2)]">
+          {spec.target_resource} · {spec.resource_id}
+        </span>
+      </div>
+
+      {spec.source_fragment && (
+        <p className="text-[11px] italic text-[var(--tx2)]">«{spec.source_fragment}»</p>
+      )}
+
+      {blocked ? (
+        <div className="rounded-[10px] border border-[var(--danger)] px-3 py-2 text-[11px] text-[var(--danger)]">
+          Bloqueada: {spec.reason}
+        </div>
+      ) : spec.diff.length === 0 ? (
+        <div className="rounded-[10px] border border-[var(--border2)] bg-[var(--bg2)] px-3 py-2 text-[11px] text-[var(--tx2)]">
+          Sin cambios respecto al registro actual.
+        </div>
+      ) : (
+        <div className="flex flex-col gap-1 rounded-[10px] border border-[var(--border2)] p-2">
+          {spec.diff.map((d) => (
+            <div
+              key={d.field}
+              className="flex flex-col gap-0.5 border-b border-[var(--border2)] pb-1 last:border-b-0 last:pb-0 text-[11px]"
+            >
+              <span className="font-medium text-[var(--tx)]">{d.field}</span>
+              <span className="text-[var(--tx2)]">
+                {renderValue(d.before)} <span className="text-[var(--accent)]">→</span>{" "}
+                <span className="text-[var(--tx)]">{renderValue(d.after)}</span>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {!blocked && spec.dropped_fields.length > 0 && (
+        <div className="text-[11px] text-[var(--tx2)]">
+          Campos ignorados (fuera del esquema de edición): {spec.dropped_fields.join(", ")}
+        </div>
+      )}
+
+      {!blocked && (
+        <div>
+          <Button type="button" onClick={() => onSendFollowup(buildRecordUpdateSubmission(spec))}>
+            {spec.confirm_label}
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ACCIÓN GOBERNADA "ABRIR EXPEDIENTE" (MP-CTRL-0138). Tarjeta con un botón que, al hacer clic el médico,
+// cambia el contexto activo del shell (que monta el panel del paciente). Si está bloqueada (sin permiso
+// de ver pacientes) se pinta fija con su motivo. Si no hay handler de apertura (uso independiente sin
+// shell) el botón queda deshabilitado: nada navega automáticamente desde la salida del modelo.
+function OpenRecordCard({
+  spec,
+  onOpenRecord,
+}: Readonly<{ spec: OpenRecordSpec; onOpenRecord?: (context: ActiveClinicalContext) => void }>) {
+  const blocked = spec.disposition === "blocked";
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center gap-2">
+        <span aria-hidden="true">🗂️</span>
+        <span className="text-xs font-medium text-[var(--tx)]">{spec.patient_label}</span>
+      </div>
+
+      {blocked ? (
+        <div className="rounded-[10px] border border-[var(--danger)] px-3 py-2 text-[11px] text-[var(--danger)]">
+          Bloqueada: {spec.reason}
+        </div>
+      ) : (
+        <div>
+          <Button
+            type="button"
+            disabled={!onOpenRecord}
+            onClick={() => onOpenRecord?.(openRecordToContext(spec))}
+          >
+            {spec.label}
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ASISTENTE MULTI-PASO GUIADO (MP-CTRL-0139). Lista los pasos EN ORDEN con su estado (hecho / actual /
+// pendiente / a la espera de dependencias / bloqueado por RBAC), resalta el paso actual, marca los
+// requeridos que faltan y los campos ignorados. Al confirmar, envía un seguimiento para que el agente
+// avance SÓLO con el paso actual por la aprobación P1 (uno a la vez, sin saltarse el orden). No escribe.
+const WIZARD_STATE_LABEL: Record<WizardStepState, string> = {
+  done: "Hecho",
+  current: "Paso actual",
+  pending: "Pendiente",
+  blocked: "Bloqueado",
+};
+
+function WizardView({
+  spec,
+  onSendFollowup,
+}: Readonly<{ spec: WizardSpec; onSendFollowup: (text: string) => void }>) {
+  const { plan } = spec;
+  return (
+    <div className="flex flex-col gap-3">
+      {spec.title && <div className="text-sm font-semibold text-[var(--tx)]">{spec.title}</div>}
+
+      <div className="rounded-[10px] border border-[var(--border2)] bg-[var(--bg2)] px-3 py-2 text-xs text-[var(--tx2)]">
+        Progreso: {plan.summary.done}/{plan.summary.total} hechos · {plan.summary.pending} pendientes
+        {plan.summary.blocked > 0 ? ` · ${plan.summary.blocked} bloqueados` : ""}
+      </div>
+
+      <ol className="flex flex-col gap-2">
+        {plan.steps.map((step, index) => {
+          const isCurrent = step.state === "current";
+          const isBlocked = step.state === "blocked";
+          const waiting = step.state !== "done" && !isBlocked && step.blocked_by.length > 0;
+          return (
+            <li
+              key={step.id}
+              className={`flex flex-col gap-1 rounded-[10px] border p-2 ${
+                isBlocked
+                  ? "border-[var(--danger)]"
+                  : isCurrent
+                    ? "border-[var(--accent-bd)] bg-[var(--accent-dim)]"
+                    : "border-[var(--border2)]"
+              }`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-medium text-[var(--tx)]">
+                  {index + 1}. {step.title}
+                </span>
+                <span className="text-[10px] text-[var(--tx2)]">
+                  {step.template_id ? `plantilla ${step.template_id}` : step.target_resource} ·{" "}
+                  {WIZARD_STATE_LABEL[step.state]}
+                </span>
+              </div>
+
+              {step.source_fragment && (
+                <p className="text-[11px] italic text-[var(--tx2)]">«{step.source_fragment}»</p>
+              )}
+
+              {isBlocked ? (
+                <div className="text-[11px] text-[var(--danger)]">
+                  {WIZARD_STATE_LABEL.blocked}: {step.reason}
+                </div>
+              ) : (
+                <>
+                  {Object.keys(step.values).length > 0 && (
+                    <div className="text-[11px] text-[var(--tx2)]">
+                      {Object.entries(step.values)
+                        .map(([field, value]) => `${field}: ${renderValue(value)}`)
+                        .join("  ·  ")}
+                    </div>
+                  )}
+                  {waiting && (
+                    <div className="text-[11px] text-[var(--tx2)]">
+                      A la espera de: {step.blocked_by.join(", ")}
+                    </div>
+                  )}
+                  {step.missing_required.length > 0 && (
+                    <div className="text-[11px] text-[var(--danger)]">
+                      Faltan campos requeridos: {step.missing_required.join(", ")}
+                    </div>
+                  )}
+                  {step.dropped_fields.length > 0 && (
+                    <div className="text-[11px] text-[var(--tx2)]">
+                      Campos ignorados (fuera del esquema): {step.dropped_fields.join(", ")}
+                    </div>
+                  )}
+                </>
+              )}
+            </li>
+          );
+        })}
+      </ol>
+
+      <div>
+        <Button
+          type="button"
+          disabled={plan.current_step_id === null}
+          onClick={() => onSendFollowup(buildWizardSubmission(spec.confirm_prompt, plan))}
+        >
+          {spec.confirm_label}
+        </Button>
       </div>
     </div>
   );

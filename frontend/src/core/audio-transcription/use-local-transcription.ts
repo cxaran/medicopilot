@@ -6,7 +6,7 @@
 import { useCallback, useRef, useState } from "react";
 
 import { browserApi } from "@/core/api/browser-client";
-import { preloadModel, runAudioTranscript } from "./runtime";
+import { preloadModel, runAudioTranscript, runRecordingTranscript } from "./runtime";
 import {
   defaultWhisperModel,
   isLocalTranscriptionSupported,
@@ -33,6 +33,11 @@ export interface UseLocalTranscription {
   transcribe: (
     documentId: string,
     options?: { model?: WhisperModel; forceServer?: boolean },
+  ) => Promise<TranscriptionOutcome | null>;
+  /** Transcribe una grabación en vivo (Blob del micrófono) LOCALMENTE; sin respaldo de servidor. */
+  transcribeBlob: (
+    blob: Blob,
+    options?: { model?: WhisperModel },
   ) => Promise<TranscriptionOutcome | null>;
   preload: (model?: WhisperModel) => Promise<void>;
   reset: () => void;
@@ -80,6 +85,32 @@ export function useLocalTranscription(): UseLocalTranscription {
     [],
   );
 
+  const transcribeBlob = useCallback(async (blob: Blob, options?: { model?: WhisperModel }) => {
+    if (runningRef.current) {
+      return null;
+    }
+    runningRef.current = true;
+    setStatus("running");
+    setProgress(null);
+    setError(null);
+    setOutcome(null);
+    try {
+      const result = await runRecordingTranscript(blob, {
+        model: options?.model ?? defaultWhisperModel(),
+        onProgress: setProgress,
+      });
+      setOutcome(result);
+      setStatus("done");
+      return result;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al transcribir el audio.");
+      setStatus("error");
+      return null;
+    } finally {
+      runningRef.current = false;
+    }
+  }, []);
+
   const preload = useCallback(async (model?: WhisperModel) => {
     if (runningRef.current) {
       return;
@@ -119,6 +150,7 @@ export function useLocalTranscription(): UseLocalTranscription {
     webgpu: isWebGpuAvailable(),
     localEnabled: localTranscriptionEnabled(),
     transcribe,
+    transcribeBlob,
     preload,
     reset,
   };

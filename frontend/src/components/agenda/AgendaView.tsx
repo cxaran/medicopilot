@@ -6,7 +6,6 @@ import { useRouter } from "next/navigation";
 import { useChatNav } from "@/components/chat-shell/ChatNavProvider";
 import { ResourceRowActions } from "@/components/resources/ResourceRowActions";
 import type { ResourceActionCapability } from "@/core/api/contracts";
-import { formatTimeHM } from "@/core/chat-shell/dashboard";
 import {
   applicableAppointmentActions,
   avatarColor,
@@ -188,7 +187,6 @@ export function AgendaView(props: Readonly<AgendaViewProps>) {
       ) : props.mode === "day" ? (
         <DayList
           items={props.day}
-          timeZone={props.timeZone}
           onOpen={openPatient}
           actions={props.actions}
           actionPlaceholder={props.actionPlaceholder}
@@ -204,13 +202,11 @@ export function AgendaView(props: Readonly<AgendaViewProps>) {
 
 function DayList({
   items,
-  timeZone,
   onOpen,
   actions,
   actionPlaceholder,
 }: Readonly<{
   items: readonly AgendaAppointment[];
-  timeZone: string;
   onOpen: (item: AgendaAppointment) => void;
   actions: readonly ResourceActionCapability[];
   actionPlaceholder: string;
@@ -245,7 +241,7 @@ function DayList({
             >
               <div className="w-[52px] shrink-0 text-center">
                 <div className="text-[15px] font-semibold tabular-nums text-[var(--tx)]">
-                  {formatTimeHM(item.scheduledAt, timeZone) || "--:--"}
+                  {item.timeHM ?? "--:--"}
                 </div>
                 {item.durationMinutes !== null ? (
                   <div className="text-[11px] text-[var(--tx3)]">{item.durationMinutes} min</div>
@@ -306,10 +302,8 @@ function DayCellChip({
       }`}
       style={{ borderLeft: `3px solid ${color}` }}
     >
-      {timeZone ? (
-        <span className="shrink-0 tabular-nums text-[var(--tx3)]">
-          {formatTimeHM(item.scheduledAt, timeZone)}
-        </span>
+      {timeZone && item.timeHM ? (
+        <span className="shrink-0 tabular-nums text-[var(--tx3)]">{item.timeHM}</span>
       ) : null}
       <span className="min-w-0 flex-1 truncate font-medium text-[var(--tx)]">{item.patientLabel}</span>
     </button>

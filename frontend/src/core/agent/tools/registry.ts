@@ -31,6 +31,13 @@ import {
   type TemplatePromotionSpec,
 } from "./template-promotion";
 import {
+  buildRecordUpdate,
+  type RecordUpdateInput,
+  type RecordUpdateOptions,
+} from "./record-update";
+import { buildOpenRecord, type OpenRecordInput } from "./open-record";
+import { buildWizardPlan, type WizardInput, type WizardSpec } from "./wizard";
+import {
   searchTools,
   describeTools,
   type ToolDiscoveryContext,
@@ -408,7 +415,7 @@ const TOOLS: ToolDefinition[] = [
     description:
       "Lista citas de la agenda (paginado). Puede filtrar por paciente (patient_id), médico " +
       "(doctor_id), estado (status) y rango de fecha agendada (date_from/date_to, sobre " +
-      "scheduled_at). Solo lectura.",
+      "scheduled_date). Solo lectura.",
     kind: "read",
     inputSchema: clinicalListSchema({
       patient_id: PATIENT_FILTER_PROP,
@@ -421,7 +428,7 @@ const TOOLS: ToolDefinition[] = [
       ctx.api(
         `/api/v1/appointments${clinicalListQuery(args, {
           eq: ["patient_id", "doctor_id", "status"],
-          dateField: "scheduled_at",
+          dateField: "scheduled_date",
         })}`,
       ),
   },
@@ -1456,38 +1463,48 @@ const TOOLS: ToolDefinition[] = [
   {
     name: "clinical.create_appointment_draft",
     description:
-      "Agenda una cita EN BORRADOR (estado pendiente) para un paciente con un médico. Acción de " +
-      "escritura: requiere confirmación explícita del médico. La cita nace pendiente; el médico " +
-      "la revisa y confirma.",
+      "Agenda una cita EN BORRADOR (estado pendiente) para un paciente con un médico. Sólo la " +
+      "FECHA es obligatoria; la HORA es opcional (muchas veces el paciente acude dentro del " +
+      "horario de consulta sin hora concreta). Acción de escritura: requiere confirmación " +
+      "explícita del médico. La cita nace pendiente; el médico la revisa y confirma.",
     kind: "write",
     inputSchema: {
       type: "object",
       properties: {
         patient_id: { type: "string", description: "Id (UUID) del paciente.", format: "uuid" },
         doctor_id: { type: "string", description: "Id (UUID) del médico.", format: "uuid" },
-        scheduled_at: {
+        scheduled_date: {
           type: "string",
-          description: "Fecha y hora ISO 8601 (p. ej. 2026-07-01T10:30).",
+          description: "Fecha de la cita (YYYY-MM-DD). Obligatoria.",
+        },
+        scheduled_time: {
+          type: "string",
+          description:
+            "Hora concreta (HH:MM), OPCIONAL. Omítela si el paciente acude dentro del horario.",
         },
         duration_minutes: {
           type: "integer",
-          description: "Duración en minutos (5-480).",
+          description: "Duración en minutos (5-480), opcional; sólo si hay hora concreta.",
           minimum: 5,
           maximum: 480,
         },
         reason: { type: "string", description: "Motivo de la cita." },
         internal_notes: { type: "string", description: "Notas internas (opcional)." },
       },
-      required: ["patient_id", "doctor_id", "scheduled_at", "duration_minutes", "reason"],
+      required: ["patient_id", "doctor_id", "scheduled_date", "reason"],
       additionalProperties: false,
     },
     approval: {
       actionType: "create_appointment_draft",
       targetResource: "appointments",
-      summarize: (args) =>
-        `Agendar una cita (pendiente) para el paciente ${String(args.patient_id ?? "—")} con el ` +
-        `médico ${String(args.doctor_id ?? "—")} el ${String(args.scheduled_at ?? "—")}. ` +
-        `Motivo: ${String(args.reason ?? "—")}.`,
+      summarize: (args) => {
+        const time = args.scheduled_time ? ` a las ${String(args.scheduled_time)}` : "";
+        return (
+          `Agendar una cita (pendiente) para el paciente ${String(args.patient_id ?? "—")} con el ` +
+          `médico ${String(args.doctor_id ?? "—")} el ${String(args.scheduled_date ?? "—")}${time}. ` +
+          `Motivo: ${String(args.reason ?? "—")}.`
+        );
+      },
     },
     execute: (args, ctx) =>
       ctx.api(`/api/v1/appointments`, { method: "POST", body: args as Record<string, unknown> }),
@@ -2933,6 +2950,195 @@ const TOOLS: ToolDefinition[] = [
           typeof args.confirm_prompt === "string"
             ? args.confirm_prompt
             : "Cierre de la consulta revisado:",
+      };
+      if (typeof args.title === "string") spec.title = args.title;
+      return spec;
+    },
+  },
+  {
+    // COMPARACIÓN DEDICADA ANTES/DESPUÉS para una ACTUALIZACIÓN (MP-CTRL-0137): cuando el médico quiere
+    // cambiar un dato YA guardado (ajustar la dosis de una receta vigente, corregir la fecha de
+    // nacimiento, conciliar una medicación), el agente lee el estado actual del registro y PROPONE los
+    // nuevos valores; esta tool arma una vista campo-a-campo (actual → propuesto) para revisar ANTES de
+    // escribir. READ-ONLY: valida contra el catálogo + permiso de EDICIÓN (forms.update; recurso
+    // desconocido o sin permiso = BLOQUEADA con motivo, no se inventa), descarta campos fuera del esquema
+    // de edición y calcula el diff contra el estado actual. NO guarda nada: al confirmar, el agente aplica
+    // la edición con la tool de actualización del recurso (cada guardado pasa por la aprobación P1). A
+    // diferencia de review_detected_actions (orientada a ALTAS, gateada por creatable), ésta es para EDITAR
+    // un registro existente. Útil para conciliación de medicación y correcciones del expediente.
+    name: "ui.review_record_update",
+    description:
+      "Renderiza una COMPARACIÓN antes/después para ACTUALIZAR un registro existente (p. ej. ajustar la " +
+      "dosis de una receta vigente o corregir un dato del paciente). Indica target_resource, resource_id " +
+      "(id del registro), current_values (estado actual que leíste del expediente) y proposed_values (los " +
+      "valores nuevos). La plataforma valida el permiso de EDICIÓN (recurso desconocido o sin permiso = " +
+      "bloqueada con motivo, no se inventa), descarta campos fuera del esquema de edición y calcula el diff " +
+      "campo a campo. NO guarda nada: el médico revisa y al confirmar tú aplicas la edición con la tool de " +
+      "actualización de ese recurso (requiere aprobación P1). Solo lectura.",
+    kind: "read",
+    inputSchema: PASSTHROUGH_SCHEMA,
+    wireSchema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Título del panel (opcional)." },
+        target_resource: { type: "string", description: "Recurso del registro a actualizar." },
+        resource_id: { type: "string", description: "Id del registro existente a actualizar." },
+        label: { type: "string", description: "Etiqueta legible de la actualización (opcional)." },
+        current_values: {
+          type: "object",
+          description: "Estado actual del registro (lo lees del expediente) para el 'antes' del diff.",
+          additionalProperties: true,
+        },
+        proposed_values: {
+          type: "object",
+          description: "Valores nuevos propuestos por campo.",
+          additionalProperties: true,
+        },
+        source_fragment: { type: "string", description: "Fragmento de origen (opcional)." },
+        confirm_label: { type: "string", description: "Etiqueta del botón de confirmación." },
+        confirm_prompt: { type: "string", description: "Encabezado del mensaje de confirmación." },
+      },
+      required: ["target_resource", "resource_id", "proposed_values"],
+      additionalProperties: false,
+    },
+    execute: async (args, ctx) => {
+      const catalog = await ctx.api<readonly CatalogResourceLike[]>(`/api/v1/resources`);
+      const options: RecordUpdateOptions = {};
+      if (typeof args.title === "string") options.title = args.title;
+      if (typeof args.confirm_label === "string") options.confirm_label = args.confirm_label;
+      if (typeof args.confirm_prompt === "string") options.confirm_prompt = args.confirm_prompt;
+      const result = buildRecordUpdate(
+        args as unknown as RecordUpdateInput,
+        reviewContextFromCatalog(catalog),
+        options,
+      );
+      if (!result.ok) {
+        throw new ToolExecutionError("invalid_record_update", result.error);
+      }
+      return result.spec;
+    },
+  },
+  {
+    // ACCIÓN GOBERNADA "ABRIR EXPEDIENTE" (MP-CTRL-0138): tras buscar/identificar a un paciente, el médico
+    // pide "abre su expediente". En vez de navegar a ciegas, el agente emite esta acción y la plataforma
+    // valida que el médico PUEDE ver pacientes (el recurso aparece en el catálogo proyectado por permiso;
+    // si no, BLOQUEADA con motivo) y devuelve una tarjeta con un botón. Abrir el expediente NO es una
+    // escritura clínica: sólo cambia el contexto activo del shell (que monta el panel del paciente). El
+    // médico hace el clic; nada se navega automáticamente desde la salida del modelo. Solo lectura.
+    name: "ui.open_record",
+    description:
+      "Renderiza una tarjeta para ABRIR el expediente de un paciente ya identificado (p. ej. tras " +
+      "clinical.search_patients). Indica patient_id (requerido), patient_label (nombre legible) y, " +
+      "opcionalmente, consultation_id/consultation_label y label. La plataforma valida que el médico " +
+      "puede ver pacientes (si no, bloqueada con motivo). NO navega ni guarda nada: muestra un botón y " +
+      "el médico decide abrir el expediente (cambia el contexto activo, no es una escritura). Úsala " +
+      "cuando el médico pida abrir/ver el expediente de un paciente. Solo lectura.",
+    kind: "read",
+    inputSchema: PASSTHROUGH_SCHEMA,
+    wireSchema: {
+      type: "object",
+      properties: {
+        patient_id: { type: "string", description: "Id del paciente cuyo expediente abrir." },
+        patient_label: { type: "string", description: "Nombre legible del paciente (para la tarjeta)." },
+        consultation_id: { type: "string", description: "Consulta a enfocar (opcional)." },
+        consultation_label: { type: "string", description: "Etiqueta de la consulta (opcional)." },
+        label: { type: "string", description: "Etiqueta del botón (opcional)." },
+      },
+      required: ["patient_id"],
+      additionalProperties: false,
+    },
+    execute: async (args, ctx) => {
+      const catalog = await ctx.api<readonly CatalogResourceLike[]>(`/api/v1/resources`);
+      const result = buildOpenRecord(args as unknown as OpenRecordInput, reviewContextFromCatalog(catalog));
+      if (!result.ok) {
+        throw new ToolExecutionError("invalid_open_record", result.error);
+      }
+      return result.spec;
+    },
+  },
+  {
+    // ASISTENTE MULTI-PASO GUIADO (MP-CTRL-0139, épica conversación→expediente, casos 121, 182-186): para
+    // flujos guiados ("guíame paso a paso para registrar al paciente, su historia y abrir la consulta",
+    // "asistente de primera consulta pediátrica"), el agente propone una SECUENCIA ORDENADA de pasos —cada
+    // uno crea un recurso o abre una plantilla— con DEPENDENCIAS entre entidades. Esta tool valida cada
+    // paso contra el catálogo + RBAC (desconocido/sin permiso = bloqueado con motivo), descarta campos
+    // fuera del esquema, marca los requeridos que faltan y resuelve el PASO ACTUAL (el primero pendiente
+    // con sus dependencias hechas). NO guarda nada: el agente avanza UN paso a la vez con la tool de
+    // escritura del paso (cada guardado pasa por la aprobación P1, nunca en lote). Solo lectura.
+    name: "ui.review_wizard",
+    description:
+      "Renderiza un ASISTENTE PASO A PASO para un flujo guiado de varias entidades (p. ej. registrar " +
+      "paciente → historia clínica → abrir consulta). Indica steps: lista ORDENADA de { id, title, type " +
+      "(create_patient|create_consultation|open_template:<id>|...), target_resource, template_id?, " +
+      "proposed_values?, status? (pending|done; marca 'done' lo ya hecho), depends_on? (ids de pasos " +
+      "previos requeridos), source_fragment? }, y opcional patient_id/consultation_id. La plataforma " +
+      "valida cada paso contra el catálogo + permisos (sin permiso/recurso desconocido = bloqueado con " +
+      "motivo), descarta campos fuera del esquema, marca los requeridos que falten, respeta las " +
+      "dependencias y resuelve cuál es el PASO ACTUAL. NO guarda nada: el médico revisa el plan y tú " +
+      "avanzas UN paso a la vez con la tool de escritura de ese paso (cada uno requiere aprobación P1, " +
+      "nunca en lote ni salteando el orden). Solo lectura.",
+    kind: "read",
+    inputSchema: PASSTHROUGH_SCHEMA,
+    wireSchema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Título del asistente (opcional)." },
+        patient_id: { type: "string", description: "Paciente del flujo (opcional)." },
+        consultation_id: { type: "string", description: "Consulta del flujo (opcional)." },
+        confirm_label: { type: "string", description: "Etiqueta del botón de avance." },
+        confirm_prompt: { type: "string", description: "Encabezado del mensaje de avance." },
+        steps: {
+          type: "array",
+          description: "Pasos ordenados del asistente.",
+          items: {
+            type: "object",
+            properties: {
+              id: { type: "string", description: "Id estable del paso." },
+              title: { type: "string", description: "Título legible del paso." },
+              type: {
+                type: "string",
+                description: "Tipo de acción (create_*, open_template:<id>, ...).",
+              },
+              target_resource: { type: "string", description: "Recurso destino del paso." },
+              template_id: { type: "string", description: "Id de plantilla (si aplica)." },
+              proposed_values: {
+                type: "object",
+                description: "Valores propuestos por campo.",
+                additionalProperties: true,
+              },
+              status: {
+                type: "string",
+                description: "Estado propuesto (pending por defecto; done si ya se completó).",
+                enum: ["pending", "done"],
+              },
+              depends_on: {
+                type: "array",
+                description: "Ids de pasos previos que deben completarse antes.",
+                items: { type: "string" },
+              },
+              source_fragment: { type: "string", description: "Fragmento de origen." },
+            },
+            required: ["id", "target_resource"],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ["steps"],
+      additionalProperties: false,
+    },
+    execute: async (args, ctx) => {
+      const catalog = await ctx.api<readonly CatalogResourceLike[]>(`/api/v1/resources`);
+      const result = buildWizardPlan(args as unknown as WizardInput, reviewContextFromCatalog(catalog));
+      if (!result.ok) {
+        throw new ToolExecutionError("invalid_wizard", result.error);
+      }
+      const spec: WizardSpec = {
+        kind: "wizard",
+        plan: result.plan,
+        confirm_label:
+          typeof args.confirm_label === "string" ? args.confirm_label : "Continuar con el paso actual",
+        confirm_prompt:
+          typeof args.confirm_prompt === "string" ? args.confirm_prompt : "Asistente guiado:",
       };
       if (typeof args.title === "string") spec.title = args.title;
       return spec;

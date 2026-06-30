@@ -171,7 +171,7 @@ export const AGENDA_STATUS: Record<string, { label: string; tone: AgendaStatusTo
   no_show: { label: "No asistió", tone: "danger" },
 };
 
-/** Una cita ya proyectada para la agenda; ``dateIso`` es su día civil en la zona (clave de celda). */
+/** Una cita ya proyectada para la agenda; ``dateIso`` es su día civil (clave de celda). */
 export interface AgendaAppointment {
   id: string;
   patientId: string | null;
@@ -182,7 +182,9 @@ export interface AgendaAppointment {
   statusLabel: string;
   statusTone: AgendaStatusTone;
   durationMinutes: number | null;
-  scheduledAt: string;
+  /** Hora civil "HH:MM" si la cita se agendó con hora concreta; ``null`` si sólo por día. */
+  timeHM: string | null;
+  /** Día civil de la cita (``scheduled_date``), clave de celda. */
   dateIso: string;
 }
 
@@ -225,24 +227,32 @@ function labelFor(patientId: string | null, labels: PatientLabelMap): string {
   return PATIENT_FALLBACK;
 }
 
+/** Hora civil "HH:MM" desde un valor ``time`` ("HH:MM[:SS]"); ``null`` si falta o no es válida. */
+function timeOfDayHM(value: unknown): string | null {
+  const raw = typeof value === "string" ? value : "";
+  const match = /^(\d{2}):(\d{2})/.exec(raw);
+  return match ? `${match[1]}:${match[2]}` : null;
+}
+
 /** Proyecta una fila del contrato a una cita de agenda; ``null`` si no tiene fecha válida. */
 export function toAgendaAppointment(
   row: ResourceRow,
   labels: PatientLabelMap,
-  timeZone: string,
 ): AgendaAppointment | null {
-  const scheduledAt = str(row.scheduled_at);
-  const dateIso = civilDateOf(scheduledAt, timeZone);
-  if (!dateIso) {
+  // ``scheduled_date`` ya es una fecha civil (sin zona): se usa directamente como clave de día.
+  const parsed = parseCivilDate(str(row.scheduled_date));
+  if (!parsed) {
     return null;
   }
+  const dateIso = formatCivilDate(parsed);
+  const timeHM = timeOfDayHM(row.scheduled_time);
   const patientId = strOrNull(row.patient_id);
   const patientLabel = labelFor(patientId, labels);
   const statusKey = str(row.status);
   const meta = AGENDA_STATUS[statusKey];
   const duration = typeof row.duration_minutes === "number" ? row.duration_minutes : null;
   return {
-    id: str(row.id) || scheduledAt,
+    id: str(row.id) || `${dateIso}${timeHM ? `T${timeHM}` : ""}`,
     patientId,
     patientLabel,
     initial: patientLabel.charAt(0).toUpperCase() || "?",
@@ -251,25 +261,30 @@ export function toAgendaAppointment(
     statusLabel: meta?.label ?? (statusKey || "—"),
     statusTone: meta?.tone ?? "default",
     durationMinutes: duration,
-    scheduledAt,
+    timeHM,
     dateIso,
   };
 }
 
-/** Proyecta y ordena por hora todas las filas; descarta las que no tienen fecha válida. */
+/** Proyecta y ordena todas las filas (por día y hora; las sin hora al final del día). */
 export function toAgendaAppointments(
   rows: readonly ResourceRow[],
   labels: PatientLabelMap,
-  timeZone: string,
 ): AgendaAppointment[] {
   const items: AgendaAppointment[] = [];
   for (const row of rows) {
-    const item = toAgendaAppointment(row, labels, timeZone);
+    const item = toAgendaAppointment(row, labels);
     if (item) {
       items.push(item);
     }
   }
-  items.sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt));
+  items.sort((a, b) => {
+    if (a.dateIso !== b.dateIso) {
+      return a.dateIso.localeCompare(b.dateIso);
+    }
+    // Citas con hora primero (ascendente); las sin hora ("acude dentro del horario") al final.
+    return (a.timeHM ?? "99:99").localeCompare(b.timeHM ?? "99:99");
+  });
   return items;
 }
 

@@ -25,7 +25,7 @@ import {
 
 // Data layer SERVER-ONLY de la agenda en calendario (MP-CTRL-0135). COMPONE lecturas YA existentes del
 // contrato: cita por rango de calendario sobre el recurso ``appointments`` (operadores on/before/
-// after/between que el propio contrato publica para ``scheduled_at``) + el mapa id->nombre de
+// after/between que el propio contrato publica para ``scheduled_date``) + el mapa id->nombre de
 // pacientes (misma vía que el dashboard 0124). Deriva el rango visible del modo + ancla, hace UNA sola
 // consulta de citas en ese rango y devuelve las filas crudas; el reparto en celdas y los contadores
 // los hace el módulo PURO (calendar-range.ts) sobre el MISMO conjunto. Sólo lectura: nunca escribe.
@@ -72,13 +72,13 @@ function emptyData(mode: AgendaMode, anchor: CivilDate): AgendaData {
   };
 }
 
-/** Operadores de calendario de ``scheduled_at`` publicados por el contrato (o null si no existe). */
+/** Operadores de calendario de ``scheduled_date`` publicados por el contrato (o null si no existe). */
 function scheduledOperators(controls: FilterableControls): readonly FilterableOperatorControl[] | null {
-  const field = controls.ordered.find((entry) => entry.key === "scheduled_at");
+  const field = controls.ordered.find((entry) => entry.key === "scheduled_date");
   return field ? field.operators : null;
 }
 
-/** Zona del consultorio tomada de cualquier operador de calendario de ``scheduled_at``. */
+/** Zona del consultorio tomada de cualquier operador de calendario de ``scheduled_date``. */
 function resolveTimeZone(operators: readonly FilterableOperatorControl[] | null): string {
   if (!operators) {
     return FALLBACK_TZ;
@@ -160,7 +160,7 @@ export async function getAgendaData(mode: AgendaMode, rawAnchor?: string): Promi
   const range = computeRange(mode, anchor);
 
   const synthetic: Record<string, string> = {
-    sort: "scheduled_at",
+    sort: "scheduled_date",
     limit: String(RANGE_LIMIT),
     ...rangeFilterParams(operators, mode, range),
   };

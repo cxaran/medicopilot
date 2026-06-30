@@ -7,7 +7,7 @@ pueda actuar. No persiste nada ni muta el expediente.
 """
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime, time
 from typing import Literal, Optional
 
 from pydantic import Field
@@ -39,7 +39,10 @@ class MissedAppointmentRead(ApiReadSchema):
     patient_id: uuid.UUID
     patient_label: Optional[str] = Field(default=None)
     doctor_id: uuid.UUID
-    scheduled_at: datetime
+    scheduled_date: date
+    scheduled_time: Optional[time] = Field(
+        default=None, description="Hora de la cita, si se había fijado una concreta."
+    )
     status: Literal["no_show", "cancelled"]
     reason: str
 

@@ -80,7 +80,7 @@ export default async function AgendaPage({ searchParams }: PageProps) {
   const mode = parseMode(single(params.mode));
 
   const data = await getAgendaData(mode, single(params.anchor));
-  const appointments = toAgendaAppointments(data.rows, data.labels, data.timeZone);
+  const appointments = toAgendaAppointments(data.rows, data.labels);
   const stats = deriveStats(appointments);
 
   const statCards: AgendaStatCard[] = [

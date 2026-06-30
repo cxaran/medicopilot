@@ -28,8 +28,8 @@ const SUMMARY = {
   missed_appointments: [
     { appointment_id: "33333333-3333-3333-3333-333333333333",
       patient_id: "22222222-2222-2222-2222-222222222222", patient_label: "Juan Pérez",
-      doctor_id: "44444444-4444-4444-4444-444444444444", scheduled_at: "2026-06-25T09:00:00",
-      status: "no_show", reason: "Control" },
+      doctor_id: "44444444-4444-4444-4444-444444444444", scheduled_date: "2026-06-25",
+      scheduled_time: "09:00:00", status: "no_show", reason: "Control" },
   ],
   unreviewed_abnormal_labs_count: 1,
   unreviewed_abnormal_labs: [

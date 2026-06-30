@@ -1,9 +1,10 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime, time
 from typing import Optional
 
 from sqlalchemy import (
     CheckConstraint,
+    Date,
     DDL,
     DateTime,
     Enum as SAEnum,
@@ -11,6 +12,7 @@ from sqlalchemy import (
     Index,
     Integer,
     Text,
+    Time,
     event,
     func,
 )
@@ -48,15 +50,26 @@ class Appointment(Base):
         nullable=False,
         comment="Médico asignado a la cita.",
     )
-    scheduled_at: Mapped[datetime] = mapped_column(
-        DateTime,
+    scheduled_date: Mapped[date] = mapped_column(
+        Date,
         nullable=False,
-        comment="Fecha y hora programada de la cita.",
+        comment="Fecha programada de la cita (obligatoria).",
     )
-    duration_minutes: Mapped[int] = mapped_column(
+    scheduled_time: Mapped[Optional[time]] = mapped_column(
+        Time,
+        nullable=True,
+        comment=(
+            "Hora programada de la cita. Puede omitirse cuando el paciente acudirá "
+            "dentro del horario de consulta sin una hora concreta."
+        ),
+    )
+    duration_minutes: Mapped[Optional[int]] = mapped_column(
         Integer,
-        nullable=False,
-        comment="Duración estimada de la cita en minutos (entre 5 y 480).",
+        nullable=True,
+        comment=(
+            "Duración estimada de la cita en minutos (entre 5 y 480). Sólo aplica "
+            "cuando hay hora concreta; nula para citas sin hora."
+        ),
     )
     reason: Mapped[str] = mapped_column(
         Text, nullable=False, comment="Motivo de la cita."
@@ -144,7 +157,7 @@ class Appointment(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "duration_minutes >= 5 AND duration_minutes <= 480",
+            "duration_minutes IS NULL OR (duration_minutes >= 5 AND duration_minutes <= 480)",
             name="duration_minutes_range",
         ),
         CheckConstraint("length(trim(reason)) > 0", name="reason_not_blank"),
@@ -155,18 +168,21 @@ class Appointment(Base):
         Index("ix_appointments_patient", "patient_id"),
         Index("ix_appointments_doctor", "doctor_id"),
         Index("ix_appointments_status", "status"),
-        Index("ix_appointments_scheduled_at", "scheduled_at"),
+        Index("ix_appointments_scheduled_date", "scheduled_date"),
+        Index("ix_appointments_doctor_date", "doctor_id", "scheduled_date"),
         Index("ix_appointments_rescheduled_from", "rescheduled_from_id"),
     )
 
 
 # La agenda sin traslapes se garantiza con una restricción de exclusión GiST: dos
-# citas activas (pending/confirmed, no eliminadas) del mismo médico no pueden
-# solaparse en el tiempo. Se aplica vía DDL sólo en PostgreSQL (SQLite no soporta
-# EXCLUDE/GiST y los tests no-PG crean el esquema sobre SQLite). El rango usa
-# ``tsrange`` —no ``tstzrange``— porque el dominio usa ``DateTime`` sin zona y
-# ``utc_now()`` devuelve naive; ``tstzrange`` introduciría casts dependientes de la
-# zona de sesión. La aplicación traduce la violación al conflicto estándar (409).
+# citas activas (pending/confirmed, no eliminadas) del mismo médico CON HORA CONCRETA no
+# pueden solaparse. Las citas SIN hora (``scheduled_time`` nulo) NO reservan un intervalo
+# —el paciente acude dentro del horario de consulta— y por eso quedan FUERA de la
+# restricción (varias el mismo día son normales). El instante de inicio se compone como
+# ``scheduled_date + scheduled_time`` (date + time = timestamp en PostgreSQL). Se aplica
+# vía DDL sólo en PostgreSQL (SQLite no soporta EXCLUDE/GiST y los tests no-PG crean el
+# esquema sobre SQLite). El rango usa ``tsrange`` (timestamps naive, sin zona). La
+# aplicación traduce la violación al conflicto estándar (409).
 EXCLUDE_NO_OVERLAP = "excl_appointments_doctor_no_overlap"
 
 event.listen(
@@ -181,7 +197,13 @@ event.listen(
         f"ALTER TABLE appointments ADD CONSTRAINT {EXCLUDE_NO_OVERLAP} "
         "EXCLUDE USING gist ("
         "doctor_id WITH =, "
-        "tsrange(scheduled_at, scheduled_at + make_interval(mins => duration_minutes), '[)') WITH &&"
-        ") WHERE (status IN ('pending', 'confirmed') AND deleted_at IS NULL)"
+        "tsrange("
+        "(scheduled_date + scheduled_time), "
+        "(scheduled_date + scheduled_time) + make_interval(mins => duration_minutes), "
+        "'[)') WITH &&"
+        ") WHERE ("
+        "status IN ('pending', 'confirmed') AND deleted_at IS NULL "
+        "AND scheduled_time IS NOT NULL AND duration_minutes IS NOT NULL"
+        ")"
     ).execute_if(dialect="postgresql"),
 )

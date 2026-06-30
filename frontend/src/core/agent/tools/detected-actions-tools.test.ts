@@ -30,7 +30,7 @@ const CTX: ReviewContext = reviewContextFromCatalog([
     name: "patients",
     forms: { create: { fields: [{ name: "full_name" }, { name: "birth_date" }, { name: "phone" }] } },
   },
-  { name: "appointments", forms: { create: { fields: [{ name: "scheduled_at" }, { name: "reason" }] } } },
+  { name: "appointments", forms: { create: { fields: [{ name: "scheduled_date" }, { name: "reason" }] } } },
   { name: "consultations", forms: { create: null } },
 ]);
 

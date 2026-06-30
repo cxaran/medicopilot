@@ -1,7 +1,7 @@
 from typing import Any, NoReturn
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import Select
+from sqlalchemy import Date, DateTime, Select
 from sqlalchemy.orm.attributes import InstrumentedAttribute
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -141,6 +141,18 @@ def _apply_text_match(
     return stmt.where(column.ilike(pattern, escape="\\"))
 
 
+def _is_date_column(column: QueryableColumn) -> bool:
+    """``True`` si la columna es ``Date`` puro (no ``DateTime``).
+
+    Una columna ``date`` almacena una fecha civil sin zona; los operadores de calendario
+    se compilan comparando la fecha DIRECTAMENTE (sin límites de día por zona horaria, que
+    desfasarían el extremo en zonas ≠ UTC). Las columnas ``datetime`` siguen usando los
+    límites de día en la zona de aplicación.
+    """
+    col_type = getattr(column, "type", None)
+    return isinstance(col_type, Date) and not isinstance(col_type, DateTime)
+
+
 def _apply_calendar_single(
     stmt: Select[Any],
     query: OffsetQuerySchema,
@@ -152,6 +164,13 @@ def _apply_calendar_single(
     value = getattr(query, descriptor.parameter_name)
     if value is None:
         return stmt
+    if _is_date_column(column):
+        # Comparación directa de fecha civil (el valor del parámetro ya es ``date``).
+        if descriptor.operator is Operator.ON:
+            return stmt.where(column == value)
+        if descriptor.operator is Operator.BEFORE:
+            return stmt.where(column < value)
+        return stmt.where(column > value)  # AFTER
     if descriptor.operator is Operator.ON:
         return stmt.where(column >= day_start_utc(value, tz)).where(
             column < next_day_start_utc(value, tz)
@@ -175,6 +194,13 @@ def _apply_calendar_between(
     assert descriptor.to_parameter is not None
     from_value = getattr(query, descriptor.from_parameter)
     to_value = getattr(query, descriptor.to_parameter)
+    if _is_date_column(column):
+        # Fecha civil: ``from`` y ``to`` inclusivos, comparados directamente.
+        if from_value is not None:
+            stmt = stmt.where(column >= from_value)
+        if to_value is not None:
+            stmt = stmt.where(column <= to_value)
+        return stmt
     if from_value is not None:
         stmt = stmt.where(column >= day_start_utc(from_value, tz))
     if to_value is not None:

@@ -9,7 +9,7 @@ import {
   isLocalTranscriptionSupported,
   localTranscriptionEnabled,
 } from "./support";
-import { resolveAudioTranscript } from "./transcribe";
+import { LOCAL_PRIVACY_NOTE, resolveAudioTranscript } from "./transcribe";
 import type { TranscriptionOutcome, TranscriptionProgress, WhisperModel } from "./types";
 
 /** Mínimo contrato del contexto de la tool (evita acoplar con todo ToolContext). */
@@ -62,6 +62,53 @@ export async function runAudioTranscript(
       return result;
     },
   });
+}
+
+/**
+ * Transcribe una GRABACIÓN EN VIVO (Blob del micrófono) LOCALMENTE en el navegador.
+ *
+ * A diferencia de ``runAudioTranscript``, NO hay respaldo de servidor: una grabación en vivo no es
+ * un documento subido, así que enviarla a un proveedor STT violaría la confidencialidad del PHI.
+ * Si el navegador no soporta el modo local, devuelve ``available=false`` con una nota clara (nunca
+ * fabrica texto). El Blob se expone vía un object URL efímero que se revoca al terminar.
+ */
+export async function runRecordingTranscript(
+  blob: Blob,
+  options: RunAudioTranscriptOptions = {},
+): Promise<TranscriptionOutcome> {
+  const model = options.model ?? defaultWhisperModel();
+  if (!localTranscriptionEnabled() || !isLocalTranscriptionSupported()) {
+    return {
+      available: false,
+      transcript: null,
+      source: null,
+      model: null,
+      provider: null,
+      notes:
+        "La transcripción local no está disponible en este navegador y una grabación en vivo no " +
+        "se envía a ningún servidor. Usa un navegador con soporte o sube el audio como documento.",
+    };
+  }
+  const { transcribeLocally } = await import("./local-transcriber");
+  const objectUrl = URL.createObjectURL(blob);
+  try {
+    const text = await transcribeLocally({
+      audioUrl: objectUrl,
+      model,
+      language: WHISPER_LANGUAGE,
+      onProgress: options.onProgress,
+    });
+    return {
+      available: true,
+      transcript: text,
+      source: "browser-local",
+      model,
+      provider: null,
+      notes: LOCAL_PRIVACY_NOTE,
+    };
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
 }
 
 /** Precarga el modelo Whisper en el dispositivo (caché de IndexedDB) para que la primera

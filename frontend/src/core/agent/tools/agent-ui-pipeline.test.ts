@@ -37,7 +37,14 @@ const SHARED_CATALOG = [
     },
   },
   { name: "clinical_notes", forms: { create: { fields: [{ name: "content", required: true }] } } },
-  { name: "patients", forms: { create: { fields: [{ name: "full_name", required: true }] } } },
+  // patients: creable Y editable (forms.update presente) → habilita la comparación de actualización (0137).
+  {
+    name: "patients",
+    forms: {
+      create: { fields: [{ name: "full_name", required: true }] },
+      update: { fields: [{ name: "full_name" }, { name: "birth_date" }] },
+    },
+  },
   { name: "prescriptions", forms: { create: null } },
 ];
 
@@ -200,6 +207,9 @@ test("pipeline agente-UI: todas las kinds de UiSpec generadas pasan el reconoced
     { name: "ui.review_task_plan", args: { tasks: [{ id: "t1", confidence: 0.9, proposed_values: { title: "X" } }] }, kind: "task_plan" },
     { name: "ui.review_close_checklist", args: { items: [{ id: "i1", label: "X" }] }, kind: "close_checklist" },
     { name: "ui.propose_template_promotion", args: { spec: { widgets: [{ type: "text", name: "x", label: "X" }] } }, kind: "template_promotion_proposal" },
+    { name: "ui.review_record_update", args: { target_resource: "patients", resource_id: "p1", current_values: { full_name: "A" }, proposed_values: { full_name: "B" } }, kind: "record_update" },
+    { name: "ui.open_record", args: { patient_id: "p1", patient_label: "Juan López" }, kind: "open_record" },
+    { name: "ui.review_wizard", args: { steps: [{ id: "s1", title: "Registrar paciente", target_resource: "patients", proposed_values: { full_name: "Juan" } }] }, kind: "wizard" },
   ];
   for (const c of cases) {
     const result = await executeTool(tool(c.name), c.args, ctx);

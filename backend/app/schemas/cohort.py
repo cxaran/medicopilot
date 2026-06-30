@@ -15,7 +15,7 @@ Criterios soportados en la fase 1 (todos opcionales, combinados con AND):
 - ``age_range``: edad mínima y/o máxima (años cumplidos) calculada desde la fecha
   de nacimiento.
 - ``appointment_no_show``: tuvo una cita marcada como inasistencia (``no_show``)
-  dentro de una ventana de fechas opcional sobre ``scheduled_at``.
+  dentro de una ventana de fechas opcional sobre ``scheduled_date``.
 """
 
 from datetime import date
@@ -137,7 +137,7 @@ class AgeRangeCriterion(ApiWriteSchema):
 class AppointmentNoShowCriterion(ApiWriteSchema):
     """Tuvo una cita marcada como inasistencia (``no_show``).
 
-    La ventana de fechas, opcional, se aplica sobre ``scheduled_at`` de forma
+    La ventana de fechas, opcional, se aplica sobre ``scheduled_date`` de forma
     inclusiva.
     """
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Badge, type BadgeTone } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -40,6 +40,7 @@ import {
   COPILOT_TRANSCRIPT_LABEL,
   approvalRegionProps,
 } from "@/components/copilot/a11y";
+import { CopilotDictation } from "@/components/copilot/CopilotDictation";
 import { executeTool, resolveToolCall } from "@/core/agent/tools/tool-runner";
 import {
   listTools,
@@ -249,6 +250,12 @@ export function CopilotPanel({
   const [toolCalls, setToolCalls] = useState<ToolCallView[]>([]);
   const [input, setInput] = useState("");
   const [attachedImage, setAttachedImage] = useState<AttachedImage | null>(null);
+  // Dictado continuo (envío por fragmentos): cola (ref) de fragmentos transcritos pendientes de
+  // mandar al copiloto. Se vacían cuando el copiloto está libre (un turno por descarga; si varios
+  // se acumularon mientras procesaba, se unen para no encolar de más). El cuadro de mensaje queda
+  // libre para que el médico escriba su propia respuesta mientras se sigue grabando.
+  const dictationQueueRef = useRef<string[]>([]);
+  const sendUserTurnRef = useRef<(text: string) => void>(() => {});
 
   // Gating por rol (tool-hardening): recursos en los que el médico puede crear (del catálogo
   // permission-projected). Las escrituras se filtran ANTES de declararlas al modelo. Vacío
@@ -894,6 +901,37 @@ export function CopilotPanel({
     clearAttachedImage();
   };
 
+  // Mantiene fresca la vía de envío para la cola del dictado (sendUserTurn cambia cada render).
+  useEffect(() => {
+    sendUserTurnRef.current = (text: string): void => {
+      void sendUserTurn(text);
+    };
+  });
+
+  // Vacía la cola del dictado continuo cuando el copiloto está libre: une los fragmentos
+  // pendientes en un solo turno (evita backlog) y los manda. Se reintenta al cambiar el estado
+  // (p. ej. cuando un turno termina) y al encolar un fragmento nuevo.
+  const flushDictation = useCallback(() => {
+    if (dictationQueueRef.current.length === 0 || status !== "connected" || isBusy) {
+      return;
+    }
+    const joined = dictationQueueRef.current.join("\n");
+    dictationQueueRef.current = [];
+    sendUserTurnRef.current(joined);
+  }, [status, isBusy]);
+
+  useEffect(() => {
+    flushDictation();
+  }, [flushDictation]);
+
+  const enqueueDictationSegment = useCallback(
+    (text: string) => {
+      dictationQueueRef.current = [...dictationQueueRef.current, text];
+      flushDictation();
+    },
+    [flushDictation],
+  );
+
   // Seguimiento desde una UI generada (submit de form / clic de botón): continúa la
   // conversación con el modelo. Respeta el principio borrador: si el modelo decide una
   // acción de escritura clínica, pasa por la aprobación de B8.
@@ -1148,6 +1186,7 @@ export function CopilotPanel({
               onApprove={() => approveWrite(call.callId)}
               onReject={() => rejectWrite(call.callId)}
               onSendFollowup={handleSendFollowup}
+              onOpenRecord={setActiveContext}
             />
           ))}
 
@@ -1183,6 +1222,16 @@ export function CopilotPanel({
               </button>
             </div>
           )}
+
+          {/* Dictado: graba la consulta y la transcribe LOCALMENTE (el audio no sale del
+              dispositivo); el borrador se inserta en el mensaje del copiloto. */}
+          <CopilotDictation
+            disabled={status !== "connected"}
+            onTranscript={(text) =>
+              setInput((prev) => (prev.trim() ? `${prev.trimEnd()}\n${text}` : text))
+            }
+            onSegment={enqueueDictationSegment}
+          />
 
           <div className="flex items-end gap-2">
             <input
@@ -1462,11 +1511,14 @@ function ToolCallCard({
   onApprove,
   onReject,
   onSendFollowup,
+  onOpenRecord,
 }: Readonly<{
   call: ToolCallView;
   onApprove: () => void;
   onReject: () => void;
   onSendFollowup: (text: string) => void;
+  // Apertura GOBERNADA del expediente (MP-CTRL-0138): cambia el contexto activo del shell.
+  onOpenRecord?: (context: ActiveClinicalContext) => void;
 }>) {
   const meta = TOOL_STATUS[call.status];
   const uiSpec: UiSpec | null =
@@ -1553,7 +1605,7 @@ function ToolCallCard({
 
       {uiSpec && (
         <div className="mt-2 rounded-[8px] bg-[var(--panel2)] p-3">
-          <GeneratedUi spec={uiSpec} onSendFollowup={onSendFollowup} />
+          <GeneratedUi spec={uiSpec} onSendFollowup={onSendFollowup} onOpenRecord={onOpenRecord} />
         </div>
       )}
 

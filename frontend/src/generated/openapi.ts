@@ -2607,12 +2607,17 @@ export interface components {
              */
             doctor_id: string;
             /**
-             * Fecha y hora
-             * Format: date-time
+             * Fecha
+             * Format: date
              */
-            scheduled_at: string;
+            scheduled_date: string;
+            /**
+             * Hora (opcional)
+             * Format: time
+             */
+            scheduled_time?: string | null;
             /** Duración (min) */
-            duration_minutes: number;
+            duration_minutes?: number | null;
             /** Motivo */
             reason: string;
             /** Notas internas */
@@ -2639,12 +2644,17 @@ export interface components {
              */
             doctor_id: string;
             /**
-             * Programada
-             * Format: date-time
+             * Fecha
+             * Format: date
              */
-            scheduled_at: string;
+            scheduled_date: string;
+            /**
+             * Hora
+             * Format: time
+             */
+            scheduled_time?: string | null;
             /** Duración (min) */
-            duration_minutes: number;
+            duration_minutes?: number | null;
             /** Motivo */
             reason: string;
             /** Estado */
@@ -2668,7 +2678,7 @@ export interface components {
          * AppointmentNoShowCriterion
          * @description Tuvo una cita marcada como inasistencia (``no_show``).
          *
-         *     La ventana de fechas, opcional, se aplica sobre ``scheduled_at`` de forma
+         *     La ventana de fechas, opcional, se aplica sobre ``scheduled_date`` de forma
          *     inclusiva.
          */
         AppointmentNoShowCriterion: {
@@ -2698,12 +2708,17 @@ export interface components {
              */
             doctor_id: string;
             /**
-             * Scheduled At
-             * Format: date-time
+             * Scheduled Date
+             * Format: date
              */
-            scheduled_at: string;
+            scheduled_date: string;
+            /**
+             * Scheduled Time
+             * Format: time
+             */
+            scheduled_time?: string | null;
             /** Duration Minutes */
-            duration_minutes: number;
+            duration_minutes?: number | null;
             /** Reason */
             reason: string;
             /** Internal Notes */
@@ -2724,14 +2739,22 @@ export interface components {
          * @description Cuerpo de la reprogramación.
          *
          *     El paciente se conserva (no se acepta ``patient_id``). ``doctor_id``,
-         *     ``scheduled_at``, ``duration_minutes``, ``reason`` e ``internal_notes`` se heredan
-         *     de la cita original cuando no se envían (semántica de PATCH).
+         *     ``scheduled_date``, ``scheduled_time``, ``duration_minutes``, ``reason`` e
+         *     ``internal_notes`` se heredan de la cita original cuando no se envían (semántica de PATCH).
          */
         AppointmentReschedule: {
             /** Médico */
             doctor_id?: string | null;
-            /** Fecha y hora */
-            scheduled_at?: string | null;
+            /**
+             * Fecha
+             * Format: date
+             */
+            scheduled_date?: string | null;
+            /**
+             * Hora (opcional)
+             * Format: time
+             */
+            scheduled_time?: string | null;
             /** Duración (min) */
             duration_minutes?: number | null;
             /** Motivo */
@@ -2755,8 +2778,16 @@ export interface components {
         AppointmentUpdate: {
             /** Médico */
             doctor_id?: string | null;
-            /** Fecha y hora */
-            scheduled_at?: string | null;
+            /**
+             * Fecha
+             * Format: date
+             */
+            scheduled_date?: string | null;
+            /**
+             * Hora (opcional)
+             * Format: time
+             */
+            scheduled_time?: string | null;
             /** Duración (min) */
             duration_minutes?: number | null;
             /** Motivo */
@@ -5421,10 +5452,16 @@ export interface components {
              */
             doctor_id: string;
             /**
-             * Scheduled At
-             * Format: date-time
+             * Scheduled Date
+             * Format: date
              */
-            scheduled_at: string;
+            scheduled_date: string;
+            /**
+             * Scheduled Time
+             * Format: time
+             * @description Hora de la cita, si se había fijado una concreta.
+             */
+            scheduled_time?: string | null;
             /**
              * Status
              * @enum {string}
@@ -8971,11 +9008,11 @@ export interface operations {
                 doctor_id?: string | null;
                 status?: components["schemas"]["AppointmentStatus"] | null;
                 id_in?: string[] | null;
-                scheduled_at_on?: string | null;
-                scheduled_at_before?: string | null;
-                scheduled_at_after?: string | null;
-                scheduled_at_from?: string | null;
-                scheduled_at_to?: string | null;
+                scheduled_date_on?: string | null;
+                scheduled_date_before?: string | null;
+                scheduled_date_after?: string | null;
+                scheduled_date_from?: string | null;
+                scheduled_date_to?: string | null;
                 q?: string | null;
             };
             header?: never;

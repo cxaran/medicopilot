@@ -20,7 +20,7 @@ Reportes:
                     ventana, opcional por médico.
 """
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Annotated, Optional
 from uuid import UUID
 from zoneinfo import ZoneInfo
@@ -113,10 +113,14 @@ def report_activity(
             Consultation.consulted_at >= low,
             Consultation.consulted_at < high,
         )
+        # Las citas se agendan por FECHA civil (sin hora obligatoria): se cuentan por
+        # ``scheduled_date`` en los límites de mes en fecha civil, recortados al rango pedido.
+        appt_low = max(date(year, month, 1), date_from)
+        appt_high = min(date(year + month // 12, month % 12 + 1, 1), date_to + timedelta(days=1))
         appt_stmt = select(func.count()).select_from(Appointment).where(
             Appointment.deleted_at.is_(None),
-            Appointment.scheduled_at >= low,
-            Appointment.scheduled_at < high,
+            Appointment.scheduled_date >= appt_low,
+            Appointment.scheduled_date < appt_high,
         )
         if doctor_id is not None:
             cons_stmt = cons_stmt.where(Consultation.attending_doctor_id == doctor_id)
@@ -210,15 +214,13 @@ def report_attendance(
     doctor_id: Annotated[Optional[UUID], Query(description="Filtra por médico.")] = None,
 ) -> AttendanceReport:
     _validate_window(date_from, date_to)
-    tz = _app_tz()
-    range_start = day_start_utc(date_from, tz)
-    range_end = next_day_start_utc(date_to, tz)
 
     def _count(outcome: AppointmentStatus) -> int:
+        # Citas por FECHA civil (sin hora obligatoria): ventana inclusiva [date_from, date_to].
         stmt = select(func.count()).select_from(Appointment).where(
             Appointment.deleted_at.is_(None),
-            Appointment.scheduled_at >= range_start,
-            Appointment.scheduled_at < range_end,
+            Appointment.scheduled_date >= date_from,
+            Appointment.scheduled_date <= date_to,
             Appointment.status == outcome,
         )
         if doctor_id is not None:

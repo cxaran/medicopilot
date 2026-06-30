@@ -110,6 +110,13 @@ export function formatTimeHM(iso: string, timeZone: string): string {
   }).format(date);
 }
 
+/** Hora civil "HH:MM" desde un valor ``time`` ("HH:MM[:SS]"); ``null`` si falta o no es válida. */
+export function formatCivilTimeHM(value: unknown): string | null {
+  const raw = typeof value === "string" ? value : "";
+  const match = /^(\d{2}):(\d{2})/.exec(raw);
+  return match ? `${match[1]}:${match[2]}` : null;
+}
+
 /** Fecha corta + hora (p. ej. "12 jun, 14:30") en la zona del consultorio; "" si es inválida. */
 export function formatShortDateTime(iso: string, timeZone: string): string {
   const date = new Date(iso);
@@ -149,7 +156,6 @@ export function buildPatientLabelMap(rows: readonly ResourceRow[]): Map<string, 
 export function toAgendaItems(
   rows: readonly ResourceRow[],
   labels: PatientLabelMap,
-  timeZone: string,
 ): DashboardItem[] {
   return rows.map((row, index) => {
     const patientId = strOrNull(row.patient_id);
@@ -161,7 +167,8 @@ export function toAgendaItems(
       patientLabel: labelFor(patientId, labels),
       primary: labelFor(patientId, labels),
       secondary: str(row.reason) || undefined,
-      meta: formatTimeHM(str(row.scheduled_at), timeZone) || undefined,
+      // La cita puede no tener hora concreta (el paciente acude dentro del horario): "Sin hora".
+      meta: formatCivilTimeHM(row.scheduled_time) ?? "Sin hora",
       badge,
     };
   });

@@ -51,7 +51,7 @@ const RELATION_TARGETS: Readonly<Record<string, Omit<RelationTarget, "field">>> 
   appointment_id: {
     resource: "appointments",
     labelFields: ["reason"],
-    secondaryFields: ["scheduled_at", "status"],
+    secondaryFields: ["scheduled_date", "scheduled_time", "status"],
   },
   prescription_id: {
     resource: "prescriptions",

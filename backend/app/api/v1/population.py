@@ -182,9 +182,13 @@ def _appointment_no_show_exists(
         Appointment.deleted_at.is_(None),
         Appointment.status == AppointmentStatus.NO_SHOW,
     ]
-    clauses += _date_window(
-        Appointment.scheduled_at, criterion.date_from, criterion.date_to, tz
-    )
+    # La cita se agenda por FECHA civil (la hora es opcional): la ventana se aplica sobre
+    # ``scheduled_date`` de forma inclusiva, sin zona horaria (la fecha ya es civil). El
+    # parámetro ``tz`` se conserva por uniformidad con los demás criterios.
+    if criterion.date_from is not None:
+        clauses.append(Appointment.scheduled_date >= criterion.date_from)
+    if criterion.date_to is not None:
+        clauses.append(Appointment.scheduled_date <= criterion.date_to)
     return select(literal(1)).select_from(Appointment).where(*clauses).exists()
 
 

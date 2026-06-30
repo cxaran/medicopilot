@@ -255,7 +255,7 @@ class ReportsRoutesTest(unittest.TestCase):
                     id=uuid.uuid4(),
                     patient_id=self.patient_id,
                     doctor_id=doctor_id,
-                    scheduled_at=scheduled_at,
+                    scheduled_date=scheduled_at.date(),
                     duration_minutes=30,
                     reason="Cita",
                     status=status,

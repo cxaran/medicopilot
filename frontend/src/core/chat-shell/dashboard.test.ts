@@ -40,14 +40,16 @@ test("formatTimeHM / formatShortDateTime: hora y fecha corta en la zona dada (UT
 test("toAgendaItems: nombre + motivo + hora + badge de estado; resuelve etiqueta y fallback", () => {
   const labels = new Map([["p1", "Ana Ruiz"]]);
   const rows: ResourceRow[] = [
-    { id: "a1", patient_id: "p1", reason: "Control HTA", scheduled_at: "2026-06-29T09:05:00Z", status: "confirmed" },
-    { id: "a2", patient_id: "p9", reason: "Primera vez", scheduled_at: "2026-06-29T10:00:00Z", status: "pending" },
+    { id: "a1", patient_id: "p1", reason: "Control HTA", scheduled_date: "2026-06-29", scheduled_time: "09:05:00", status: "confirmed" },
+    { id: "a2", patient_id: "p9", reason: "Primera vez", scheduled_date: "2026-06-29", status: "pending" },
   ];
-  const items = toAgendaItems(rows, labels, "UTC");
+  const items = toAgendaItems(rows, labels);
   assert.equal(items[0].patientId, "p1");
   assert.equal(items[0].primary, "Ana Ruiz");
   assert.equal(items[0].secondary, "Control HTA");
   assert.equal(items[0].meta, "09:05");
+  // a2 no tiene hora concreta -> "Sin hora".
+  assert.equal(items[1].meta, "Sin hora");
   assert.deepEqual(items[0].badge, { label: "Confirmada", tone: "ok" });
   // Paciente fuera del mapa -> etiqueta de respaldo, pero sigue siendo clicable (patientId presente).
   assert.equal(items[1].patientLabel, "Paciente");

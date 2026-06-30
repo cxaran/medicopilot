@@ -88,7 +88,8 @@ function row(over: Partial<ResourceRow>): ResourceRow {
   return {
     id: "a1",
     patient_id: "p1",
-    scheduled_at: "2026-06-24T15:00:00Z",
+    scheduled_date: "2026-06-24",
+    scheduled_time: "15:00:00",
     duration_minutes: 30,
     reason: "Control",
     status: "confirmed",
@@ -103,12 +104,11 @@ test("toAgendaAppointments: resuelve etiqueta, ordena por hora y descarta sin fe
   ]);
   const items = toAgendaAppointments(
     [
-      row({ id: "tarde", patient_id: "p2", scheduled_at: "2026-06-24T18:00:00Z", status: "pending" }),
-      row({ id: "manana", patient_id: "p1", scheduled_at: "2026-06-24T09:00:00Z" }),
-      row({ id: "sin-fecha", scheduled_at: "no-fecha" }),
+      row({ id: "tarde", patient_id: "p2", scheduled_date: "2026-06-24", scheduled_time: "18:00:00", status: "pending" }),
+      row({ id: "manana", patient_id: "p1", scheduled_date: "2026-06-24", scheduled_time: "09:00:00" }),
+      row({ id: "sin-fecha", scheduled_date: "no-fecha" }),
     ],
     labels,
-    "UTC",
   );
   assert.equal(items.length, 2); // descarta la inválida
   assert.deepEqual(
@@ -122,7 +122,7 @@ test("toAgendaAppointments: resuelve etiqueta, ordena por hora y descarta sin fe
 });
 
 test("toAgendaAppointment: sin nombre en el mapa cae a 'Paciente', estado desconocido se muestra tal cual", () => {
-  const [item] = toAgendaAppointments([row({ patient_id: "px", status: "rarisimo" })], new Map(), "UTC");
+  const [item] = toAgendaAppointments([row({ patient_id: "px", status: "rarisimo" })], new Map());
   assert.equal(item.patientLabel, "Paciente");
   assert.equal(item.statusLabel, "rarisimo");
   assert.equal(item.statusTone, "default");
@@ -131,11 +131,10 @@ test("toAgendaAppointment: sin nombre en el mapa cae a 'Paciente', estado descon
 test("bucketDay: sólo las citas de ese día civil", () => {
   const items = toAgendaAppointments(
     [
-      row({ id: "hoy", scheduled_at: "2026-06-24T15:00:00Z" }),
-      row({ id: "otro", scheduled_at: "2026-06-25T15:00:00Z" }),
+      row({ id: "hoy", scheduled_date: "2026-06-24" }),
+      row({ id: "otro", scheduled_date: "2026-06-25" }),
     ],
     new Map(),
-    "UTC",
   );
   const day = bucketDay(items, { year: 2026, month: 6, day: 24 });
   assert.deepEqual(
@@ -147,11 +146,10 @@ test("bucketDay: sólo las citas de ese día civil", () => {
 test("bucketWeek: 7 columnas lun-dom con cada cita en su columna y días vacíos incluidos", () => {
   const items = toAgendaAppointments(
     [
-      row({ id: "lun", scheduled_at: "2026-06-22T15:00:00Z" }),
-      row({ id: "dom", scheduled_at: "2026-06-28T15:00:00Z" }),
+      row({ id: "lun", scheduled_date: "2026-06-22" }),
+      row({ id: "dom", scheduled_date: "2026-06-28" }),
     ],
     new Map(),
-    "UTC",
   );
   const week = bucketWeek(items, { year: 2026, month: 6, day: 24 }, "UTC");
   assert.equal(week.length, 7);
@@ -164,9 +162,8 @@ test("bucketWeek: 7 columnas lun-dom con cada cita en su columna y días vacíos
 
 test("bucketMonth: rejilla de semanas completas con inMonth marcando los días propios", () => {
   const items = toAgendaAppointments(
-    [row({ id: "c1", scheduled_at: "2026-06-15T15:00:00Z" })],
+    [row({ id: "c1", scheduled_date: "2026-06-15" })],
     new Map(),
-    "UTC",
   );
   const weeks = bucketMonth(items, { year: 2026, month: 6, day: 24 }, "UTC");
   // junio 2026 = 5 semanas (1 jun lunes .. 5 jul domingo).
@@ -196,7 +193,6 @@ test("deriveStats: contadores por estado desde el mismo conjunto", () => {
       row({ id: "5", status: "no_show" }),
     ],
     new Map(),
-    "UTC",
   );
   const stats = deriveStats(items);
   assert.equal(stats.total, 5);
