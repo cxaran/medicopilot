@@ -2,6 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { AnimatedOrb } from "@/components/ui/AnimatedOrb";
+import { Markdown } from "@/components/copilot/Markdown";
+import { ProviderIcon } from "@/components/copilot/ProviderIcon";
+import { avatarColor } from "@/components/ui/avatar-color";
 import { Badge, type BadgeTone } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -34,13 +38,15 @@ import type {
   WireProviderStatus,
 } from "@/core/agent/protocol";
 import { turnFailureMessage } from "@/core/agent/turn-error";
+import { loadPreferredModelId, savePreferredModelId } from "@/core/agent/model-preference";
 import {
   APPROVAL_APPROVE_LABEL,
   APPROVAL_REJECT_LABEL,
   COPILOT_TRANSCRIPT_LABEL,
   approvalRegionProps,
 } from "@/components/copilot/a11y";
-import { CopilotDictation } from "@/components/copilot/CopilotDictation";
+import { useCopilotDictation } from "@/core/audio-transcription/use-copilot-dictation";
+import { formatDuration } from "@/core/audio-transcription/recorder";
 import { executeTool, resolveToolCall } from "@/core/agent/tools/tool-runner";
 import {
   listTools,
@@ -60,6 +66,7 @@ import {
   declaredToolNames,
   isMetaTool,
 } from "@/core/agent/tool-discovery";
+import { buildStartSuggestions } from "@/core/agent/start-suggestions";
 import { loadMcpTools } from "@/core/agent/mcp/mcp-tools";
 import { loadPharmacologyTools } from "@/core/agent/pharmacology/pharmacology-tools";
 import {
@@ -110,6 +117,18 @@ import { browserApi } from "@/core/api/browser-client";
 import type { ResourceCatalog } from "@/core/api/contracts";
 import { isUiSpec, type UiSpec } from "@/core/agent/tools/ui-spec";
 import { GeneratedUi } from "@/components/copilot/GeneratedUi";
+import { parseComposerPalette, type ComposerCommand } from "@/core/chat-shell/composer-commands";
+import { useChatNavOptional } from "@/components/chat-shell/ChatNavProvider";
+import { deriveResourceTools } from "@/core/agent/tools/contract-tools";
+
+/** Candidato seguro de la búsqueda de pacientes (proyección de GET /patients/search, 0113). */
+interface PatientSearchCandidate {
+  id: string;
+  full_name: string;
+  age: number;
+  sex: string;
+  phone_masked?: string | null;
+}
 
 /** Imagen adjunta a un mensaje: data URL para previsualizar + base64 puro para el cable. */
 interface AttachedImage {
@@ -123,6 +142,10 @@ export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   text: string;
+  // "note" = nota de CONTEXTO (acción humana inline, p. ej. crear/editar un recurso desde el
+  // expediente). No es un turno: se muestra distinta y entra al contexto del próximo turno. Su rol
+  // de cable es "user" (acción del médico registrada), pero NO dispara una llamada al modelo.
+  kind?: "note";
   image?: AttachedImage;
   isError?: boolean;
   // Resumen de razonamiento del turno (proveedores con thinking). Se muestra colapsado
@@ -153,6 +176,21 @@ const TOOL_STATUS: Record<ToolCallStatus, { label: string; tone: BadgeTone }> = 
   error: { label: "Error", tone: "danger" },
   rejected: { label: "Rechazada", tone: "neutral" },
 };
+
+// Sugerencias de inicio del chat (pills, fiel a las del diseño). Sólo se muestran con el chat vacío
+// y rellenan el composer para que el médico las revise/edite antes de enviar (no se autoenvían).
+const PATIENT_SUGGESTIONS: readonly string[] = [
+  "¿Tiene alergias registradas?",
+  "Dame un resumen del paciente",
+  "¿Qué medicación toma actualmente?",
+  "¿Cuáles son sus últimos signos vitales?",
+];
+const GLOBAL_SUGGESTIONS: readonly string[] = [
+  "¿Cómo van las consultas de esta semana?",
+  "Muéstrame una gráfica de la actividad reciente",
+  "Pacientes con alergias registradas",
+  "¿Qué tengo en la agenda de hoy?",
+];
 
 function previewContent(value: unknown): string {
   let text: string;
@@ -213,6 +251,7 @@ export function CopilotPanel({
   activeContext: controlledContext,
   onActiveContextChange,
   hideContextPicker = false,
+  embedded = false,
   initialMessages,
   onMessagesChange,
 }: Readonly<{
@@ -222,6 +261,11 @@ export function CopilotPanel({
   onActiveContextChange?: (context: ActiveClinicalContext | null) => void;
   // Oculta el selector interno cuando el host ya ofrece la selección de paciente (evita duplicarlo).
   hideContextPicker?: boolean;
+  // Modo EMBEBIDO (shell chat-first, fiel a MediCopilot.dc.html): chat LIMPIO sin cromo inline
+  // (encabezado, banner de borrador, panel de herramientas, barra de costo, borde de tarjeta). Esas
+  // garantías/herramientas/costo se mueven a un MODAL accesible desde el botón de escudo del composer.
+  // Sin ``embedded`` (ruta /copilot independiente) se conserva el cromo completo de siempre.
+  embedded?: boolean;
   // PERSISTENCIA DEL HILO (MP-CTRL-0123): historial inicial con el que SEMBRAR el transcript al
   // abrir un chat (mensajes ya persistidos del backend). El host remonta el panel con ``key`` por
   // conversación, así el sembrado se reaplica al cambiar de chat. Si se omite, arranca vacío.
@@ -238,6 +282,20 @@ export function CopilotPanel({
   const [models, setModels] = useState<WireModel[]>([]);
   const [providers, setProviders] = useState<WireProviderStatus[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>("");
+  // Popup inline del selector de modelo dentro del composer (A9 del rediseño): el modelo deja de
+  // ocupar una tarjeta voluminosa arriba y se elige desde un botón compacto en la barra del composer.
+  const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  // Modal de "Garantías del copiloto" (modo embebido): aloja el aviso de borrador, el catálogo de
+  // herramientas y el uso/costo, fuera del flujo del chat (botón de escudo en el composer).
+  const [safetyOpen, setSafetyOpen] = useState(false);
+  // Paletas "/" del composer (D1): resultados de la búsqueda de pacientes ("/paciente <texto>").
+  const [patientResults, setPatientResults] = useState<PatientSearchCandidate[]>([]);
+  const [patientSearchLoading, setPatientSearchLoading] = useState(false);
+  // Notas de contexto (acciones humanas inline del expediente): se consumen del shell y se añaden
+  // al hilo SIN disparar un turno. ``lastNoteIdRef`` marca hasta dónde ya se consumió.
+  const chatNav = useChatNavOptional();
+  const contextNotes = chatNav?.contextNotes ?? null;
+  const lastNoteIdRef = useRef(0);
   // Esfuerzo de razonamiento NORMALIZADO por turno (P5). Solo se ofrece/envía cuando el modelo
   // negociado soporta el control; default "medium" (se omite en modelos sin razonamiento).
   const [reasoningEffort, setReasoningEffort] = useState<NormalizedReasoningEffort>("medium");
@@ -262,6 +320,11 @@ export function CopilotPanel({
   // por defecto: hasta cargar el catálogo no se ofrece ninguna escritura (defensa en
   // profundidad; FastAPI revalida igual). ``toolCatalog`` es la vista de procedencia/auditoría.
   const [toolCatalog, setToolCatalog] = useState<ToolCatalogEntry[]>([]);
+  // Sugerencias de inicio DERIVADAS de las tools disponibles (RBAC) + muestreo aleatorio. Se
+  // recalculan solo con el chat vacío (al abrir/cambiar de chat o al cargar el catálogo); si aún
+  // no hay catálogo o ninguna elegible, caen a la lista fija. Math.random vive en un efecto
+  // (cliente) para no romper la hidratación de SSR.
+  const [startSuggestions, setStartSuggestions] = useState<string[]>([]);
   const creatableRef = useRef<Set<string>>(new Set());
   // Descubrimiento a escala (tool_search/tool_describe): nombres de tools CARGADAS bajo demanda
   // en este hilo. Se suman al set declarado en los turnos siguientes (el set por turno se
@@ -273,6 +336,10 @@ export function CopilotPanel({
   // closures de los handlers del turno (deps vacías).
   const [mcpTools, setMcpTools] = useState<ToolDefinition[]>([]);
   const mcpToolsRef = useRef<ToolDefinition[]>([]);
+  // Tools DERIVADAS DEL CONTRATO (F6): se generan del catálogo /resources al cargarlo, con
+  // precedencia de las hand-written. Se incluyen en la declaración al modelo, el descubrimiento y la
+  // resolución al ejecutar. Backend cambia → próxima carga → tools nuevas, sin tocar el front.
+  const derivedToolsRef = useRef<ToolDefinition[]>([]);
 
   // RECALL (P2): nº de memorias del médico inyectadas en el último turno, para el indicador
   // de contexto. ``null`` = aún no hay turno con recall. Las memorias viajan como contexto NO
@@ -368,10 +435,50 @@ export function CopilotPanel({
     onMessagesChange?.(messages);
   }, [messages, onMessagesChange]);
 
+  // Consume las notas de contexto pendientes (acciones humanas inline) y las añade al hilo SIN
+  // disparar un turno: se muestran, se persisten y entran al contexto del próximo turno. El append
+  // ocurre en un microtimeout (no setState síncrono en el efecto) y avanza la marca recién al
+  // aplicarse, para ser idempotente bajo StrictMode (doble invocación de efectos en dev).
+  useEffect(() => {
+    if (!contextNotes || contextNotes.length === 0) {
+      return;
+    }
+    const fresh = contextNotes.filter((note) => note.id > lastNoteIdRef.current);
+    if (fresh.length === 0) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      lastNoteIdRef.current = fresh[fresh.length - 1].id;
+      setMessages((prev) => [
+        ...prev,
+        ...fresh.map((note) => ({
+          id: nextId(),
+          role: "user" as const,
+          kind: "note" as const,
+          text: note.text,
+        })),
+      ]);
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [contextNotes]);
+
   // Mantiene el ref del contexto activo en sincronía para los handlers del turno (closures).
   useEffect(() => {
     activeContextRef.current = activeContext;
   }, [activeContext]);
+
+  // Muestrea las sugerencias de inicio cuando el chat está vacío (al abrir/cambiar de chat o al
+  // cargar el catálogo de tools). Derivadas de las tools disponibles para el rol; si aún no hay
+  // catálogo o ninguna elegible, cae a la lista fija. Solo con el chat vacío para no re-mezclar
+  // mientras se conversa.
+  useEffect(() => {
+    if (messages.length > 0) return;
+    const ctx = activeContext ? "patient" : "global";
+    const dynamic = buildStartSuggestions(toolCatalog, ctx, 4);
+    setStartSuggestions(
+      dynamic.length > 0 ? dynamic : [...(activeContext ? PATIENT_SUGGESTIONS : GLOBAL_SUGGESTIONS)],
+    );
+  }, [toolCatalog, activeContext, messages.length]);
 
   // Espeja las tools MCP en un ref para los handlers del turno (closures con deps vacías).
   useEffect(() => {
@@ -399,7 +506,10 @@ export function CopilotPanel({
         if (!active) return;
         const creatable = creatableResources(catalog);
         creatableRef.current = creatable;
-        const tools = [...listTools(), ...mcpTools];
+        // Deriva las tools genéricas del contrato (precedencia: las hand-written de listTools ganan).
+        const derived = deriveResourceTools(catalog, listTools());
+        derivedToolsRef.current = derived;
+        const tools = [...listTools(), ...derived, ...mcpTools];
         const eff = effectiveTools(tools, creatable);
         setToolCatalog(
           buildToolCatalog(tools, creatable, declaredToolNames(eff, loadedToolsRef.current)),
@@ -408,6 +518,7 @@ export function CopilotPanel({
       .catch(() => {
         if (!active) return;
         creatableRef.current = new Set();
+        derivedToolsRef.current = [];
         const tools = [...listTools(), ...mcpTools];
         const eff = effectiveTools(tools, new Set());
         setToolCatalog(
@@ -524,14 +635,16 @@ export function CopilotPanel({
       toolName: string,
       args: unknown,
     ): void => {
-      // Despacho de tools MCP (rebanada 2): se pasan SÓLO las MCP EFECTIVAS (tras el gating por
-      // rol) como tools extra; una MCP gateada nunca se resuelve -> nunca se ejecuta. Las nativas
-      // se resuelven por el registro (getTool) con prioridad, sin regresión.
-      const mcpEffective = effectiveTools(
-        [...listTools(), ...mcpToolsRef.current],
+      // Despacho de tools NO nativas (derivadas del contrato + MCP): se pasan TODAS las EFECTIVAS
+      // (tras el gating por rol) como tools extra, para que las que el registro estático no conoce
+      // (p. ej. resource.update_*, resource.create_*) sean EJECUTABLES y no devuelvan "Herramienta
+      // desconocida". Una tool gateada nunca está en las efectivas -> nunca se resuelve. Las nativas
+      // las resuelve el registro (getTool) con prioridad, sin regresión.
+      const extraTools = effectiveTools(
+        [...listTools(), ...derivedToolsRef.current, ...mcpToolsRef.current],
         creatableRef.current,
-      ).filter((candidate) => candidate.source?.startsWith("MCP:"));
-      const resolved = resolveToolCall(toolName, args, mcpEffective);
+      );
+      const resolved = resolveToolCall(toolName, args, extraTools);
       if (resolved.outcome !== "ready") {
         const message = resolved.result.status === "error" ? resolved.result.message : "Error";
         upsertToolCall({
@@ -555,7 +668,7 @@ export function CopilotPanel({
         // Contexto de descubrimiento para las meta-tools (tool_search/tool_describe): el set
         // BUSCABLE es el efectivo (ya gateado por rol) sin las meta-tools; markLoaded suma las
         // cargadas (se declararán en turnos siguientes) y refresca la vista de procedencia.
-        const eff = effectiveTools([...listTools(), ...mcpToolsRef.current], creatableRef.current);
+        const eff = effectiveTools([...listTools(), ...derivedToolsRef.current, ...mcpToolsRef.current], creatableRef.current);
         const ctx: ToolExecutionContext = {
           ...defaultToolContext,
           discovery: {
@@ -571,7 +684,7 @@ export function CopilotPanel({
               if (changed) {
                 setToolCatalog(
                   buildToolCatalog(
-                    [...listTools(), ...mcpToolsRef.current],
+                    [...listTools(), ...derivedToolsRef.current, ...mcpToolsRef.current],
                     creatableRef.current,
                     declaredToolNames(eff, loadedToolsRef.current),
                   ),
@@ -619,7 +732,19 @@ export function CopilotPanel({
     const onEvent = (event: ServerEvent): void => {
       if (event.type === "models.list.result") {
         setModels(event.models);
-        setSelectedModel((current) => current || event.models[0]?.id || "");
+        // Restaura la última selección persistida SIEMPRE que ese modelo siga disponible en la
+        // lista negociada; si no (credenciales cambiadas, proveedor caído), cae al primero. No
+        // pisa una selección ya hecha en esta sesión.
+        setSelectedModel((current) => {
+          if (current) {
+            return current;
+          }
+          const preferred = loadPreferredModelId();
+          if (preferred && event.models.some((model) => model.id === preferred)) {
+            return preferred;
+          }
+          return event.models[0]?.id || "";
+        });
         return;
       }
       if (event.type === "provider.status.result") {
@@ -744,10 +869,88 @@ export function CopilotPanel({
   const selectedModelSupportsReasoning =
     models.find((model) => model.id === selectedModel)?.capabilities.compat.supportsReasoningEffort ??
     false;
+  const selectedModelLabel =
+    models.find((model) => model.id === selectedModel)?.label ??
+    (models.length === 0 ? "Sin modelos" : "Modelo");
+  // Pista de proveedor para el glifo de marca (id + protocolo + etiqueta): infiere Anthropic/OpenAI/
+  // Google/etc. sin depender de un catálogo fijo.
+  const selectedModelProtocol = (() => {
+    const m = models.find((model) => model.id === selectedModel);
+    return m ? `${m.id} ${m.protocol}` : "";
+  })();
   const canSend =
     status === "connected" &&
     !isBusy &&
     (input.trim().length > 0 || attachedImage !== null);
+
+  // Paleta "/" del composer (D1): se deriva del texto actual. La búsqueda de pacientes es el único
+  // modo con E/S; el resto (comandos) es presentación pura sobre el catálogo.
+  const composerPalette = parseComposerPalette(input);
+  const patientSearchQuery =
+    composerPalette.mode === "patient_search" ? composerPalette.query : null;
+
+  // Búsqueda de pacientes "/paciente <texto>" (D1): debounce sobre el endpoint existente (0113).
+  // Sólo LEE (proyección segura, teléfono enmascarado); al elegir un resultado se abre su expediente.
+  // Si falla o el término es corto, no muestra resultados (degradación limpia).
+  useEffect(() => {
+    let cancelled = false;
+    const query = patientSearchQuery?.trim() ?? "";
+    // Término ausente o demasiado corto: limpia resultados (de forma asíncrona para no llamar a
+    // setState en el cuerpo del efecto). Con término válido: busca tras el debounce.
+    if (patientSearchQuery === null || query.length < 2) {
+      const clear = setTimeout(() => {
+        if (!cancelled) {
+          setPatientResults([]);
+          setPatientSearchLoading(false);
+        }
+      }, 0);
+      return () => {
+        cancelled = true;
+        clearTimeout(clear);
+      };
+    }
+    const timer = setTimeout(() => {
+      void (async () => {
+        if (!cancelled) setPatientSearchLoading(true);
+        try {
+          const response = await browserApi<{ candidates?: PatientSearchCandidate[] }>(
+            `/api/v1/patients/search?name=${encodeURIComponent(query)}`,
+          );
+          if (!cancelled) setPatientResults(response.candidates ?? []);
+        } catch {
+          if (!cancelled) setPatientResults([]);
+        } finally {
+          if (!cancelled) setPatientSearchLoading(false);
+        }
+      })();
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [patientSearchQuery]);
+
+  // Al elegir un comando: si es de prompt, siembra el texto (el médico revisa y envía); si es la
+  // búsqueda de pacientes, deja el composer en "/paciente " para escribir el término.
+  const handlePickCommand = (command: ComposerCommand): void => {
+    if (command.kind === "patient_search") {
+      setInput(`${command.name} `);
+      return;
+    }
+    setInput(command.prompt ?? "");
+  };
+
+  // Al elegir un paciente del dropdown: abre su expediente (contexto activo) y limpia el composer.
+  const handlePickPatient = (candidate: PatientSearchCandidate): void => {
+    setActiveContext({
+      patientId: candidate.id,
+      patientLabel: candidate.full_name,
+      consultationId: null,
+      consultationLabel: null,
+    });
+    setInput("");
+    setPatientResults([]);
+  };
 
   const clearAttachedImage = (): void => {
     setAttachedImage(null);
@@ -760,6 +963,8 @@ export function CopilotPanel({
   // enviar un turno que el gateway rechazaría (modelo text-only).
   const handleModelChange = (modelId: string): void => {
     setSelectedModel(modelId);
+    // Persiste la elección para restaurarla en la próxima sesión (si el modelo sigue disponible).
+    savePreferredModelId(modelId);
     const supportsVision =
       models.find((model) => model.id === modelId)?.capabilities.input_modalities.includes("image") ??
       false;
@@ -840,7 +1045,7 @@ export function CopilotPanel({
     // Descubrimiento a escala: se declara solo el set ACOTADO (núcleo + meta + tools cargadas
     // bajo demanda), no todo el catálogo. El resto sigue accesible vía tool_search/tool_describe.
     const declared = declaredTools(
-      effectiveTools([...listTools(), ...mcpToolsRef.current], creatableRef.current),
+      effectiveTools([...listTools(), ...derivedToolsRef.current, ...mcpToolsRef.current], creatableRef.current),
       loadedToolsRef.current,
     );
     const toolsWire = toWireToolDefinitions(declared);
@@ -932,6 +1137,15 @@ export function CopilotPanel({
     [flushDictation],
   );
 
+  // Dictado de UN solo botón (fiel al diseño): el motor LOCAL continuo; cada pausa envía el fragmento
+  // al copiloto ("enviar al pausar" on) o lo acumula en el cuadro de mensaje (off). El botón vive en
+  // la fila del composer (junto a enviar) y el panel de grabación se muestra sobre el textarea.
+  const dictation = useCopilotDictation({
+    onSegmentSend: enqueueDictationSegment,
+    onSegmentAppend: (text) =>
+      setInput((prev) => (prev.trim() ? `${prev.trimEnd()}\n${text}` : text)),
+  });
+
   // Seguimiento desde una UI generada (submit de form / clic de botón): continúa la
   // conversación con el modelo. Respeta el principio borrador: si el modelo decide una
   // acción de escritura clínica, pasa por la aprobación de B8.
@@ -1008,28 +1222,41 @@ export function CopilotPanel({
     : { label: STATUS_LABEL[status], tone: STATUS_TONE[status] };
 
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-5">
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold text-[var(--tx)]">Copiloto clínico</h1>
-          <p className="mt-1 text-sm text-[var(--tx2)]">
-            Asistente de IA conectado al gateway de modelos.
-          </p>
-        </div>
-        {/* role=status + aria-live: anuncia con cortesía los cambios de conexión
-            (Conectado/Reintentando…/Reconectado/Sin conexión) sin robar el foco. */}
-        <Badge tone={badge.tone} role="status" aria-live="polite">
-          {badge.label}
-        </Badge>
-      </header>
+    <div
+      className={
+        embedded
+          ? "mx-auto flex w-full max-w-[780px] flex-1 flex-col gap-4"
+          : "mx-auto flex max-w-3xl flex-col gap-5"
+      }
+    >
+      {/* Cromo COMPLETO sólo fuera del modo embebido (ruta /copilot). En el shell chat-first el
+          encabezado y el aviso de borrador se omiten: el chat va limpio y las garantías viven en el
+          modal del botón de escudo del composer. */}
+      {!embedded && (
+        <>
+          <header className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h1 className="text-xl font-semibold text-[var(--tx)]">Copiloto clínico</h1>
+              <p className="mt-1 text-sm text-[var(--tx2)]">
+                Asistente de IA conectado al gateway de modelos.
+              </p>
+            </div>
+            {/* role=status + aria-live: anuncia con cortesía los cambios de conexión
+                (Conectado/Reintentando…/Reconectado/Sin conexión) sin robar el foco. */}
+            <Badge tone={badge.tone} role="status" aria-live="polite">
+              {badge.label}
+            </Badge>
+          </header>
 
-      <div
-        role="note"
-        className="rounded-[12px] border border-[var(--border2)] bg-[color-mix(in_srgb,var(--warn)_10%,transparent)] px-4 py-3 text-sm text-[var(--tx)]"
-      >
-        Toda salida de IA es un <strong>borrador</strong> que el médico debe revisar y aprobar.
-        El copiloto nunca diagnostica, receta ni guarda información final de forma autónoma.
-      </div>
+          <div
+            role="note"
+            className="rounded-[12px] border border-[var(--border2)] bg-[color-mix(in_srgb,var(--warn)_10%,transparent)] px-4 py-3 text-sm text-[var(--tx)]"
+          >
+            Toda salida de IA es un <strong>borrador</strong> que el médico debe revisar y aprobar.
+            El copiloto nunca diagnostica, receta ni guarda información final de forma autónoma.
+          </div>
+        </>
+      )}
 
       {/* Sin gateway configurado: aviso legacy (no se reintenta). */}
       {!gatewayConfigured && status === "unavailable" && (
@@ -1068,75 +1295,6 @@ export function CopilotPanel({
         </Card>
       )}
 
-      <div className="grid gap-4 md:grid-cols-[1fr_auto]">
-        <Card className="flex flex-col gap-2">
-          <label className="text-xs font-semibold uppercase tracking-wide text-[var(--tx2)]">
-            Modelo
-          </label>
-          <Select
-            value={selectedModel}
-            onChange={(event) => handleModelChange(event.target.value)}
-            disabled={models.length === 0}
-            aria-label="Modelo del copiloto"
-          >
-            {models.length === 0 ? (
-              <option value="">Sin modelos disponibles</option>
-            ) : (
-              models.map((model) => (
-                <option key={model.id} value={model.id}>
-                  {model.label} · {model.protocol}
-                </option>
-              ))
-            )}
-          </Select>
-          <p className="text-xs text-[var(--tx2)]">
-            {models.length} modelo(s) en el catálogo del gateway.
-            {selectedModelSupportsVision && " · admite imágenes"}
-          </p>
-          {selectedModelSupportsReasoning && (
-            <div className="flex flex-col gap-1">
-              <label
-                htmlFor="copilot-reasoning-effort"
-                className="text-xs font-semibold uppercase tracking-wide text-[var(--tx2)]"
-              >
-                Razonamiento
-              </label>
-              <Select
-                id="copilot-reasoning-effort"
-                value={reasoningEffort}
-                onChange={(event) =>
-                  setReasoningEffort(event.target.value as NormalizedReasoningEffort)
-                }
-                aria-label="Esfuerzo de razonamiento del modelo"
-              >
-                <option value="off">Desactivado</option>
-                <option value="low">Bajo</option>
-                <option value="medium">Medio</option>
-                <option value="high">Alto</option>
-                <option value="max">Máximo</option>
-              </Select>
-            </div>
-          )}
-        </Card>
-
-        <Card className="flex flex-col gap-2">
-          <span className="text-xs font-semibold uppercase tracking-wide text-[var(--tx2)]">
-            Proveedores
-          </span>
-          {providers.length === 0 ? (
-            <span className="text-sm text-[var(--tx2)]">—</span>
-          ) : (
-            <div className="flex flex-wrap gap-1.5">
-              {providers.map((provider) => (
-                <Badge key={provider.protocol} tone={provider.available ? "ok" : "neutral"}>
-                  {provider.protocol}
-                </Badge>
-              ))}
-            </div>
-          )}
-        </Card>
-      </div>
-
       {!hideContextPicker && (
         <ActiveContextPicker context={activeContext} onChange={setActiveContext} />
       )}
@@ -1161,14 +1319,40 @@ export function CopilotPanel({
         </div>
       )}
 
-      {contextStats && <ContextUsageBar usage={contextStats} compaction={compaction} />}
+      {/* Aviso de compactación (cuando ocurre): el uso de contexto en sí se muestra como chip
+          compacto dentro del composer (A9 del rediseño). */}
+      {compaction && (
+        <div
+          role="status"
+          className="rounded-[12px] border border-[var(--border2)] bg-[var(--panel2)] px-3.5 py-2 text-xs text-[var(--tx2)]"
+        >
+          Se compactó la conversación: se resumieron {compaction.dropped} intercambio(s) antiguo(s)
+          {compaction.preservedIds.length > 0
+            ? `, conservando ${compaction.preservedIds.length} identificador(es) clínico(s).`
+            : "."}{" "}
+          Los datos del expediente no se modificaron.
+        </div>
+      )}
 
-      {usageStats && <CostUsageBar stats={usageStats} />}
+      {/* Costo y catálogo de herramientas: inline sólo fuera del modo embebido; en el chat-first
+          viven en el modal de garantías (botón de escudo del composer). */}
+      {!embedded && usageStats && <CostUsageBar stats={usageStats} />}
 
-      <ToolCatalogPanel entries={toolCatalog} />
+      {!embedded && <ToolCatalogPanel entries={toolCatalog} />}
 
-      <Card className="flex min-h-[280px] flex-col gap-3">
-        <div className="flex-1 space-y-3" role="log" aria-label={COPILOT_TRANSCRIPT_LABEL} aria-live="polite">
+      <div
+        className={
+          embedded
+            ? "flex min-h-0 flex-1 flex-col gap-3"
+            : "flex min-h-[280px] flex-col gap-3 rounded-[16px] border border-[var(--border)] bg-[var(--panel)] p-4 shadow-[var(--soft)]"
+        }
+      >
+        <div
+          className={embedded ? "flex-1 space-y-4 overflow-y-auto" : "flex-1 space-y-3"}
+          role="log"
+          aria-label={COPILOT_TRANSCRIPT_LABEL}
+          aria-live="polite"
+        >
           {messages.length === 0 && !isBusy && (
             <p className="text-sm text-[var(--tx2)]">
               Escribe un mensaje para empezar. El asistente responderá en borrador.
@@ -1191,14 +1375,29 @@ export function CopilotPanel({
           ))}
 
           {isBusy && (
-            <div className="rounded-[12px] bg-[var(--panel2)] px-3.5 py-2.5">
-              <div className="mb-1 text-xs font-semibold text-[var(--tx2)]">Asistente (borrador)</div>
-              {turn.reasoningText && <ReasoningPanel reasoning={turn.reasoningText} live />}
-              {turn.assistantText ? (
-                <p className="whitespace-pre-wrap text-sm text-[var(--tx)]">{turn.assistantText}</p>
-              ) : turn.reasoningText ? null : (
-                <p className="text-sm text-[var(--tx2)]">Pensando…</p>
-              )}
+            <div className="flex items-start justify-start gap-2.5">
+              <AnimatedOrb size={30} />
+              <div className="min-w-0 flex-1 pt-0.5">
+                {turn.reasoningText && <ReasoningPanel reasoning={turn.reasoningText} live />}
+                {turn.assistantText ? (
+                  <Markdown content={turn.assistantText} />
+                ) : turn.reasoningText ? null : (
+                  <div className="flex gap-1.5 py-1.5" aria-label="Pensando…">
+                    <span
+                      className="h-[7px] w-[7px] rounded-full bg-[var(--tx3)]"
+                      style={{ animation: "mcbounce 1s infinite" }}
+                    />
+                    <span
+                      className="h-[7px] w-[7px] rounded-full bg-[var(--tx3)]"
+                      style={{ animation: "mcbounce 1s infinite .15s" }}
+                    />
+                    <span
+                      className="h-[7px] w-[7px] rounded-full bg-[var(--tx3)]"
+                      style={{ animation: "mcbounce 1s infinite .3s" }}
+                    />
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -1223,17 +1422,12 @@ export function CopilotPanel({
             </div>
           )}
 
-          {/* Dictado: graba la consulta y la transcribe LOCALMENTE (el audio no sale del
-              dispositivo); el borrador se inserta en el mensaje del copiloto. */}
-          <CopilotDictation
-            disabled={status !== "connected"}
-            onTranscript={(text) =>
-              setInput((prev) => (prev.trim() ? `${prev.trimEnd()}\n${text}` : text))
-            }
-            onSegment={enqueueDictationSegment}
-          />
 
-          <div className="flex items-end gap-2">
+          {/* Composer UNIFICADO (fiel al diseño): UN solo panel redondeado con el textarea arriba y
+              una fila inferior [modelo · escudo · contexto · — · imagen · enviar]. ``order-last`` lo
+              mantiene debajo de las paletas/sugerencias del footer sin reordenar el código. La misma
+              lógica del composer (handleSend / paletas / modelo) se conserva. */}
+          <div className="order-last flex flex-col gap-2 rounded-[24px] bg-[var(--panel)] px-4 pb-2.5 pt-3 shadow-[var(--soft2)]">
             <input
               ref={fileInputRef}
               type="file"
@@ -1243,95 +1437,595 @@ export function CopilotPanel({
               aria-hidden="true"
               tabIndex={-1}
             />
-            {selectedModelSupportsVision && (
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={status !== "connected" || isBusy}
-                className="shrink-0 rounded-[11px] border border-[var(--border2)] px-3 py-2.5 text-sm font-semibold text-[var(--tx)] transition hover:bg-[var(--panel2)] disabled:opacity-50"
-                aria-label="Adjuntar imagen"
-                title="Adjuntar imagen"
-              >
-                Imagen
-              </button>
+
+            {/* Panel de grabación en vivo (fiel al diseño): estado + toggle "Enviar al pausar" +
+                transcripción del último fragmento + ayuda. El audio se transcribe LOCALMENTE. */}
+            {dictation.recording && (
+              <div className="flex flex-col gap-2 rounded-[14px] border border-[var(--border)] bg-[var(--bg2)] px-3 py-2.5">
+                <div className="flex items-center justify-between gap-3">
+                  <span
+                    className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide"
+                    style={{ color: dictation.transcribing ? "var(--accent-tx)" : "var(--tx3)" }}
+                  >
+                    <span
+                      className="h-[7px] w-[7px] rounded-full"
+                      style={{
+                        background: dictation.transcribing ? "var(--accent)" : "var(--danger)",
+                        animation: "mcpulse 1.2s infinite",
+                      }}
+                    />
+                    {dictation.transcribing ? "Transcribiendo" : "Escuchando"} ·{" "}
+                    {formatDuration(dictation.durationMs)}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => dictation.setAutoSend(!dictation.autoSend)}
+                    title="Enviar el fragmento automáticamente al detectar una pausa"
+                    className="flex shrink-0 items-center gap-2"
+                  >
+                    <span
+                      className="text-[11.5px] font-medium"
+                      style={{ color: dictation.autoSend ? "var(--accent-tx)" : "var(--tx3)" }}
+                    >
+                      Enviar al pausar
+                    </span>
+                    <span
+                      className="relative h-[18px] w-8 shrink-0 rounded-full transition-colors"
+                      style={{ background: dictation.autoSend ? "var(--accent)" : "var(--border2)" }}
+                    >
+                      <span
+                        className="absolute top-[2px] h-[14px] w-[14px] rounded-full bg-white shadow"
+                        style={{ left: dictation.autoSend ? "16px" : "2px", transition: "left .2s" }}
+                      />
+                    </span>
+                  </button>
+                </div>
+                <div className="text-[13.5px] leading-snug text-[var(--tx)]">
+                  {dictation.lastSegment ? (
+                    dictation.lastSegment
+                  ) : (
+                    <span className="text-[var(--tx3)]">Escuchando…</span>
+                  )}
+                  <span
+                    aria-hidden="true"
+                    className="ml-0.5 inline-block h-[15px] w-[1.5px] translate-y-[2px] bg-[var(--accent-tx)]"
+                    style={{ animation: "mcblink 1s infinite" }}
+                  />
+                </div>
+                <div className="text-[11px] text-[var(--tx3)]">
+                  {dictation.autoSend
+                    ? `Cada pausa (~${dictation.pauseSeconds.toLocaleString("es")} s) envía el fragmento al copiloto y la grabación continúa.`
+                    : "El texto se acumula en el mensaje; envíalo al terminar."}
+                  {dictation.segmentCount > 0 ? ` · ${dictation.segmentCount} enviado(s)` : ""}
+                </div>
+                {dictation.error && (
+                  <p role="alert" className="text-[11px] text-[var(--danger)]">
+                    {dictation.error}
+                  </p>
+                )}
+              </div>
             )}
+
             <Input
               value={input}
               onChange={(event) => setInput(event.target.value)}
               onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault();
-                  handleSend();
+                if (event.key !== "Enter" || event.shiftKey) {
+                  return;
                 }
+                event.preventDefault();
+                if (composerPalette.mode === "commands" && composerPalette.matches.length > 0) {
+                  handlePickCommand(composerPalette.matches[0]);
+                  return;
+                }
+                if (composerPalette.mode === "patient_search" && patientResults.length > 0) {
+                  handlePickPatient(patientResults[0]);
+                  return;
+                }
+                handleSend();
               }}
               placeholder={
-                status === "connected" ? "Escribe tu consulta…" : "Copiloto no conectado"
+                status === "connected"
+                  ? "Escribe / para comandos o tu consulta…"
+                  : "Copiloto no conectado"
               }
               disabled={status !== "connected" || isBusy}
               aria-label="Mensaje para el copiloto"
+              className="rounded-none! border-transparent! bg-transparent! px-1! shadow-none! focus:border-transparent! focus:shadow-none!"
             />
-            {isBusy ? (
-              <Button type="button" onClick={handleCancel} className="shrink-0">
-                Cancelar
-              </Button>
-            ) : (
-              <Button type="button" onClick={handleSend} disabled={!canSend} className="shrink-0">
-                Enviar
-              </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Escudo: abre el modal de garantías + herramientas + costo (modo embebido). */}
+            {embedded && (
+              <button
+                type="button"
+                onClick={() => setSafetyOpen(true)}
+                title="Garantías y herramientas del copiloto"
+                aria-label="Garantías y herramientas del copiloto"
+                className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--panel)] text-[var(--tx3)] transition hover:bg-[var(--panel2)] hover:text-[var(--accent-tx)]"
+              >
+                <svg
+                  width="15"
+                  height="15"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M12 3l7 3v5c0 4.4-3 7.4-7 9-4-1.6-7-4.6-7-9V6z" />
+                  <path d="M9.2 12l2 2 3.6-4" />
+                </svg>
+              </button>
             )}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setModelMenuOpen((open) => !open)}
+                disabled={models.length === 0}
+                aria-haspopup="menu"
+                aria-expanded={modelMenuOpen}
+                title="Cambiar modelo del copiloto"
+                className="flex items-center gap-1.5 rounded-[11px] border border-[var(--border)] bg-[var(--panel)] py-1.5 pl-2 pr-2.5 text-xs font-semibold text-[var(--tx)] transition hover:bg-[var(--panel2)] disabled:opacity-50"
+              >
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-[6px] bg-[var(--bg2)]">
+                  <ProviderIcon modelKey={`${selectedModelLabel} ${selectedModelProtocol}`} size={13} />
+                </span>
+                <span className="max-w-[170px] truncate">{selectedModelLabel}</span>
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  aria-hidden="true"
+                  className="text-[var(--tx3)]"
+                >
+                  <path d="M6 9l6 6 6-6" />
+                </svg>
+              </button>
+              {modelMenuOpen && (
+                <div
+                  role="menu"
+                  className="absolute bottom-[calc(100%+6px)] left-0 z-20 flex max-h-[min(70vh,440px)] w-[min(16rem,calc(100vw-2.5rem))] flex-col overflow-hidden rounded-[14px] border border-[var(--border2)] bg-[var(--panel)] p-1.5 shadow-[var(--soft2)]"
+                >
+                  <p className="shrink-0 px-2 py-1 text-[10.5px] font-semibold uppercase tracking-wide text-[var(--tx3)]">
+                    Modelo del agente
+                  </p>
+                  {/* Lista de modelos con SCROLL propio: no se desborda con muchos modelos ni en
+                      pantallas pequeñas; el encabezado y el pie (razonamiento/proveedores) quedan fijos. */}
+                  <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto overscroll-contain">
+                  {models.length === 0 ? (
+                    <p className="px-2 py-1.5 text-xs text-[var(--tx2)]">Sin modelos disponibles</p>
+                  ) : (
+                    models.map((model) => {
+                      const active = model.id === selectedModel;
+                      return (
+                        <button
+                          key={model.id}
+                          type="button"
+                          role="menuitemradio"
+                          aria-checked={active}
+                          onClick={() => {
+                            handleModelChange(model.id);
+                            setModelMenuOpen(false);
+                          }}
+                          className="flex w-full items-center gap-2.5 rounded-[10px] px-2 py-1.5 text-left transition hover:bg-[var(--panel2)]"
+                        >
+                          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] bg-[var(--bg2)]">
+                            <ProviderIcon modelKey={`${model.label} ${model.protocol}`} />
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-[13px] font-semibold text-[var(--tx)]">
+                              {model.label}
+                            </span>
+                            <span className="block truncate text-[11px] text-[var(--tx3)]">
+                              {model.protocol}
+                            </span>
+                          </span>
+                          {active && (
+                            <svg
+                              width="15"
+                              height="15"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2.4"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              aria-hidden="true"
+                              className="shrink-0 text-[var(--accent-tx)]"
+                            >
+                              <path d="M5 12l5 5L20 6" />
+                            </svg>
+                          )}
+                        </button>
+                      );
+                    })
+                  )}
+                  </div>
+                  {selectedModelSupportsReasoning && (
+                    <div className="mt-1 shrink-0 border-t border-[var(--border)] px-2 pb-1 pt-2">
+                      <label
+                        htmlFor="copilot-reasoning-effort"
+                        className="block pb-1 text-[10.5px] font-semibold uppercase tracking-wide text-[var(--tx3)]"
+                      >
+                        Razonamiento
+                      </label>
+                      <Select
+                        id="copilot-reasoning-effort"
+                        value={reasoningEffort}
+                        onChange={(event) =>
+                          setReasoningEffort(event.target.value as NormalizedReasoningEffort)
+                        }
+                        aria-label="Esfuerzo de razonamiento del modelo"
+                      >
+                        <option value="off">Desactivado</option>
+                        <option value="low">Bajo</option>
+                        <option value="medium">Medio</option>
+                        <option value="high">Alto</option>
+                        <option value="max">Máximo</option>
+                      </Select>
+                    </div>
+                  )}
+                  {providers.length > 0 && (
+                    <div className="mt-1 flex shrink-0 flex-wrap gap-1.5 border-t border-[var(--border)] px-2 pb-1.5 pt-2">
+                      {providers.map((provider) => (
+                        <Badge key={provider.protocol} tone={provider.available ? "ok" : "neutral"}>
+                          {provider.protocol}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {contextStats && !contextStats.unknownBudget && (
+              <div
+                title={`Contexto: ${contextStats.used.toLocaleString("es")} / ${contextStats.budget.toLocaleString("es")} tokens · ${contextStats.source}`}
+                className="flex items-center gap-2 rounded-[11px] border border-[var(--border)] bg-[var(--panel)] px-2.5 py-1.5"
+              >
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="var(--tx3)"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M4 7h16M4 12h11M4 17h7" />
+                </svg>
+                <span
+                  className="h-[5px] w-[46px] shrink-0 overflow-hidden rounded-full bg-[var(--border2)]"
+                  role="progressbar"
+                  aria-valuenow={contextStats.percent}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-label="Uso del contexto del modelo"
+                >
+                  <span
+                    className="block h-full rounded-full"
+                    style={{
+                      width: `${contextStats.percent}%`,
+                      backgroundColor:
+                        contextStats.percent >= 90
+                          ? "var(--danger)"
+                          : contextStats.percent >= 75
+                            ? "var(--warn)"
+                            : "var(--accent)",
+                    }}
+                  />
+                </span>
+                <span className="whitespace-nowrap text-[11.5px] font-medium text-[var(--tx2)]">
+                  {contextStats.percent}%
+                </span>
+              </div>
+            )}
+
+              <div className="flex-1" />
+
+              {selectedModelSupportsVision && (
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={status !== "connected" || isBusy}
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--panel)] text-[var(--tx2)] transition hover:bg-[var(--panel2)] hover:text-[var(--accent-tx)] disabled:opacity-50"
+                  aria-label="Adjuntar imagen"
+                  title="Adjuntar imagen"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <rect x="3" y="3" width="18" height="18" rx="2.5" />
+                    <circle cx="8.5" cy="8.5" r="1.8" />
+                    <path d="M21 15l-5-5L5 21" />
+                  </svg>
+                </button>
+              )}
+
+              {/* UN solo botón de grabación, junto a enviar (fiel al diseño): micrófono ↔ stop. */}
+              {dictation.supported && (
+                <button
+                  type="button"
+                  onClick={dictation.toggleRecording}
+                  disabled={dictation.stopping}
+                  title={dictation.recording ? "Detener grabación" : "Grabar nota de voz"}
+                  aria-label={dictation.recording ? "Detener grabación" : "Grabar nota de voz"}
+                  className={
+                    dictation.recording
+                      ? "flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-0 bg-[var(--danger)] text-white transition disabled:opacity-60"
+                      : "flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--panel)] text-[var(--tx2)] transition hover:bg-[var(--panel2)] hover:text-[var(--accent-tx)]"
+                  }
+                >
+                  {dictation.recording ? (
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                      <rect x="6" y="6" width="12" height="12" rx="2.5" />
+                    </svg>
+                  ) : (
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <rect x="9" y="3" width="6" height="11" rx="3" />
+                      <path d="M5 11a7 7 0 0014 0M12 18v3" />
+                    </svg>
+                  )}
+                </button>
+              )}
+
+              {isBusy ? (
+                <button
+                  type="button"
+                  onClick={handleCancel}
+                  aria-label="Detener la respuesta"
+                  title="Detener la respuesta"
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-0 bg-[var(--danger)] text-white transition hover:brightness-105"
+                >
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                    <rect x="6" y="6" width="12" height="12" rx="2.5" />
+                  </svg>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleSend}
+                  disabled={!canSend}
+                  aria-label="Enviar"
+                  title="Enviar"
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-0 bg-[var(--accent)] text-[var(--on-accent)] shadow-[var(--soft)] transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M12 19V5M6 11l6-6 6 6" />
+                  </svg>
+                </button>
+              )}
+            </div>
           </div>
+
+          {/* Paletas "/" del composer (D1): comandos del agente o "Ir a paciente". Pura lectura;
+              ninguna ejecuta una acción de escritura por sí misma. */}
+          {composerPalette.mode === "commands" && composerPalette.matches.length > 0 && (
+            <div
+              role="listbox"
+              aria-label="Comandos del agente"
+              className="flex flex-col gap-0.5 rounded-[14px] border border-[var(--border2)] bg-[var(--panel)] p-1.5 shadow-[var(--soft2)]"
+            >
+              <div className="flex items-center justify-between px-2 py-1">
+                <span className="text-[10.5px] font-semibold uppercase tracking-wide text-[var(--tx3)]">
+                  Comandos del agente
+                </span>
+                <span className="text-[10.5px] text-[var(--tx3)]">↵ para usar</span>
+              </div>
+              {composerPalette.matches.map((command) => (
+                <button
+                  key={command.name}
+                  type="button"
+                  role="option"
+                  aria-selected={false}
+                  onClick={() => handlePickCommand(command)}
+                  className="flex w-full items-center gap-2.5 rounded-[10px] px-2 py-1.5 text-left transition hover:bg-[var(--panel2)]"
+                >
+                  <span className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-[9px] bg-[var(--bg2)]">
+                    <CommandGlyph name={command.name} />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-mono text-[13px] font-semibold text-[var(--tx)]">
+                      {command.name}
+                    </span>
+                    <span className="block truncate text-[11.5px] text-[var(--tx3)]">
+                      {command.description}
+                    </span>
+                  </span>
+                  <span className="shrink-0 rounded-[6px] bg-[var(--bg2)] px-2 py-0.5 text-[10px] font-semibold text-[var(--tx3)]">
+                    {command.tag}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {composerPalette.mode === "patient_search" && (
+            <div
+              role="listbox"
+              aria-label="Ir a paciente"
+              className="flex flex-col gap-0.5 rounded-[14px] border border-[var(--border2)] bg-[var(--panel)] p-1.5 shadow-[var(--soft2)]"
+            >
+              <div className="flex items-center justify-between px-2 py-1">
+                <span className="text-[10.5px] font-semibold uppercase tracking-wide text-[var(--tx3)]">
+                  Ir a paciente
+                </span>
+                <span className="text-[10.5px] text-[var(--tx3)]">
+                  {patientSearchLoading ? "Buscando…" : `${patientResults.length} resultado(s)`}
+                </span>
+              </div>
+              {patientSearchQuery !== null && patientSearchQuery.trim().length < 2 ? (
+                <p className="px-2 py-2 text-[12.5px] text-[var(--tx3)]">
+                  Escribe al menos 2 caracteres del nombre.
+                </p>
+              ) : !patientSearchLoading && patientResults.length === 0 ? (
+                <p className="px-2 py-2 text-[12.5px] text-[var(--tx3)]">
+                  Sin pacientes que coincidan con «{patientSearchQuery}».
+                </p>
+              ) : (
+                patientResults.map((candidate) => (
+                  <button
+                    key={candidate.id}
+                    type="button"
+                    role="option"
+                    aria-selected={false}
+                    onClick={() => handlePickPatient(candidate)}
+                    className="flex w-full items-center gap-2.5 rounded-[10px] px-2 py-1.5 text-left transition hover:bg-[var(--panel2)]"
+                  >
+                    <span
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[9px] text-xs font-bold text-white"
+                      style={{ background: avatarColor(candidate.id) }}
+                    >
+                      {(candidate.full_name.trim()[0] ?? "?").toUpperCase()}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[13.5px] font-semibold text-[var(--tx)]">
+                        {candidate.full_name}
+                      </span>
+                      <span className="block truncate text-[11.5px] text-[var(--tx3)]">
+                        {candidate.age} años · {candidate.sex}
+                        {candidate.phone_masked ? ` · ${candidate.phone_masked}` : ""}
+                      </span>
+                    </span>
+                  </button>
+                ))
+              )}
+            </div>
+          )}
+
+          {/* Sugerencias de inicio (pills): sólo con el chat vacío y conectado; rellenan el composer.
+              Derivadas de las tools disponibles (RBAC) con selección aleatoria; ver startSuggestions. */}
+          {messages.length === 0 && !isBusy && status === "connected" && startSuggestions.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {startSuggestions.map((suggestion) => (
+                <button
+                  key={suggestion}
+                  type="button"
+                  onClick={() => setInput(suggestion)}
+                  className="rounded-full bg-[var(--panel)] px-3.5 py-1.5 text-[12.5px] text-[var(--tx2)] shadow-[var(--soft)] transition hover:-translate-y-px hover:text-[var(--accent-tx)]"
+                >
+                  {suggestion}
+                </button>
+              ))}
+            </div>
+          )}
+
         </div>
-      </Card>
+      </div>
+
+      {/* Modal de garantías + herramientas + costo (modo embebido), fiel al diseño. */}
+      {embedded && safetyOpen && (
+        <SafetyModal
+          onClose={() => setSafetyOpen(false)}
+          toolCatalog={toolCatalog}
+          usageStats={usageStats}
+        />
+      )}
+
+      {embedded && (
+        <p className="text-center text-[11px] text-[var(--tx3)]">
+          MediCopilot puede cometer errores. Verifique la información clínica.
+        </p>
+      )}
     </div>
   );
 }
 
-function ContextUsageBar({
-  usage,
-  compaction,
+/**
+ * Modal "Garantías del copiloto" (modo embebido), fiel a MediCopilot.dc.html: aloja el aviso de
+ * borrador, el catálogo de herramientas declaradas/descubribles/restringidas y el uso/costo de IA,
+ * fuera del flujo del chat. Cierra al hacer clic en el fondo, en la X o con la tecla Escape.
+ */
+function SafetyModal({
+  onClose,
+  toolCatalog,
+  usageStats,
 }: Readonly<{
-  usage: ContextUsage;
-  compaction: { dropped: number; preservedIds: string[] } | null;
+  onClose: () => void;
+  toolCatalog: ToolCatalogEntry[];
+  usageStats: Parameters<typeof CostUsageBar>[0]["stats"] | null;
 }>) {
-  const tone =
-    usage.percent >= 90 ? "var(--danger)" : usage.percent >= 75 ? "var(--warn)" : "var(--accent)";
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
   return (
-    <div className="flex flex-col gap-1.5 rounded-[12px] border border-[var(--border2)] bg-[var(--panel2)] px-3.5 py-2.5 text-xs text-[var(--tx2)]">
-      <div className="flex items-center justify-between gap-2">
-        <span className="font-semibold uppercase tracking-wide">Contexto</span>
-        {usage.unknownBudget ? (
-          <span>Presupuesto del modelo no informado</span>
-        ) : (
-          <span>
-            {usage.used.toLocaleString("es")} / {usage.budget.toLocaleString("es")} tokens ·{" "}
-            {usage.percent}% · {usage.source}
+    <div
+      onClick={onClose}
+      className="fixed inset-0 z-[130] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Garantías del copiloto"
+        onClick={(event) => event.stopPropagation()}
+        className="flex max-h-[86vh] w-full max-w-[560px] flex-col overflow-hidden rounded-[22px] border border-[var(--border2)] bg-[var(--panel)] shadow-[var(--soft2)]"
+      >
+        <div className="flex items-start gap-3 border-b border-[var(--border)] px-5 py-4">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[11px] bg-[var(--accent-dim)] text-[var(--accent-tx)]">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M12 3l7 3v5c0 4.4-3 7.4-7 9-4-1.6-7-4.6-7-9V6z" />
+              <path d="M9.2 12l2 2 3.6-4" />
+            </svg>
           </span>
-        )}
-      </div>
-      {!usage.unknownBudget && (
-        <div
-          className="h-1.5 w-full overflow-hidden rounded-full bg-[var(--border2)]"
-          role="progressbar"
-          aria-valuenow={usage.percent}
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-label="Uso del contexto del modelo"
-        >
-          <div
-            className="h-full rounded-full transition-all"
-            style={{ width: `${usage.percent}%`, backgroundColor: tone }}
-          />
+          <div className="min-w-0 flex-1">
+            <div className="text-[16px] font-semibold tracking-tight text-[var(--tx)]">
+              Garantías del copiloto
+            </div>
+            <div className="mt-0.5 text-[12.5px] text-[var(--tx3)]">
+              Cómo trabaja con seguridad sobre el expediente
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Cerrar"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[9px] border border-[var(--border)] bg-[var(--panel)] text-[var(--tx2)] transition hover:bg-[var(--panel2)] hover:text-[var(--tx)]"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          </button>
         </div>
-      )}
-      {compaction && (
-        <p>
-          Se compactó la conversación: se resumieron {compaction.dropped} intercambio(s) antiguo(s)
-          {compaction.preservedIds.length > 0
-            ? `, conservando ${compaction.preservedIds.length} identificador(es) clínico(s).`
-            : "."}{" "}
-          Los datos del expediente no se modificaron.
-        </p>
-      )}
+
+        <div className="flex-1 space-y-4 overflow-y-auto p-5">
+          <div className="flex gap-2.5 rounded-[14px] border border-[var(--accent-bd)] bg-[var(--accent-dim)] p-3.5 text-[13.5px] leading-relaxed text-[var(--tx)]">
+            <span className="shrink-0 text-[var(--accent-tx)]" aria-hidden="true">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="9" />
+                <path d="M12 8h.01M11 12h1v4h1" />
+              </svg>
+            </span>
+            <p className="m-0">
+              Toda salida de IA es un <strong>borrador</strong> que el médico revisa y aprueba. El
+              copiloto nunca diagnostica, receta ni guarda información final de forma autónoma; cada
+              acción de escritura pasa por tu aprobación y el servidor la revalida.
+            </p>
+          </div>
+
+          <ToolCatalogPanel entries={toolCatalog} />
+          {usageStats && <CostUsageBar stats={usageStats} />}
+        </div>
+      </div>
     </div>
   );
 }
@@ -1400,48 +2094,61 @@ function ToolCatalogPanel({ entries }: Readonly<{ entries: ToolCatalogEntry[] }>
       </button>
 
       {open && (
-        <div className="space-y-2">
+        <div className="space-y-3">
           <p className="text-xs text-[var(--tx2)]">
             Para no inflar el contexto, cada turno se declara solo un núcleo pequeño de
             herramientas; el modelo descubre el resto «bajo demanda» con tool_search/tool_describe.
             Las acciones de escritura solo se ofrecen si tu rol permite crear en el recurso, y el
             servidor revalida cada acción.
           </p>
-          <ul className="space-y-1">
-            {entries.map((entry) => (
-              <li
-                key={entry.name}
-                className="flex flex-wrap items-center gap-2 rounded-[8px] bg-[var(--panel2)] px-2.5 py-1.5"
-              >
-                <Badge tone={entry.kind === "write" ? "warn" : "accent"}>
-                  {entry.kind === "write" ? "Escritura" : "Lectura"}
-                </Badge>
-                <code className="text-xs text-[var(--tx)]">{entry.name}</code>
-                <span className="text-xs text-[var(--tx2)]">· {entry.source}</span>
-                <Badge
-                  tone={
-                    entry.status === "declared"
-                      ? "ok"
-                      : entry.status === "discoverable"
-                        ? "accent"
-                        : "neutral"
-                  }
-                >
-                  {entry.status === "declared"
-                    ? "Activa"
-                    : entry.status === "discoverable"
-                      ? "Bajo demanda"
-                      : "Restringida"}
-                </Badge>
-                {entry.reason ? (
-                  <span className="text-xs text-[var(--tx2)]">{entry.reason}</span>
-                ) : null}
-              </li>
-            ))}
-          </ul>
+          {/* Agrupado por estado (activas / bajo demanda / restringidas), fiel al acordeón del
+              diseño; cada fila: acceso (LECTURA/ESCRITURA a color) + nombre monospace + estado. */}
+          <ToolCatalogGroup label="Activas" entries={declared} />
+          <ToolCatalogGroup label="Bajo demanda" entries={discoverable} />
+          <ToolCatalogGroup label="Restringidas" entries={gatedOut} />
         </div>
       )}
     </Card>
+  );
+}
+
+function ToolCatalogGroup({
+  label,
+  entries,
+}: Readonly<{ label: string; entries: ToolCatalogEntry[] }>) {
+  if (entries.length === 0) {
+    return null;
+  }
+  return (
+    <div className="overflow-hidden rounded-[12px] border border-[var(--border)] bg-[var(--bg2)]">
+      <div className="flex items-center justify-between gap-2 px-3 py-2">
+        <span className="text-[11.5px] font-semibold text-[var(--tx)]">{label}</span>
+        <span className="text-[11px] tabular-nums text-[var(--tx3)]">{entries.length}</span>
+      </div>
+      <div className="flex flex-col">
+        {entries.map((entry) => (
+          <div
+            key={entry.name}
+            className="flex items-center gap-2 border-t border-[var(--border)] px-3 py-1.5"
+            title={entry.reason ?? entry.source}
+          >
+            <span
+              className="w-[58px] shrink-0 rounded-[5px] px-1.5 py-0.5 text-center text-[9.5px] font-bold uppercase tracking-wide"
+              style={
+                entry.kind === "write"
+                  ? { color: "var(--warn)", backgroundColor: "color-mix(in srgb, var(--warn) 16%, transparent)" }
+                  : { color: "var(--accent-tx)", backgroundColor: "var(--accent-dim)" }
+              }
+            >
+              {entry.kind === "write" ? "Escr." : "Lect."}
+            </span>
+            <code className="min-w-0 flex-1 truncate font-mono text-[12px] text-[var(--tx2)]">
+              {entry.name}
+            </code>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -1455,48 +2162,91 @@ function ReasoningPanel({
   live = false,
 }: Readonly<{ reasoning: string; live?: boolean }>) {
   return (
-    <details open={live} className="mb-2 rounded-[10px] border border-[var(--border)] bg-[var(--bg2)]">
-      <summary className="flex cursor-pointer select-none items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-[var(--tx2)]">
-        <span aria-hidden>🧠</span>
-        <span className={live ? "animate-pulse" : undefined}>
-          {live ? "Razonando…" : "Ver razonamiento"}
-        </span>
+    <details open={live} className="group mb-2">
+      <summary className="inline-flex cursor-pointer select-none list-none items-center gap-1.5 rounded-[9px] border border-[var(--border)] bg-[var(--bg2)] px-2.5 py-1 text-[11.5px] font-medium text-[var(--tx3)] transition hover:text-[var(--tx2)] [&::-webkit-details-marker]:hidden">
+        {live ? (
+          <span
+            aria-hidden
+            className="h-[7px] w-[7px] shrink-0 rounded-full bg-[var(--accent-tx)]"
+            style={{ animation: "mcpulse 1.2s infinite" }}
+          />
+        ) : (
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+            className="shrink-0 transition-transform group-open:rotate-90"
+          >
+            <path d="M9 6l6 6-6 6" />
+          </svg>
+        )}
+        {live ? "Razonando…" : "Ver razonamiento"}
       </summary>
-      <div className="border-t border-[var(--border)] px-3 py-2">
-        <p className="whitespace-pre-wrap text-xs leading-relaxed text-[var(--tx2)]">{reasoning}</p>
+      <div className="ml-2 mt-2 border-l-2 border-[var(--border2)] pl-3">
+        <p className="whitespace-pre-wrap text-[12px] leading-relaxed text-[var(--tx2)]">{reasoning}</p>
       </div>
     </details>
   );
 }
 
 function MessageBubble({ message }: Readonly<{ message: ChatMessage }>) {
+  // Nota de contexto (acción humana inline): pill centrada y discreta; no es ni del médico ni del
+  // agente, es un registro de lo que se hizo desde el expediente, visible y en contexto.
+  if (message.kind === "note") {
+    return (
+      <div className="flex justify-center">
+        <div className="max-w-[90%] rounded-[10px] border border-[var(--border2)] bg-[var(--bg2)] px-3 py-1.5 text-center text-[12px] text-[var(--tx2)]">
+          {message.text}
+        </div>
+      </div>
+    );
+  }
   const isUser = message.role === "user";
+
+  // Mensaje del USUARIO: burbuja de panel blanco alineada a la derecha (fiel al diseño: NO acento),
+  // con esquina inferior derecha recortada y sombra suave.
+  if (isUser) {
+    return (
+      <div className="user-message-enter flex justify-end">
+        <div className="max-w-[82%] whitespace-pre-wrap rounded-[18px] rounded-br-[6px] bg-[var(--panel)] px-4 py-2.5 text-[14px] leading-relaxed text-[var(--tx)] shadow-[var(--soft)]">
+          {message.image && (
+            <>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={message.image.dataUrl}
+                alt={message.image.name}
+                className="mb-2 max-h-48 rounded-[8px] object-contain"
+              />
+            </>
+          )}
+          {message.text}
+        </div>
+      </div>
+    );
+  }
+
+  // Mensaje del ASISTENTE: orbe animado como avatar + texto que fluye al lado (sin burbuja), fiel al
+  // diseño. Se conserva el marcador "Borrador" (principio rector: toda salida de IA es un borrador).
   return (
-    <div className={isUser ? "flex justify-end" : "flex justify-start"}>
-      <div
-        className={`max-w-[85%] rounded-[12px] px-3.5 py-2.5 text-sm whitespace-pre-wrap ${
-          isUser
-            ? "bg-[var(--accent)] text-[var(--on-accent)]"
-            : message.isError
-              ? "bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] text-[var(--danger)]"
-              : "bg-[var(--panel2)] text-[var(--tx)]"
-        }`}
-      >
-        {!isUser && (
-          <div className="mb-1 text-xs font-semibold text-[var(--tx2)]">Asistente (borrador)</div>
+    <div className="flex items-start justify-start gap-2.5">
+      <AnimatedOrb size={30} />
+      <div className="min-w-0 flex-1 pt-0.5">
+        {message.reasoning && <ReasoningPanel reasoning={message.reasoning} />}
+        {/* El texto del agente se renderiza como Markdown SEGURO (negritas, listas, tablas, citas,
+            código, fórmulas). Los mensajes de error quedan en texto plano (no son Markdown). */}
+        {message.isError ? (
+          <div className="whitespace-pre-wrap text-[14px] leading-[1.62] text-[var(--danger)]">
+            {message.text}
+          </div>
+        ) : (
+          <Markdown content={message.text} />
         )}
-        {!isUser && message.reasoning && <ReasoningPanel reasoning={message.reasoning} />}
-        {message.image && (
-          <>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={message.image.dataUrl}
-              alt={message.image.name}
-              className="mb-2 max-h-48 rounded-[8px] object-contain"
-            />
-          </>
-        )}
-        {message.text}
       </div>
     </div>
   );
@@ -1504,6 +2254,80 @@ function MessageBubble({ message }: Readonly<{ message: ChatMessage }>) {
 
 function isSandboxResult(value: unknown): value is { value: unknown; logs: string[] } {
   return typeof value === "object" && value !== null && "logs" in value;
+}
+
+/**
+ * Glifo del comando "/" derivado de su nombre (fiel a los iconos de slashCommands del diseño). No
+ * modifica el modelo del comando: mapea por palabra clave a un icono a color, con un destello por
+ * defecto.
+ */
+const COMMAND_GLYPHS: { match: RegExp; color: string; paths: string[] }[] = [
+  { match: /paciente|buscar|ir/, color: "#0d9488", paths: ["M10 11a3.2 3.2 0 100-6.4A3.2 3.2 0 0010 11z", "M4.5 19c0-3 2.4-5 5.5-5", "M16 16l4 4"] },
+  { match: /resumen|resume|perfil/, color: "#8b7ff0", paths: ["M4 6h16M4 12h10M4 18h7"] },
+  { match: /lab|resultado/, color: "#2563eb", paths: ["M9 3v6l-4 9a2 2 0 002 3h10a2 2 0 002-3l-4-9V3", "M8 3h8"] },
+  { match: /tarea|pendiente|todo/, color: "#0d9488", paths: ["M4 7l2 2 4-4", "M4 16l2 2 4-4", "M13 7h7M13 17h7"] },
+  { match: /agenda|cita|calendar/, color: "#8b7ff0", paths: ["M3 9h18", "M5 5h14a1 1 0 011 1v13a1 1 0 01-1 1H5a1 1 0 01-1-1V6a1 1 0 011-1z", "M8 3v4M16 3v4"] },
+  { match: /receta|prescrip|medic|fármac|farmac/, color: "#8b7ff0", paths: ["M5 8h11l3 3-3 3H5z"] },
+  { match: /signo|vital|presi/, color: "#8b7ff0", paths: ["M3 12h4l2 5 4-12 2 7h6"] },
+  { match: /consulta|nota|soap/, color: "#8b7ff0", paths: ["M5 3v6a4 4 0 008 0V3", "M9 13v2a5 5 0 0010 0"] },
+  { match: /alerg/, color: "#dc2626", paths: ["M12 3l9.5 16.5H2.5z", "M12 10v4M12 17h.01"] },
+  { match: /archivo|documento|estudio/, color: "#0d9488", paths: ["M14 3v5h5", "M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8z"] },
+  { match: /historia|antecedent/, color: "#8b7ff0", paths: ["M12 20h9", "M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"] },
+  { match: /whatsapp|wa|mensaje/, color: "#25d366", paths: ["M21 11.5a8.4 8.4 0 01-12.3 7.5L3 21l2.1-5.6A8.4 8.4 0 1121 11.5z"] },
+  { match: /llamar|telefono|call/, color: "#2563eb", paths: ["M22 16.9v3a2 2 0 01-2.2 2 19.8 19.8 0 01-8.6-3.1 19.5 19.5 0 01-6-6A19.8 19.8 0 012.1 4.2 2 2 0 014.1 2h3a2 2 0 012 1.7c.1.9.3 1.8.6 2.6a2 2 0 01-.5 2.1L8.1 9.9a16 16 0 006 6l1.5-1.1a2 2 0 012.1-.5c.8.3 1.7.5 2.6.6a2 2 0 011.7 2z"] },
+];
+const DEFAULT_COMMAND_GLYPH = { color: "var(--accent-tx)", paths: ["M4 6h10M4 12h16M4 18h7"] };
+
+function CommandGlyph({ name }: Readonly<{ name: string }>) {
+  const key = name.toLowerCase();
+  const glyph = COMMAND_GLYPHS.find((entry) => entry.match.test(key)) ?? DEFAULT_COMMAND_GLYPH;
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={glyph.color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {glyph.paths.map((d, i) => (
+        <path key={i} d={d} />
+      ))}
+    </svg>
+  );
+}
+
+/**
+ * Glifo de estado de la llamada a herramienta, fiel al ``stepIcon`` del diseño: anillo girando
+ * mientras corre/espera, palomita al completar, equis en error, guion al rechazar.
+ */
+function ToolStatusGlyph({ status }: Readonly<{ status: ToolCallStatus }>) {
+  if (status === "running" || status === "awaiting_approval") {
+    return (
+      <span
+        aria-hidden="true"
+        className="inline-block h-[13px] w-[13px] shrink-0 rounded-full border-[1.7px] border-[var(--border2)] border-t-[var(--accent-tx)]"
+        style={{ animation: "mc-spin .7s linear infinite" }}
+      />
+    );
+  }
+  const color =
+    status === "success" ? "var(--ok)" : status === "error" ? "var(--danger)" : "var(--tx3)";
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke={color}
+      strokeWidth="3"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className="shrink-0"
+    >
+      {status === "error" ? (
+        <path d="M6 6l12 12M18 6L6 18" />
+      ) : status === "rejected" ? (
+        <path d="M6 12h12" />
+      ) : (
+        <path d="M5 12l5 5L20 6" />
+      )}
+    </svg>
+  );
 }
 
 function ToolCallCard({
@@ -1549,10 +2373,11 @@ function ToolCallCard({
       className="rounded-[12px] border border-[var(--border2)] bg-[var(--bg2)] px-3.5 py-2.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
     >
       <div className="flex flex-wrap items-center gap-2">
+        <ToolStatusGlyph status={call.status} />
         <Badge tone={call.kind === "write" ? "warn" : "accent"}>
           {call.kind === "write" ? "Escritura" : "Lectura"}
         </Badge>
-        <code className="text-sm font-semibold text-[var(--tx)]">{call.name}</code>
+        <code className="font-mono text-[13px] font-semibold text-[var(--tx)]">{call.name}</code>
         <Badge tone={meta.tone}>{meta.label}</Badge>
       </div>
 
