@@ -5,6 +5,10 @@ export interface GatewaySettings {
   publicPathPrefix: string;
   enableRootPathAlias: boolean;
   cookieName: string;
+  // Nombre de la cookie de sesión del BACKEND (FastAPI) que el navegador manda al gateway bajo
+  // el mismo origen. El gateway la reenvía a /api/v1/auth/me para verificar que la sesión del
+  // médico sigue viva antes de correr un turno. Opcional (default "session_token").
+  backendSessionCookieName?: string | undefined;
   allowedOrigins: string[];
   globalMaxContextTokens: number;
   safetyReserveTokens: number;
@@ -103,6 +107,7 @@ export function loadSettings(): GatewaySettings {
     publicPathPrefix: process.env.GATEWAY_PUBLIC_PATH_PREFIX ?? "/model-gateway",
     enableRootPathAlias: booleanFromEnv("GATEWAY_ENABLE_ROOT_PATH_ALIAS", true),
     cookieName: process.env.GATEWAY_PUBLIC_COOKIE_NAME ?? "mg_session",
+    backendSessionCookieName: process.env.GATEWAY_BACKEND_SESSION_COOKIE_NAME ?? "session_token",
     allowedOrigins: (process.env.GATEWAY_ALLOWED_ORIGINS ?? "http://localhost:3000")
       .split(",")
       .map((origin) => origin.trim())
@@ -110,10 +115,11 @@ export function loadSettings(): GatewaySettings {
     globalMaxContextTokens: numberFromEnv("GATEWAY_GLOBAL_MAX_CONTEXT_TOKENS", 128000),
     safetyReserveTokens: numberFromEnv("GATEWAY_SAFETY_RESERVE_TOKENS", 1024),
     maxWebSocketMessageBytes: numberFromEnv("GATEWAY_MAX_WS_MESSAGE_BYTES", 1024 * 1024),
-    // El set curado de tools clínicas del navegador creció (lecturas + borradores de
-    // escritura gateados por rol). 24 da holgura sobre las 17 actuales; el descubrimiento
-    // por tool_search será la solución de escala definitiva.
-    maxToolsPerTurn: numberFromEnv("GATEWAY_MAX_TOOLS_PER_TURN", 24),
+    // El navegador declara TODO el catálogo efectivo (gateado por rol) al modelo, sin
+    // descubrimiento: el camino común no necesita tool_search. Por eso el tope es alto (cubre el
+    // catálogo curado + las tools derivadas del contrato). Ajustar a la baja sólo si se vuelve a
+    // un esquema de descubrimiento.
+    maxToolsPerTurn: numberFromEnv("GATEWAY_MAX_TOOLS_PER_TURN", 200),
     maxToolResultBytes: numberFromEnv("GATEWAY_MAX_TOOL_RESULT_BYTES", 64 * 1024),
     toolResultTimeoutMs: numberFromEnv("GATEWAY_TOOL_RESULT_TIMEOUT_MS", 30_000),
     fakeEnabled: process.env.GATEWAY_FAKE_ENABLED === "true",

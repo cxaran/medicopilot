@@ -29,10 +29,42 @@ export function createWebSocketHandler(container: GatewayContainer) {
       return;
     }
 
+    // Cookie de sesión del BACKEND capturada en el handshake (misma origen vía nginx). Se reenvía
+    // a FastAPI para verificar que la sesión del médico sigue viva ANTES de correr cualquier
+    // acción que consuma el proveedor del modelo. Atado a una sesión vigente: si el backend cerró
+    // la sesión (expiración, logout, rotación, cambio de secreto), el modelo deja de responder.
+    const backendCookie = parseCookie(
+      request.headers.cookie,
+      container.settings.backendSessionCookieName ?? "session_token"
+    );
+    const sessionValidator = container.backendSession;
+
+    // ``true`` si se puede servir un mensaje costoso. En dev/tests sin validador (sin backend
+    // real) no se exige (legacy). Con validador: la sesión del backend debe estar viva y
+    // pertenecer al MISMO usuario que la sesión del gateway (defensa contra desajuste).
+    const backendSessionAlive = async (): Promise<boolean> => {
+      if (!sessionValidator) {
+        return true;
+      }
+      const identity = await sessionValidator.validate(backendCookie);
+      return identity !== null && identity.userId === browserSession.userId;
+    };
+
     const send = (payload: unknown): void => {
       if (socket.readyState === socket.OPEN) {
         socket.send(JSON.stringify(payload));
       }
+    };
+
+    // Rechazo uniforme cuando la sesión del backend ya no es válida: avisa y cierra el socket
+    // para que el navegador re-autentique (re-login). No corre ningún turno ni arrienda credencial.
+    const rejectExpiredSession = (): void => {
+      send({
+        type: "protocol.error",
+        code: "BACKEND_SESSION_EXPIRED",
+        message: "La sesión del backend no es válida. Vuelve a iniciar sesión."
+      });
+      socket.close(1008, "Backend session expired");
     };
 
     const sink: TurnEventSink = {
@@ -55,6 +87,20 @@ export function createWebSocketHandler(container: GatewayContainer) {
           }
 
           const parsed = parseClientMessage(raw);
+
+          // Acciones que consumen el proveedor del modelo (turno, reanudación, discovery de
+          // modelos que arrienda credenciales): exigen una sesión del backend VIVA. El resto
+          // (cancelar, estado de proveedores) es local y no se gatea.
+          if (
+            parsed.kind === "turn.start" ||
+            parsed.kind === "turn.tool_result" ||
+            parsed.kind === "models.list"
+          ) {
+            if (!(await backendSessionAlive())) {
+              rejectExpiredSession();
+              return;
+            }
+          }
 
           switch (parsed.kind) {
             case "turn.start":

@@ -20,7 +20,9 @@ import { ProviderRegistry } from "../providers/registry.js";
 import { createFakeModel } from "../domain/model.js";
 import { InMemoryBrowserSessionStore } from "../application/browser-sessions/session-store.js";
 import { ModelDiscoveryService } from "../application/capabilities/model-discovery.js";
+import { HttpBackendSessionValidator } from "../infrastructure/backend-session/http-backend-session.validator.js";
 import type { GatewaySettings } from "../config/settings.js";
+import type { BackendSessionValidatorPort } from "../ports/backend-session.port.js";
 import type { ControlPlanePort } from "../ports/control-plane.port.js";
 import type { ProviderAdapter } from "../ports/provider-adapter.port.js";
 import type { ModelCatalogPort } from "../ports/model-catalog.port.js";
@@ -32,6 +34,10 @@ import type { TurnStorePort } from "../ports/turn-store.port.js";
 export interface GatewayContainer {
   settings: GatewaySettings;
   controlPlane: ControlPlanePort;
+  // Validador de la sesión del backend para cada turno. ``null`` en dev/tests (sin backend
+  // real): la validación queda DESACTIVADA, igual que el control-plane real. Cuando hay
+  // backend configurado, ningún turno corre sin una sesión del backend viva.
+  backendSession: BackendSessionValidatorPort | null;
   modelCatalog: ModelCatalogPort;
   modelDiscovery: ModelDiscoveryService;
   providerRegistry: ProviderRegistryPort;
@@ -183,6 +189,16 @@ export function createContainer(settings = loadSettings()): GatewayContainer {
         })
       : new FakeControlPlaneClient();
 
+  // Validador de sesión del backend: sólo cuando hay backend real configurado (mismo gate que
+  // el control-plane real). Reusa la URL interna del backend; reenvía la cookie de sesión del
+  // médico a /api/v1/auth/me para confirmar que sigue viva antes de cada turno.
+  const backendSession: BackendSessionValidatorPort | null = settings.backendInternalUrl
+    ? new HttpBackendSessionValidator({
+        backendBaseUrl: settings.backendInternalUrl,
+        cookieName: settings.backendSessionCookieName ?? "session_token"
+      })
+    : null;
+
   const providerRegistry = new ProviderRegistry(adapters);
   const telemetry = new PinoTelemetry();
 
@@ -206,6 +222,7 @@ export function createContainer(settings = loadSettings()): GatewayContainer {
   return {
     settings,
     controlPlane,
+    backendSession,
     modelCatalog,
     modelDiscovery,
     providerRegistry,
