@@ -133,6 +133,14 @@ function ReportsIcon() {
   );
 }
 
+function ScaleIcon() {
+  return (
+    <svg {...iconProps} aria-hidden="true">
+      <path d="M12 3v18M5 7h14M5 7l-2.5 5a3 3 0 0 0 5 0L5 7m14 0-2.5 5a3 3 0 0 0 5 0L19 7" />
+    </svg>
+  );
+}
+
 function AuditIcon() {
   return (
     <svg {...iconProps} aria-hidden="true">
@@ -175,6 +183,8 @@ const MAIN_NAV: NavItem[] = [
   { label: "Copiloto", href: "/copilot", icon: <CopilotIcon /> },
   // Reportes agregados (sin recurso de catálogo: la página degrada con aviso si falta reports:read).
   { label: "Reportes", href: "/reports", icon: <ReportsIcon /> },
+  // Escalas clínicas (sin recurso de catálogo: degrada si falta clinical_scales:read).
+  { label: "Escalas", href: "/scales", icon: <ScaleIcon /> },
 ];
 
 // Navegación de ADMINISTRACIÓN (pie de la barra), también filtrada por catálogo: cada item solo
