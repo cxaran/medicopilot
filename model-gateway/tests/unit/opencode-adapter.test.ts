@@ -109,24 +109,6 @@ describe("opencode visión (mapa curado de modalidades)", () => {
   });
 });
 
-describe("OpencodeProviderAdapter.verifyCredential", () => {
-  it("devuelve valid=true con 200 y usa Bearer con la key arrendada", async () => {
-    const { adapter, calls } = adapterWith([jsonResponse({ data: [] })]);
-    const result = await adapter.verifyCredential(lease);
-    expect(result.valid).toBe(true);
-    expect(calls[0]!.url).toBe(`${BASE_URL}/models`);
-    const headers = calls[0]!.init.headers as Record<string, string>;
-    expect(headers.authorization).toBe(`Bearer ${SECRET}`);
-  });
-
-  it("devuelve valid=false con 401", async () => {
-    const { adapter } = adapterWith([jsonResponse({ error: "unauthorized" }, 401)]);
-    const result = await adapter.verifyCredential(lease);
-    expect(result.valid).toBe(false);
-    expect(result.reason).toBe("unauthorized");
-  });
-});
-
 describe("OpencodeProviderAdapter.discoverModels", () => {
   it("mapea /models a ModelDescriptor[] con capacidades", async () => {
     const { adapter } = adapterWith([
@@ -499,7 +481,7 @@ describe("OpenCode Go (mismo adaptador, provider id distinto)", () => {
     });
 
     expect(goAdapter.protocol).toBe(OPENCODE_GO_PROVIDER_ID);
-    await goAdapter.verifyCredential(lease);
+    await goAdapter.discoverModels(lease);
     expect(calls[0]!.url).toBe(`${GO_BASE_URL}/models`);
     const headers = calls[0]!.init.headers as Record<string, string>;
     expect(headers.authorization).toBe(`Bearer ${SECRET}`);

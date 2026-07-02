@@ -291,6 +291,110 @@ describe("runtime local: auth condicional y relay de tool (nivel adaptador)", ()
   });
 });
 
+describe("runtime local: tool calls PARALELAS se drenan una a una antes de volver al proveedor", () => {
+  // Mismo drenado del núcleo compartido (advanceOpenAICompatContinuation) que usan OpenAI y
+  // OpenRouter: el cable exige un mensaje `tool` por CADA tool_call_id del assistant antes del
+  // siguiente request; sin drenado, upstreams estrictos rechazan con 400.
+  async function collect(iterable: AsyncIterable<ProviderEvent>): Promise<ProviderEvent[]> {
+    const out: ProviderEvent[] = [];
+    for await (const ev of iterable) {
+      out.push(ev);
+    }
+    return out;
+  }
+  function fetchQueue(responses: Response[]) {
+    const calls: { url: string; init: RequestInit }[] = [];
+    const queue = [...responses];
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(input), init: init ?? {} });
+      const next = queue.shift();
+      if (!next) {
+        throw new Error("fetch mock: sin respuestas en cola");
+      }
+      return next;
+    }) as unknown as typeof fetch;
+    return { calls, fetchImpl };
+  }
+  const model = createLocalModel({ baseUrl: BASE_URL, modelId: MODEL_ID });
+  const credential = { leaseId: "l", secret: "", expiresAt: new Date(Date.now() + 60_000) };
+  const messages = [{ role: "user" as const, content: [{ type: "text" as const, text: "Hola" }] }];
+  const tools: ModelToolDefinition[] = [
+    { name: "clinical.list_patients", description: "Lista", inputSchema: { type: "object" }, strict: false },
+    { name: "clinical.list_tasks", description: "Tareas", inputSchema: { type: "object" }, strict: false }
+  ];
+
+  it("con dos tool calls paralelas, el primer resume despacha la segunda SIN llamar al proveedor", async () => {
+    const { calls, fetchImpl } = fetchQueue([
+      sseResponse([
+        JSON.stringify({
+          choices: [
+            {
+              delta: {
+                tool_calls: [
+                  { index: 0, id: "call_1", function: { name: "clinical.list_patients", arguments: "{}" } },
+                  { index: 1, id: "call_2", function: { name: "clinical.list_tasks", arguments: "{}" } }
+                ]
+              }
+            }
+          ]
+        }),
+        JSON.stringify({ choices: [{ delta: {}, finish_reason: "tool_calls" }] })
+      ]),
+      sseResponse([
+        JSON.stringify({ choices: [{ delta: { content: "Listo" } }] }),
+        JSON.stringify({ choices: [{ finish_reason: "stop" }] })
+      ])
+    ]);
+    const adapter = new LocalProviderAdapter({ baseUrl: BASE_URL, fetchImpl });
+    const startEvents = await collect(
+      adapter.startTurn({ turnId: "t1", model, credential, messages, tools, options: { maxOutputTokens: 100 }, signal: new AbortController().signal })
+    );
+    const first = startEvents.find((e) => e.type === "tool_call.ready");
+    if (!first || first.type !== "tool_call.ready") {
+      throw new Error("esperado tool_call.ready");
+    }
+    expect(first.call.callId).toBe("call_1");
+
+    // Primer resume: queda una paralela pendiente -> se emite al navegador sin ir al proveedor.
+    const drainEvents = await collect(
+      adapter.resumeTurn({
+        turnId: "t1",
+        model,
+        credential,
+        toolResults: [{ callId: "call_1", result: { status: "success", content: { ok: true } } }],
+        continuationState: first.continuationState ?? null,
+        signal: new AbortController().signal
+      })
+    );
+    expect(calls).toHaveLength(1); // solo el startTurn pegó al proveedor
+    const second = drainEvents[0];
+    if (!second || second.type !== "tool_call.ready") {
+      throw new Error("esperado tool_call.ready de la paralela pendiente");
+    }
+    expect(second.call.callId).toBe("call_2");
+    expect(second.call.name).toBe("clinical.list_tasks");
+
+    // Segundo resume (todas con resultado): vuelve al proveedor con ambos mensajes tool.
+    const finishEvents = await collect(
+      adapter.resumeTurn({
+        turnId: "t1",
+        model,
+        credential,
+        toolResults: [{ callId: "call_2", result: { status: "success", content: { ok: true } } }],
+        continuationState: second.continuationState ?? null,
+        signal: new AbortController().signal
+      })
+    );
+    expect(finishEvents.some((e) => e.type === "completed")).toBe(true);
+    expect(calls).toHaveLength(2);
+    const resumeBody = JSON.parse(String(calls[1]?.init.body ?? "{}")) as {
+      messages: Array<{ role: string; tool_call_id?: string }>;
+    };
+    const toolMessages = resumeBody.messages.filter((m) => m.role === "tool");
+    expect(toolMessages.map((m) => m.tool_call_id)).toEqual(["call_1", "call_2"]);
+  });
+});
+
 describe("runtime local: discovery y capacidades HONESTAS", () => {
   it("mapea /v1/models con defaults unknown y usa max_model_len si está", async () => {
     const fetchImpl = (async () =>

@@ -48,6 +48,7 @@ export class FakeControlPlaneClient implements ControlPlanePort {
   }
 
   async reportTurnUsage(): Promise<void> {
+    // Dev/tests: no hay control-plane real al que reportar; el usage queda en el turn store.
     return;
   }
 }

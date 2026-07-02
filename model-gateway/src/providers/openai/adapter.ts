@@ -1,5 +1,6 @@
 import { GatewayError } from "../../kernel/errors.js";
 import { createId } from "../../kernel/ids.js";
+import { buildWireToolNameMap, sanitizeWireToolName } from "../../kernel/tool-names.js";
 import { emptyTurnUsage } from "../../domain/usage.js";
 import { nativeReasoningEffort } from "../../domain/reasoning.js";
 import {
@@ -19,7 +20,6 @@ import type { ModelDescriptor, ProviderProtocol } from "../../domain/model.js";
 import type { ModelToolDefinition } from "../../domain/tool.js";
 import type { TurnUsage } from "../../domain/usage.js";
 import type {
-  CredentialVerification,
   ProviderAdapter,
   ProviderCredentialLease,
   ProviderEvent,
@@ -227,26 +227,6 @@ export class OpenAIProviderAdapter implements ProviderAdapter {
     return rows
       .filter((row) => typeof row.slug === "string" && row.slug.length > 0)
       .map((row) => createCodexModel({ baseUrl: this.baseUrl, row, providerId: this.providerId }));
-  }
-
-  async verifyCredential(credential: ProviderCredentialLease): Promise<CredentialVerification> {
-    try {
-      const response = await this.fetchImpl(`${this.baseUrl}/models`, {
-        method: "GET",
-        headers: this.authHeaders(credential)
-      });
-      if (response.status === 401 || response.status === 403) {
-        return { valid: false, reason: "unauthorized" };
-      }
-      // En Codex/Responses /models puede no existir (404): no es "no autorizado", así que
-      // se acepta como válido (la verificación real ocurre en el turno).
-      if (response.ok || (this.apiFlavor === "codex_responses" && response.status === 404)) {
-        return { valid: true };
-      }
-      return { valid: false, reason: `status_${response.status}` };
-    } catch {
-      return { valid: false, reason: "unreachable" };
-    }
   }
 
   async discoverModels(credential: ProviderCredentialLease): Promise<ModelDescriptor[]> {
@@ -641,7 +621,6 @@ export function createOpenAIModel(input: {
       }
     },
     source: row ? "discovered" : "curated",
-    metadataRevision: row?.created != null ? String(row.created) : null,
     deprecatedAt: null
   };
 }
@@ -707,7 +686,6 @@ export function createCodexModel(input: {
       }
     },
     source: "discovered",
-    metadataRevision: null,
     deprecatedAt: null
   };
 }
@@ -757,19 +735,16 @@ function toResponsesInput(messages: CanonicalMessage[]): ResponsesInputItem[] {
   });
 }
 
-// El Responses de Codex exige nombres de function ^[a-zA-Z0-9_-]+$ (NO admite el punto de
-// nuestros namespaces, p. ej. "clinical.search_patients"). Se sanea el punto y cualquier otro
-// carácter inválido a "_"; el mapa inverso recupera el nombre original para ejecutar la tool.
+// El Responses de Codex exige nombres de function ^[a-zA-Z0-9_-]{1,64}$ (NO admite el punto
+// de nuestros namespaces, p. ej. "clinical.search_patients"). Criterio canónico compartido en
+// kernel/tool-names.ts (saneo + truncado a 64); el mapa inverso recupera el nombre original
+// para ejecutar la tool en el navegador.
 function sanitizeCodexToolName(name: string): string {
-  return name.replace(/[^a-zA-Z0-9_-]/g, "_");
+  return sanitizeWireToolName(name);
 }
 
 function buildCodexToolNameMap(tools: ModelToolDefinition[]): Record<string, string> {
-  const map: Record<string, string> = {};
-  for (const tool of tools) {
-    map[sanitizeCodexToolName(tool.name)] = tool.name;
-  }
-  return map;
+  return buildWireToolNameMap(tools.map((tool) => tool.name));
 }
 
 function toResponsesTools(tools: ModelToolDefinition[]): ResponsesTool[] {

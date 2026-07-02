@@ -1,5 +1,6 @@
 import { GatewayError } from "../../kernel/errors.js";
 import { createId } from "../../kernel/ids.js";
+import { buildWireToolNameMap, sanitizeWireToolName } from "../../kernel/tool-names.js";
 import { emptyTurnUsage } from "../../domain/usage.js";
 import { nativeReasoningEffort } from "../../domain/reasoning.js";
 import { opencodeCuratedFor, type OpencodeCuratedEntry } from "./catalog.js";
@@ -9,7 +10,6 @@ import type { ModelDescriptor } from "../../domain/model.js";
 import type { ModelToolDefinition, ToolCallResult } from "../../domain/tool.js";
 import type { TurnUsage } from "../../domain/usage.js";
 import type {
-  CredentialVerification,
   ProviderAdapter,
   ProviderCredentialLease,
   ProviderEvent,
@@ -162,25 +162,6 @@ export class OpencodeProviderAdapter implements ProviderAdapter {
     this.protocol = this.providerId;
     this.baseUrl = options.baseUrl.replace(/\/+$/, "");
     this.fetchImpl = options.fetchImpl ?? fetch;
-  }
-
-  async verifyCredential(credential: ProviderCredentialLease): Promise<CredentialVerification> {
-    try {
-      const response = await this.fetchImpl(`${this.baseUrl}/models`, {
-        method: "GET",
-        headers: this.authHeaders(credential)
-      });
-      if (response.status === 401 || response.status === 403) {
-        return { valid: false, reason: "unauthorized" };
-      }
-      if (!response.ok) {
-        return { valid: false, reason: `status_${response.status}` };
-      }
-      return { valid: true };
-    } catch {
-      // No se propaga el error original para no arriesgar fugas de URL/secreto.
-      return { valid: false, reason: "unreachable" };
-    }
   }
 
   async discoverModels(credential: ProviderCredentialLease): Promise<ModelDescriptor[]> {
@@ -542,7 +523,6 @@ export function createOpencodeModel(input: {
       }
     },
     source: row ? "discovered" : "curated",
-    metadataRevision: row?.created != null ? String(row.created) : null,
     deprecatedAt: null
   };
 }
@@ -568,21 +548,16 @@ function toOpenAIMessages(messages: CanonicalMessage[]): OpenAIMessage[] {
 }
 
 // Sanea un nombre de tool al patrón aceptado por OpenAI/Anthropic y upstreams estrictos
-// (^[a-zA-Z0-9_-]{1,64}$): reemplaza cualquier carácter inválido (p. ej. '.') por '_' y
-// trunca a 64. Determinista; la reversión usa el mapa construido por buildToolNameMap.
+// (^[a-zA-Z0-9_-]{1,64}$). Criterio canónico compartido en kernel/tool-names.ts; la
+// reversión usa el mapa construido por buildToolNameMap.
 function sanitizeToolName(name: string): string {
-  return name.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64);
+  return sanitizeWireToolName(name);
 }
 
 // Mapa nombre-saneado -> nombre-original, para revertir el nombre de la tool call que emite
-// el proveedor (que ve el saneado) al original que conoce el cliente. Si dos nombres colisionan
-// al sanear (caso teórico improbable con el namespacing por '.'), gana el último.
+// el proveedor (que ve el saneado) al original que conoce el cliente.
 function buildToolNameMap(tools: ModelToolDefinition[]): Record<string, string> {
-  const map: Record<string, string> = {};
-  for (const tool of tools) {
-    map[sanitizeToolName(tool.name)] = tool.name;
-  }
-  return map;
+  return buildWireToolNameMap(tools.map((tool) => tool.name));
 }
 
 function toOpenAITools(tools: ModelToolDefinition[]): OpenAITool[] {

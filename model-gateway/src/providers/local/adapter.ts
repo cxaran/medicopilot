@@ -4,13 +4,12 @@ import {
   runOpenAICompatChat,
   toOpenAICompatMessages,
   toOpenAICompatTools,
-  toToolResultMessages,
+  advanceOpenAICompatContinuation,
   isOpenAICompatChatContinuation
 } from "../openai-compat/chat.js";
 import type { GenerationOptions } from "../../application/capabilities/capability-negotiator.js";
 import type { ModelDescriptor } from "../../domain/model.js";
 import type {
-  CredentialVerification,
   ProviderAdapter,
   ProviderCredentialLease,
   ProviderEvent,
@@ -67,25 +66,6 @@ export class LocalProviderAdapter implements ProviderAdapter {
     this.fetchImpl = options.fetchImpl ?? fetch;
   }
 
-  async verifyCredential(credential: ProviderCredentialLease): Promise<CredentialVerification> {
-    try {
-      const response = await this.fetchImpl(`${this.baseUrl}/models`, {
-        method: "GET",
-        headers: this.authHeaders(credential)
-      });
-      // Con key configurada y ausente, el server local responde 401/403; sin auth requerida, ok.
-      if (response.status === 401 || response.status === 403) {
-        return { valid: false, reason: "unauthorized" };
-      }
-      if (response.ok) {
-        return { valid: true };
-      }
-      return { valid: false, reason: `status_${response.status}` };
-    } catch {
-      return { valid: false, reason: "unreachable" };
-    }
-  }
-
   async discoverModels(credential: ProviderCredentialLease): Promise<ModelDescriptor[]> {
     // Endpoint OpenAI-compatible. Los modelos locales rara vez traen metadatos de capacidad,
     // así que createLocalModel cae a defaults HONESTOS (unknown) más lo que el endpoint dé.
@@ -127,6 +107,14 @@ export class LocalProviderAdapter implements ProviderAdapter {
     if (!isOpenAICompatChatContinuation(state, LOCAL_CONTINUATION)) {
       throw new GatewayError("INVALID_CONTINUATION_STATE", "Missing or invalid local continuation state");
     }
+    // Si el assistant pidió tools en paralelo, se despacha la siguiente al navegador sin llamar
+    // al proveedor (el cable exige un mensaje tool por cada tool_call_id antes de reanudar).
+    // Mismo drenado del núcleo compartido que usan OpenAI y OpenRouter.
+    const advance = advanceOpenAICompatContinuation(state, input.toolResults);
+    if (advance.nextEvent) {
+      yield advance.nextEvent;
+      return;
+    }
     yield* runOpenAICompatChat({
       baseUrl: this.baseUrl,
       fetchImpl: this.fetchImpl,
@@ -134,7 +122,7 @@ export class LocalProviderAdapter implements ProviderAdapter {
       continuationProtocol: LOCAL_CONTINUATION,
       authHeaders: this.authHeaders(input.credential),
       model: input.model,
-      messages: [...state.messages, ...toToolResultMessages(input.toolResults)],
+      messages: advance.messages,
       tools: state.tools,
       options: state.options,
       bodyExtensions: reasoningBody(input.model, state.options),
@@ -226,7 +214,6 @@ export function createLocalModel(input: {
       }
     },
     source: row ? "discovered" : "curated",
-    metadataRevision: row?.created != null ? String(row.created) : null,
     deprecatedAt: null
   };
 }

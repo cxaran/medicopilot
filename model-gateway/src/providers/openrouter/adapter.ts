@@ -10,7 +10,6 @@ import {
 import type { GenerationOptions } from "../../application/capabilities/capability-negotiator.js";
 import type { ModelDescriptor, ModelPricing } from "../../domain/model.js";
 import type {
-  CredentialVerification,
   ProviderAdapter,
   ProviderCredentialLease,
   ProviderEvent,
@@ -76,24 +75,6 @@ export class OpenRouterProviderAdapter implements ProviderAdapter {
   constructor(options: OpenRouterProviderOptions) {
     this.baseUrl = options.baseUrl.replace(/\/+$/, "");
     this.fetchImpl = options.fetchImpl ?? fetch;
-  }
-
-  async verifyCredential(credential: ProviderCredentialLease): Promise<CredentialVerification> {
-    try {
-      const response = await this.fetchImpl(`${this.baseUrl}/models`, {
-        method: "GET",
-        headers: this.authHeaders(credential)
-      });
-      if (response.status === 401 || response.status === 403) {
-        return { valid: false, reason: "unauthorized" };
-      }
-      if (response.ok) {
-        return { valid: true };
-      }
-      return { valid: false, reason: `status_${response.status}` };
-    } catch {
-      return { valid: false, reason: "unreachable" };
-    }
   }
 
   async discoverModels(credential: ProviderCredentialLease): Promise<ModelDescriptor[]> {
@@ -276,7 +257,6 @@ export function createOpenRouterModel(input: {
       }
     },
     source: row ? "discovered" : "curated",
-    metadataRevision: row?.created != null ? String(row.created) : null,
     deprecatedAt: null
   };
 }

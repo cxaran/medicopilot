@@ -1,5 +1,6 @@
 import { GatewayError } from "../../kernel/errors.js";
 import { createId } from "../../kernel/ids.js";
+import { buildWireToolNameMap, sanitizeWireToolName } from "../../kernel/tool-names.js";
 import { emptyTurnUsage } from "../../domain/usage.js";
 import type { GenerationOptions } from "../../application/capabilities/capability-negotiator.js";
 import type { CanonicalMessage } from "../../domain/message.js";
@@ -184,23 +185,19 @@ export function advanceOpenAICompatContinuation(
 // --- Saneo de nombres de tool para el cable. ----------------------------------------
 //
 // Varios upstreams chat/completions (DeepSeek vía opencode/OpenRouter, la propia OpenAI)
-// exigen nombres de function ^[a-zA-Z0-9_-]+$: NO admiten el punto de nuestros namespaces
+// exigen nombres de function ^[a-zA-Z0-9_-]{1,64}$: NO admiten el punto de nuestros namespaces
 // ("clinical.search_patients", "ui.render_form"). El saneo se aplica SOLO en el cable (tools
 // declaradas y tool_calls del historial reenviado); la tool call emitida al navegador, las
-// pendientes y el estado de continuación conservan el nombre ORIGINAL. Como el saneo es
-// determinista, re-sanear el historial al reanudar reproduce lo que el proveedor generó.
+// pendientes y el estado de continuación conservan el nombre ORIGINAL. El criterio canónico
+// vive en kernel/tool-names.ts (compartido con anthropic/gemini/codex/opencode).
 
 export function sanitizeOACToolName(name: string): string {
-  return name.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64);
+  return sanitizeWireToolName(name);
 }
 
 /** Mapa inverso saneado→original para recuperar el nombre real de la tool call del stream. */
 export function buildOACToolNameMap(tools: readonly OACTool[]): Record<string, string> {
-  const map: Record<string, string> = {};
-  for (const tool of tools) {
-    map[sanitizeOACToolName(tool.function.name)] = tool.function.name;
-  }
-  return map;
+  return buildWireToolNameMap(tools.map((tool) => tool.function.name));
 }
 
 /** Tools con el nombre saneado para el cable (las originales no se mutan). */

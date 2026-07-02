@@ -167,19 +167,6 @@ describe("discoverModels", () => {
   });
 });
 
-// --- verifyCredential ---
-
-describe("verifyCredential", () => {
-  it("401 -> inválida (unauthorized)", async () => {
-    const { adapter } = adapterWith([jsonResponse({}, 401)]);
-    expect(await adapter.verifyCredential(lease)).toEqual({ valid: false, reason: "unauthorized" });
-  });
-  it("codex_responses: 404 en /models se acepta como válida", async () => {
-    const { adapter } = adapterWith([jsonResponse({}, 404)], "codex_responses");
-    expect(await adapter.verifyCredential(lease)).toEqual({ valid: true });
-  });
-});
-
 // --- streaming chat/completions ---
 
 describe("startTurn chat_completions", () => {

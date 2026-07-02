@@ -50,6 +50,10 @@ export interface GatewayContainer {
 export function createContainer(settings = loadSettings()): GatewayContainer {
   const browserSessions = new InMemoryBrowserSessionStore();
 
+  // ¿Hay backend real configurado? Decide el control-plane (real vs fake) y, por invariante,
+  // si el proveedor fake debe registrarse (ver abajo).
+  const hasRealControlPlane = Boolean(settings.backendInternalUrl && settings.backendInternalSecret);
+
   // B5: primer proveedor real. opencode es el catálogo base; el registry expone su protocolo.
   const opencodeAdapter = new OpencodeProviderAdapter({ baseUrl: settings.opencodeBaseUrl });
   const opencodeModel = createOpencodeModel({
@@ -60,9 +64,13 @@ export function createContainer(settings = loadSettings()): GatewayContainer {
   const adapters: ProviderAdapter[] = [opencodeAdapter];
   const catalogModels = [opencodeModel];
 
-  // Proveedor FAKE: SOLO dev/tests y solo si se habilita explícitamente (GATEWAY_FAKE_ENABLED).
-  // No debe figurar como proveedor ni modelo en runtime (dev/producción).
-  if (settings.fakeEnabled) {
+  // Proveedor FAKE (dev/tests). INVARIANTE: el control-plane fake (modo dev sin backend) solo
+  // sabe autorizar el proveedor "fake"; sin el adaptador+modelo fake registrados, ese modo
+  // fallaría en turn.start con PROVIDER_PROTOCOL_NOT_REGISTERED. Por eso se registra siempre
+  // que el control-plane resuelto sea el fake, además del override explícito
+  // GATEWAY_FAKE_ENABLED (caso backend-real + fake para pruebas). Con backend real y sin el
+  // flag, el fake NO figura como proveedor ni modelo.
+  if (settings.fakeEnabled || !hasRealControlPlane) {
     adapters.unshift(new FakeProviderAdapter());
     catalogModels.unshift(createFakeModel());
   }

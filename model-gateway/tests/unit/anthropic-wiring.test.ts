@@ -437,6 +437,117 @@ describe("Anthropic: mapeo de reasoning normalizado -> extended thinking (presup
   });
 });
 
+describe("Anthropic: saneo de nombres de tool en el cable y reversión al emitir", () => {
+  // Anthropic exige nombres ^[a-zA-Z0-9_-]{1,64}$: el punto de nuestros namespaces
+  // ("clinical.list_patients") debe ir saneado en el cable y la tool call emitida al
+  // navegador debe REVERTIR al nombre original (kernel/tool-names.ts).
+  const WIRE_NAME_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/;
+
+  async function collect(iterable: AsyncIterable<unknown>): Promise<unknown[]> {
+    const out: unknown[] = [];
+    for await (const ev of iterable) {
+      out.push(ev);
+    }
+    return out;
+  }
+  function fetchQueue(responses: Response[]) {
+    const calls: { url: string; init: RequestInit }[] = [];
+    const queue = [...responses];
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(input), init: init ?? {} });
+      return queue.shift() ?? sseResponse(textTurnEvents("ok"));
+    }) as unknown as typeof fetch;
+    return { calls, fetchImpl };
+  }
+  const credential = { leaseId: "l1", secret: "k", expiresAt: new Date(Date.now() + 60_000) };
+  const messages = [{ role: "user" as const, content: [{ type: "text" as const, text: "Hola" }] }];
+  const namespacedTools: ModelToolDefinition[] = [
+    toolDef,
+    { name: `ui.${"x".repeat(80)}`, description: "Larga", inputSchema: { type: "object" }, strict: false }
+  ];
+
+  it("declara tools saneadas (sin punto, tope 64) y revierte el nombre en tool_call.ready", async () => {
+    const { calls, fetchImpl } = fetchQueue([
+      // El proveedor emite el nombre SANEADO (es el que se le declaró).
+      sseResponse(toolUseTurnEvents("clinical_list_patients"))
+    ]);
+    const adapter = new AnthropicProviderAdapter({ baseUrl: BASE_URL, fetchImpl });
+    const model = createAnthropicModel({ baseUrl: BASE_URL, modelId: MODEL_ID });
+    const events = await collect(
+      adapter.startTurn({
+        turnId: "t1",
+        model,
+        credential,
+        messages,
+        tools: namespacedTools,
+        options: { maxOutputTokens: 100 },
+        signal: new AbortController().signal
+      })
+    );
+
+    // Cable: todos los nombres declarados cumplen el patrón estricto de Anthropic.
+    const body = JSON.parse(String(calls[0]?.init.body ?? "{}")) as { tools: Array<{ name: string }> };
+    expect(body.tools[0]?.name).toBe("clinical_list_patients");
+    for (const tool of body.tools) {
+      expect(tool.name).toMatch(WIRE_NAME_PATTERN);
+    }
+    expect(body.tools[1]?.name.length).toBe(64);
+
+    // Evento al navegador: el nombre ORIGINAL (con '.') que conoce el registro de tools.
+    const ready = events.find(
+      (e): e is { type: "tool_call.ready"; call: { name: string }; continuationState?: unknown } =>
+        (e as { type?: string }).type === "tool_call.ready"
+    );
+    expect(ready?.call.name).toBe("clinical.list_patients");
+  });
+
+  it("al reanudar, el historial reenvía el tool_use con el nombre SANEADO que emitió el proveedor", async () => {
+    const { calls, fetchImpl } = fetchQueue([
+      sseResponse(toolUseTurnEvents("clinical_list_patients")),
+      sseResponse(textTurnEvents("Listo"))
+    ]);
+    const adapter = new AnthropicProviderAdapter({ baseUrl: BASE_URL, fetchImpl });
+    const model = createAnthropicModel({ baseUrl: BASE_URL, modelId: MODEL_ID });
+    const events = await collect(
+      adapter.startTurn({
+        turnId: "t1",
+        model,
+        credential,
+        messages,
+        tools: [toolDef],
+        options: { maxOutputTokens: 100 },
+        signal: new AbortController().signal
+      })
+    );
+    const ready = events.find(
+      (e): e is { type: string; call: { callId: string; name: string }; continuationState?: unknown } =>
+        (e as { type?: string }).type === "tool_call.ready"
+    );
+    if (!ready) {
+      throw new Error("esperado tool_call.ready");
+    }
+    await collect(
+      adapter.resumeTurn({
+        turnId: "t1",
+        model,
+        credential,
+        toolResults: [{ callId: ready.call.callId, result: { status: "success", content: { ok: true } } }],
+        continuationState: ready.continuationState ?? null,
+        signal: new AbortController().signal
+      })
+    );
+    const resumeBody = JSON.parse(String(calls[1]?.init.body ?? "{}")) as {
+      tools: Array<{ name: string }>;
+      messages: Array<{ role: string; content: Array<{ type: string; name?: string }> }>;
+    };
+    // Tools y tool_use del historial siguen SANEADOS en el cable del resume.
+    expect(resumeBody.tools[0]?.name).toBe("clinical_list_patients");
+    const assistant = resumeBody.messages.find((m) => m.role === "assistant");
+    const toolUse = assistant?.content.find((b) => b.type === "tool_use");
+    expect(toolUse?.name).toBe("clinical_list_patients");
+  });
+});
+
 describe("Anthropic: discovery y resolución de capacidades", () => {
   it("discoverModels mapea /v1/models a descriptores honestos", async () => {
     const fetchImpl = (async () =>

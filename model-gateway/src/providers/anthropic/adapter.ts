@@ -1,5 +1,6 @@
 import { GatewayError } from "../../kernel/errors.js";
 import { createId } from "../../kernel/ids.js";
+import { buildWireToolNameMap, sanitizeWireToolName } from "../../kernel/tool-names.js";
 import { emptyTurnUsage } from "../../domain/usage.js";
 import type { NormalizedReasoningEffort } from "../../domain/reasoning.js";
 import type { GenerationOptions } from "../../application/capabilities/capability-negotiator.js";
@@ -8,7 +9,6 @@ import type { ModelDescriptor } from "../../domain/model.js";
 import type { ModelToolDefinition, ToolCallResult } from "../../domain/tool.js";
 import type { TurnUsage } from "../../domain/usage.js";
 import type {
-  CredentialVerification,
   ProviderAdapter,
   ProviderCredentialLease,
   ProviderEvent,
@@ -173,6 +173,10 @@ interface AnthropicContinuationState {
   messages: AnthropicMessage[];
   tools: AnthropicTool[];
   options: GenerationOptions;
+  // Mapa nombre-saneado -> nombre-original de tool (kernel/tool-names.ts). Anthropic exige
+  // nombres ^[a-zA-Z0-9_-]{1,64}$ (sin el punto de nuestros namespaces); el cable lleva el
+  // saneado y la tool call emitida al navegador se revierte al original.
+  toolNameMap: Record<string, string>;
 }
 
 function isAnthropicContinuationState(state: unknown): state is AnthropicContinuationState {
@@ -188,24 +192,6 @@ export class AnthropicProviderAdapter implements ProviderAdapter {
   constructor(options: AnthropicProviderOptions) {
     this.baseUrl = options.baseUrl.replace(/\/+$/, "");
     this.fetchImpl = options.fetchImpl ?? fetch;
-  }
-
-  async verifyCredential(credential: ProviderCredentialLease): Promise<CredentialVerification> {
-    try {
-      const response = await this.fetchImpl(`${this.baseUrl}/models`, {
-        method: "GET",
-        headers: this.authHeaders(credential)
-      });
-      if (response.status === 401 || response.status === 403) {
-        return { valid: false, reason: "unauthorized" };
-      }
-      if (response.ok) {
-        return { valid: true };
-      }
-      return { valid: false, reason: `status_${response.status}` };
-    } catch {
-      return { valid: false, reason: "unreachable" };
-    }
   }
 
   async discoverModels(credential: ProviderCredentialLease): Promise<ModelDescriptor[]> {
@@ -236,6 +222,7 @@ export class AnthropicProviderAdapter implements ProviderAdapter {
       system,
       messages,
       tools: toAnthropicTools(input.tools),
+      toolNameMap: buildWireToolNameMap(input.tools.map((tool) => tool.name)),
       options: input.options,
       signal: input.signal
     });
@@ -260,6 +247,7 @@ export class AnthropicProviderAdapter implements ProviderAdapter {
       system: state.system,
       messages: [...state.messages, toolResultMessage],
       tools: state.tools,
+      toolNameMap: state.toolNameMap ?? {},
       options: state.options,
       signal: input.signal
     });
@@ -276,6 +264,7 @@ export class AnthropicProviderAdapter implements ProviderAdapter {
     system: string | null;
     messages: AnthropicMessage[];
     tools: AnthropicTool[];
+    toolNameMap: Record<string, string>;
     options: GenerationOptions;
     signal: AbortSignal;
   }): AsyncGenerator<ProviderEvent> {
@@ -456,14 +445,17 @@ export class AnthropicProviderAdapter implements ProviderAdapter {
         system: params.system,
         messages: [...params.messages, { role: "assistant", content: assistantContent }],
         tools: params.tools,
+        toolNameMap: params.toolNameMap,
         options: params.options
       };
+      // El navegador ejecuta por el nombre ORIGINAL (con punto); Anthropic vio/emitió el
+      // saneado, que se conserva verbatim en el historial reenviado (assistantContent).
       yield {
         type: "tool_call.ready",
         continuationState,
         call: {
           callId: toolUseId,
-          name: toolUse.name,
+          name: params.toolNameMap[toolUse.name] ?? toolUse.name,
           arguments: safeParseJson(toolUse.json)
         }
       };
@@ -538,7 +530,6 @@ export function createAnthropicModel(input: {
       }
     },
     source: row ? "discovered" : "curated",
-    metadataRevision: row?.created_at ?? null,
     deprecatedAt: null
   };
 }
@@ -582,9 +573,11 @@ function toContentBlock(part: CanonicalMessage["content"][number]): AnthropicCon
   return { type: "document", source: { type: "base64", media_type: part.mimeType, data: part.data } };
 }
 
+// El cable lleva el nombre SANEADO (Anthropic exige ^[a-zA-Z0-9_-]{1,64}$; ver
+// kernel/tool-names.ts); la reversión al original usa el toolNameMap de la continuación.
 function toAnthropicTools(tools: ModelToolDefinition[]): AnthropicTool[] {
   return tools.map((tool) => ({
-    name: tool.name,
+    name: sanitizeWireToolName(tool.name),
     description: tool.description,
     input_schema: tool.inputSchema
   }));

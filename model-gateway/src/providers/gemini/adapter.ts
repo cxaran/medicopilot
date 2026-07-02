@@ -1,5 +1,6 @@
 import { GatewayError } from "../../kernel/errors.js";
 import { createId } from "../../kernel/ids.js";
+import { buildWireToolNameMap, sanitizeWireToolName } from "../../kernel/tool-names.js";
 import { emptyTurnUsage } from "../../domain/usage.js";
 import type { NormalizedReasoningEffort } from "../../domain/reasoning.js";
 import type { GenerationOptions } from "../../application/capabilities/capability-negotiator.js";
@@ -8,7 +9,6 @@ import type { ModelDescriptor } from "../../domain/model.js";
 import type { ModelToolDefinition, ToolCallResult } from "../../domain/tool.js";
 import type { TurnUsage } from "../../domain/usage.js";
 import type {
-  CredentialVerification,
   ProviderAdapter,
   ProviderCredentialLease,
   ProviderEvent,
@@ -128,8 +128,13 @@ interface GeminiContinuationState {
   contents: GeminiContent[];
   tools: GeminiTool[];
   options: GenerationOptions;
-  // Gemini correla la respuesta de función por NOMBRE; se guarda el de la llamada pendiente.
+  // Gemini correla la respuesta de función por NOMBRE DE CABLE (saneado); se guarda el de la
+  // llamada pendiente tal como lo emitió el proveedor.
   pendingToolName: string;
+  // Mapa nombre-saneado -> nombre-original de tool (kernel/tool-names.ts). Gemini exige
+  // nombres de función sin el punto de nuestros namespaces; el cable lleva el saneado y la
+  // tool call emitida al navegador se revierte al original.
+  toolNameMap: Record<string, string>;
 }
 
 function isGeminiContinuationState(state: unknown): state is GeminiContinuationState {
@@ -152,24 +157,6 @@ export class GeminiProviderAdapter implements ProviderAdapter {
   constructor(options: GeminiProviderOptions) {
     this.baseUrl = options.baseUrl.replace(/\/+$/, "");
     this.fetchImpl = options.fetchImpl ?? fetch;
-  }
-
-  async verifyCredential(credential: ProviderCredentialLease): Promise<CredentialVerification> {
-    try {
-      const response = await this.fetchImpl(`${this.baseUrl}/models`, {
-        method: "GET",
-        headers: this.authHeaders(credential)
-      });
-      if (response.status === 401 || response.status === 403) {
-        return { valid: false, reason: "unauthorized" };
-      }
-      if (response.ok) {
-        return { valid: true };
-      }
-      return { valid: false, reason: `status_${response.status}` };
-    } catch {
-      return { valid: false, reason: "unreachable" };
-    }
   }
 
   async discoverModels(credential: ProviderCredentialLease): Promise<ModelDescriptor[]> {
@@ -201,6 +188,7 @@ export class GeminiProviderAdapter implements ProviderAdapter {
       systemInstruction,
       contents,
       tools: toGeminiTools(input.tools),
+      toolNameMap: buildWireToolNameMap(input.tools.map((tool) => tool.name)),
       options: input.options,
       signal: input.signal
     });
@@ -225,6 +213,7 @@ export class GeminiProviderAdapter implements ProviderAdapter {
       systemInstruction: state.systemInstruction,
       contents: [...state.contents, responseContent],
       tools: state.tools,
+      toolNameMap: state.toolNameMap ?? {},
       options: state.options,
       signal: input.signal
     });
@@ -241,6 +230,7 @@ export class GeminiProviderAdapter implements ProviderAdapter {
     systemInstruction: { parts: GeminiTextPart[] } | null;
     contents: GeminiContent[];
     tools: GeminiTool[];
+    toolNameMap: Record<string, string>;
     options: GenerationOptions;
     signal: AbortSignal;
   }): AsyncGenerator<ProviderEvent> {
@@ -350,13 +340,21 @@ export class GeminiProviderAdapter implements ProviderAdapter {
         contents: [...params.contents, { role: "model", parts: continuationParts }],
         tools: params.tools,
         options: params.options,
-        pendingToolName: first.name
+        // El pendiente conserva el nombre DE CABLE (saneado) que emitió el proveedor: el
+        // functionResponse del resume debe correlacionar con ese nombre exacto.
+        pendingToolName: first.name,
+        toolNameMap: params.toolNameMap
       };
+      // El navegador ejecuta por el nombre ORIGINAL (con punto); Gemini vio/emitió el saneado.
       yield {
         type: "tool_call.ready",
         continuationState,
         // callId interno (Gemini no lo provee): correlación nuestra; el cable usa el nombre.
-        call: { callId: createId("call"), name: first.name, arguments: first.args }
+        call: {
+          callId: createId("call"),
+          name: params.toolNameMap[first.name] ?? first.name,
+          arguments: first.args
+        }
       };
       return;
     }
@@ -427,7 +425,6 @@ export function createGeminiModel(input: {
       }
     },
     source: row ? "discovered" : "curated",
-    metadataRevision: null,
     deprecatedAt: null
   };
 }
@@ -473,6 +470,8 @@ function toPart(part: CanonicalMessage["content"][number]): GeminiPart {
   return { inlineData: { mimeType: part.mimeType, data: part.data } };
 }
 
+// El cable lleva el nombre SANEADO (Gemini no admite el punto de nuestros namespaces; ver
+// kernel/tool-names.ts); la reversión al original usa el toolNameMap de la continuación.
 function toGeminiTools(tools: ModelToolDefinition[]): GeminiTool[] {
   if (tools.length === 0) {
     return [];
@@ -480,7 +479,7 @@ function toGeminiTools(tools: ModelToolDefinition[]): GeminiTool[] {
   return [
     {
       functionDeclarations: tools.map((tool) => ({
-        name: tool.name,
+        name: sanitizeWireToolName(tool.name),
         description: tool.description,
         parameters: tool.inputSchema
       }))

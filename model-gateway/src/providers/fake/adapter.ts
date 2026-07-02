@@ -2,14 +2,9 @@ import { createId } from "../../kernel/ids.js";
 import { createFakeModel } from "../../domain/model.js";
 import type { ProviderAdapter, ProviderResumeInput, ProviderTurnInput } from "../../ports/provider-adapter.port.js";
 import type { ProviderEvent } from "../../ports/provider-adapter.port.js";
-import type { ProviderCredentialLease } from "../../ports/provider-adapter.port.js";
 
 export class FakeProviderAdapter implements ProviderAdapter {
   readonly protocol = "fake" as const;
-
-  async verifyCredential(credential: ProviderCredentialLease): Promise<{ valid: boolean; reason?: string }> {
-    return { valid: credential.secret.length > 0 };
-  }
 
   async discoverModels(): Promise<ReturnType<typeof createFakeModel>[]> {
     return [createFakeModel()];
