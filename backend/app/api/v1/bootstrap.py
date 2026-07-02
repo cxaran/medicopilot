@@ -34,29 +34,14 @@ from backend.app.security.rate_limit import limit_bootstrap_initialize
 router = APIRouter(prefix="/bootstrap", tags=["bootstrap"])
 
 
-def _no_store(response: Response) -> None:
-    response.headers["Cache-Control"] = "no-store"
-
-
-def _token_required() -> bool:
-    return bootstrap_token_required(settings.bootstrap_setup_token)
-
-
-def _ensure_setup_available(session: SessionDep) -> None:
-    status_read = get_platform_setup_status(session, token_required=_token_required())
-    if not status_read.setup_required:
-        api_error(
-            status.HTTP_409_CONFLICT,
-            "bootstrap_completed",
-            "Bootstrap ya fue completado.",
-        )
-
-
 @router.get("/status", response_model=BootstrapStatusRead)
 def read_bootstrap_status(response: Response, session: SessionDep) -> BootstrapStatusRead:
-    _no_store(response)
+    response.headers["Cache-Control"] = "no-store"
     return BootstrapStatusRead.model_validate(
-        get_platform_setup_status(session, token_required=_token_required())
+        get_platform_setup_status(
+            session,
+            token_required=bootstrap_token_required(settings.bootstrap_setup_token),
+        )
     )
 
 
@@ -66,10 +51,35 @@ def read_bootstrap_catalog(
     session: SessionDep,
     bootstrap_token: str | None = Header(default=None, alias=BOOTSTRAP_TOKEN_HEADER),
 ) -> BootstrapCatalogRead:
-    _no_store(response)
-    _ensure_setup_available(session)
+    response.headers["Cache-Control"] = "no-store"
+    status_read = get_platform_setup_status(
+        session, token_required=bootstrap_token_required(settings.bootstrap_setup_token)
+    )
+    if not status_read.setup_required:
+        api_error(
+            status.HTTP_409_CONFLICT,
+            "bootstrap_completed",
+            "Bootstrap ya fue completado.",
+        )
     require_bootstrap_token(settings.bootstrap_setup_token, bootstrap_token)
-    return _catalog_read()
+    return BootstrapCatalogRead(
+        permission_groups=[
+            BootstrapPermissionGroupRead(
+                name=group.group_name(),
+                label=group.group_label(),
+                permissions=[
+                    BootstrapPermissionRead(
+                        access=permission.permission,
+                        label=permission.description or permission.permission,
+                        description=permission.description,
+                    )
+                    for permission in group
+                ],
+            )
+            for group in SECURITY_GROUPS
+        ],
+        limits=BootstrapLimitsRead(max_additional_roles=MAX_ADDITIONAL_ROLES),
+    )
 
 
 @router.post(
@@ -84,52 +94,10 @@ def initialize_bootstrap(
     session: SessionDep,
     bootstrap_token: str | None = Header(default=None, alias=BOOTSTRAP_TOKEN_HEADER),
 ) -> BootstrapInitializeRead:
-    _no_store(response)
+    response.headers["Cache-Control"] = "no-store"
     limit_bootstrap_initialize(request)
     require_bootstrap_token(settings.bootstrap_setup_token, bootstrap_token)
-    try:
-        initialize_platform(session, _payload_to_input(payload))
-        session.commit()
-    except BootstrapError as exc:
-        session.rollback()
-        _raise_bootstrap_error(exc)
-    except IntegrityError:
-        session.rollback()
-        api_error(
-            status.HTTP_409_CONFLICT,
-            "bootstrap_conflict",
-            "No se pudo completar Bootstrap.",
-        )
-
-    return BootstrapInitializeRead(setup_complete=True)
-
-
-def _catalog_read() -> BootstrapCatalogRead:
-    groups: list[BootstrapPermissionGroupRead] = []
-    for group in SECURITY_GROUPS:
-        group_name = _group_name(group.__name__)
-        groups.append(
-            BootstrapPermissionGroupRead(
-                name=group_name,
-                label=_group_label(group_name),
-                permissions=[
-                    BootstrapPermissionRead(
-                        access=permission.permission,
-                        label=permission.description or permission.permission,
-                        description=permission.description,
-                    )
-                    for permission in group
-                ],
-            )
-        )
-    return BootstrapCatalogRead(
-        permission_groups=groups,
-        limits=BootstrapLimitsRead(max_additional_roles=MAX_ADDITIONAL_ROLES),
-    )
-
-
-def _payload_to_input(payload: BootstrapInitializeRequest) -> BootstrapInitializeInput:
-    return BootstrapInitializeInput(
+    setup_input = BootstrapInitializeInput(
         user=BootstrapUserInput(
             name=payload.user.name,
             last_name=payload.user.last_name,
@@ -150,87 +118,21 @@ def _payload_to_input(payload: BootstrapInitializeRequest) -> BootstrapInitializ
             for role in payload.additional_roles
         ],
     )
+    try:
+        initialize_platform(session, setup_input)
+        session.commit()
+    except BootstrapError as exc:
+        session.rollback()
+        status_code = (
+            status.HTTP_409_CONFLICT if exc.code == "bootstrap_unavailable" else 422
+        )
+        api_error(status_code, exc.code, exc.message)
+    except IntegrityError:
+        session.rollback()
+        api_error(
+            status.HTTP_409_CONFLICT,
+            "bootstrap_conflict",
+            "No se pudo completar Bootstrap.",
+        )
 
-
-def _raise_bootstrap_error(exc: BootstrapError) -> None:
-    status_code = (
-        status.HTTP_409_CONFLICT
-        if exc.code == "bootstrap_unavailable"
-        else 422
-    )
-    api_error(status_code, exc.code, exc.message)
-
-
-def _group_name(class_name: str) -> str:
-    singular = class_name.removesuffix("Permissions").lower()
-    return {
-        "user": "users",
-        "role": "roles",
-        "doctor": "doctors",
-        "medicationtemplate": "medication_templates",
-        "patient": "patients",
-        "patientclinicalitem": "patient_clinical_items",
-        "patienthistoryitem": "patient_history_items",
-        "patientimmunization": "patient_immunizations",
-        "medicalhistoryversion": "medical_history_versions",
-        "consultation": "consultations",
-        "consultationdiagnosis": "consultation_diagnoses",
-        "conversation": "conversations",
-        "message": "messages",
-        "vitalsign": "vital_signs",
-        "labresult": "lab_results",
-        "clinicalevent": "clinical_events",
-        "studyorder": "study_orders",
-        "clinicaltask": "clinical_tasks",
-        "prescription": "prescriptions",
-        "appointment": "appointments",
-        "clinicaldocument": "clinical_documents",
-        "institutionalsetting": "institutional_settings",
-        "clinicalcode": "clinical_codes",
-        "clinicalscale": "clinical_scales",
-        "scaleresult": "scale_results",
-        "clinicalnote": "clinical_notes",
-        "qualitycheck": "quality_checks",
-        "medicationreconciliation": "medication_reconciliation",
-        "followup": "follow_ups",
-        "auditevent": "audit_events",
-        "permission": "permissions",
-    }.get(singular, singular)
-
-
-def _group_label(group_name: str) -> str:
-    return {
-        "users": "Usuarios",
-        "roles": "Roles",
-        "doctors": "Médicos",
-        "medication_templates": "Plantillas de medicamentos",
-        "patients": "Pacientes",
-        "patient_clinical_items": "Datos clínicos de pacientes",
-        "patient_history_items": "Antecedentes del paciente",
-        "patient_immunizations": "Inmunizaciones del paciente",
-        "medical_history_versions": "Historia clínica",
-        "consultations": "Consultas médicas",
-        "consultation_diagnoses": "Diagnósticos de consulta",
-        "conversations": "Conversaciones del copiloto",
-        "messages": "Mensajes del copiloto",
-        "vital_signs": "Signos vitales",
-        "lab_results": "Resultados de laboratorio",
-        "clinical_events": "Eventos clínicos",
-        "study_orders": "Órdenes de estudio",
-        "clinical_tasks": "Tareas clínicas",
-        "prescriptions": "Recetas médicas",
-        "appointments": "Agenda y citas",
-        "clinical_documents": "Documentos clínicos",
-        "population": "Población y cohortes",
-        "reports": "Reportes y analítica",
-        "institutional_settings": "Configuración institucional",
-        "clinical_codes": "Códigos clínicos",
-        "clinical_scales": "Escalas clínicas",
-        "scale_results": "Resultados de escalas clínicas",
-        "clinical_notes": "Notas clínicas",
-        "quality_checks": "Verificaciones de calidad/seguridad",
-        "medication_reconciliation": "Conciliación de medicación",
-        "follow_ups": "Pendientes de seguimiento",
-        "audit_events": "Registros de auditoría",
-        "permissions": "Permisos",
-    }.get(group_name, group_name.capitalize())
+    return BootstrapInitializeRead(setup_complete=True)
