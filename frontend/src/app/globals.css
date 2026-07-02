@@ -248,6 +248,13 @@ input::placeholder {
   75% { filter: hue-rotate(45deg); }
   100% { filter: hue-rotate(0deg); }
 }
+@keyframes orb-hue-rotate-blur {
+  0% { filter: blur(var(--orb-blur, 6px)) hue-rotate(0deg); }
+  25% { filter: blur(var(--orb-blur, 6px)) hue-rotate(45deg); }
+  50% { filter: blur(var(--orb-blur, 6px)) hue-rotate(90deg); }
+  75% { filter: blur(var(--orb-blur, 6px)) hue-rotate(45deg); }
+  100% { filter: blur(var(--orb-blur, 6px)) hue-rotate(0deg); }
+}
 @keyframes orb-orbit-1 {
   0% { transform: rotate(0) translateX(25%) rotate(0) scale(1); }
   25% { transform: rotate(90deg) translateX(30%) rotate(-90deg) scale(1.15); }

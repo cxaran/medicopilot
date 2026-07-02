@@ -4,15 +4,21 @@
  * un contenedor circular con rotacion de matiz (hue-rotate), cinco circulos
  * de colores en orbita bajo una capa de desenfoque, y un brillo superior.
  *
- * Difiere del handoff SOLO en la composicion de capas (misma apariencia):
- * la sombra vive en un wrapper SIN filter y el desenfoque es un blur ESTATICO
- * en su propia capa, con el hue-rotate animado por encima. Animar
- * `filter: blur() hue-rotate()` en un mismo elemento (y la sombra dentro del
- * elemento filtrado) obliga a Chrome a re-rasterizar blur y box-shadow en cada
- * frame, y en Windows la sombra se pinta de forma inestable o desaparece.
+ * Difiere del handoff SOLO en donde vive el box-shadow: en un div HERMANO
+ * dedicado (solo sombra, sin hijos), no en un elemento que contenga o anime
+ * filtros. Chrome degrada el rasterizado de una sombra cuyo elemento anima
+ * `filter` o contiene capas compuestas por filtros animados: ignora el
+ * border-radius y la pinta como columna rectangular cortada bajo el orbe.
+ * El interior (blur + hue-rotate juntos en una capa, keyframes
+ * orb-hue-rotate-blur) se conserva tal cual el handoff: separarlos en capas
+ * anidadas rompe el clipping del desenfoque (el glow desborda el circulo del
+ * orbe y se corta en el limite rectangular de la capa compuesta). NO
+ * reintroducir willChange ni capas de filtro separadas ni sombra en ancestros
+ * del subtree filtrado.
  *
  * Es marcado puro (sin estado ni hooks), valido tanto en arboles server como
- * client. Las animaciones viven en globals.css (orb-hue-rotate y orb-orbit-1..5).
+ * client. Las animaciones viven en globals.css (orb-hue-rotate,
+ * orb-hue-rotate-blur, orb-orbit-1..5).
  */
 import type { CSSProperties } from "react";
 
@@ -62,44 +68,34 @@ export function AnimatedOrb({ size = 30, variant = "default", className, style }
           overflow: "hidden",
           backgroundColor: palette.bg,
           animation: "orb-hue-rotate 8s linear infinite",
-          willChange: "filter",
         }}
       >
-        {/* Matiz animado (reverse, como el handoff) sobre una capa de blur ESTATICO:
-            equivale a blur(N) hue-rotate(x) pero sin re-rasterizar el blur cada frame. */}
         <div
           style={{
             position: "absolute",
             inset: 0,
-            animation: "orb-hue-rotate 6s linear infinite reverse",
-            willChange: "filter",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            // consumido por orb-hue-rotate-blur
+            ["--orb-blur" as string]: `${blur}px`,
+            animation: "orb-hue-rotate-blur 6s linear infinite reverse",
           }}
         >
-          <div
-            style={{
-              position: "absolute",
-              inset: 0,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              filter: `blur(${blur}px)`,
-            }}
-          >
-            {palette.cols.map((color, i) => (
-              <div
-                key={color}
-                className={`orb-c${i + 1}`}
-                style={{
-                  position: "absolute",
-                  borderRadius: "50%",
-                  width: size * CIRCLE_SCALE[i],
-                  height: size * CIRCLE_SCALE[i],
-                  opacity: CIRCLE_OPACITY[i],
-                  backgroundColor: color,
-                }}
-              />
-            ))}
-          </div>
+          {palette.cols.map((color, i) => (
+            <div
+              key={color}
+              className={`orb-c${i + 1}`}
+              style={{
+                position: "absolute",
+                borderRadius: "50%",
+                width: size * CIRCLE_SCALE[i],
+                height: size * CIRCLE_SCALE[i],
+                opacity: CIRCLE_OPACITY[i],
+                backgroundColor: color,
+              }}
+            />
+          ))}
         </div>
         <div
           style={{
