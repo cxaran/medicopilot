@@ -151,6 +151,15 @@ Recursos declarativos (UI genérica existente, sin pantallas a medida):
 Callback OAuth: `GET /api/v1/backups/google-drive/callback` (exige la sesión del
 administrador) → redirige a `/resources/backup_settings?drive=connected|error`.
 
+**Archivos reales en Drive (fase inicial del explorador)**: página `/backups`
+(sidebar → Respaldos, gate `backups:read`) que lista los archivos de la carpeta
+conectada — nombre, tipo (Respaldo/Exploración), fecha y tamaño — con descarga en
+streaming. Endpoints: `GET /api/v1/backups/drive-files` (409 legible si Drive no
+está conectado o requiere reconexión) y `GET
+/api/v1/backups/drive-files/{file_id}/download` (sólo sirve archivos que
+pertenezcan a la carpeta configurada). Sin exploración todavía: abrir el SQLite
+desde la UI llega en la fase siguiente.
+
 ## Configuración del despliegue
 
 ```env

@@ -775,6 +775,49 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/backups/drive-files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Drive Backup Files
+         * @description Archivos REALES de la carpeta de respaldos en la cuenta de Drive conectada
+         *     (nombre, tipo, fecha y tamaño; más reciente primero).
+         */
+        get: operations["list_drive_backup_files_api_v1_backups_drive_files_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/backups/drive-files/{file_id}/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download Drive Backup File
+         * @description Descarga en STREAMING de un archivo de la carpeta de respaldos. Sólo sirve
+         *     archivos que pertenezcan a la carpeta configurada (aunque el scope drive.file ya
+         *     acota a archivos de la app, se valida la pertenencia explícitamente).
+         */
+        get: operations["download_drive_backup_file_api_v1_backups_drive_files__file_id__download_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/bootstrap/status": {
         parameters: {
             query?: never;
@@ -4938,6 +4981,35 @@ export interface components {
             prescription_footer?: string | null;
             /** Estado */
             status?: components["schemas"]["RecordStatus"] | null;
+        };
+        /**
+         * DriveBackupFileRead
+         * @description Archivo REAL guardado en la carpeta de respaldos de Google Drive (fase inicial
+         *     del explorador: ver qué hay y descargarlo; sin exploración todavía).
+         */
+        DriveBackupFileRead: {
+            /** File Id */
+            file_id: string;
+            /** Name */
+            name: string;
+            /** Size Bytes */
+            size_bytes?: number | null;
+            /** Created Time */
+            created_time?: string | null;
+            /** Artifact Kind */
+            artifact_kind: string;
+            /** Backup Run Id */
+            backup_run_id?: string | null;
+        };
+        /**
+         * DriveBackupFilesResponse
+         * @description Listado de la carpeta de Drive (más reciente primero).
+         */
+        DriveBackupFilesResponse: {
+            /** Folder Id */
+            folder_id: string;
+            /** Files */
+            files: components["schemas"]["DriveBackupFileRead"][];
         };
         /**
          * ExtractedField
@@ -10540,6 +10612,70 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BackupRunRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_drive_backup_files_api_v1_backups_drive_files_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DriveBackupFilesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    download_drive_backup_file_api_v1_backups_drive_files__file_id__download_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                file_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

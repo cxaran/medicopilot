@@ -557,6 +557,25 @@ def backup_settings_email(config: BackupSettings, identity_plain: Optional[str])
     return "MediCopilot: configuración de respaldos actualizada", "\n".join(lines)
 
 
+def drive_client_from_config(config: BackupSettings) -> GoogleDriveBackupService:
+    """Cliente de Drive autenticado con la conexión guardada. Lanza
+    ``BackupPermanentError`` si Drive no está conectado/activo."""
+    if (
+        config.drive_status != BackupDriveStatus.ACTIVE
+        or not config.drive_refresh_token_ciphertext
+        or not config.drive_folder_id
+    ):
+        raise BackupPermanentError(
+            "drive_not_connected", "Google Drive no está conectado."
+        )
+    client_id, client_secret, _redirect = _require_oauth_client()
+    return GoogleDriveBackupService(
+        refresh_token=decrypt_refresh_token(config.drive_refresh_token_ciphertext),
+        client_id=client_id,
+        client_secret=client_secret,
+    )
+
+
 def enqueue_manual_run(session: Session) -> BackupRun:
     """Crea la ejecución manual (queued, reclamable de inmediato por el tick)."""
     explorer_status, policy = initial_explorer_status()

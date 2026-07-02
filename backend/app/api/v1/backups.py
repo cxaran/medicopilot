@@ -8,11 +8,12 @@ state, además, expira en 10 minutos y se consume una sola vez).
 """
 
 import logging
+import re
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Query, status
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, StreamingResponse
 from sqlmodel import select
 
 from backend.app.api.resource_actions import (
@@ -32,6 +33,8 @@ from backend.app.schemas.backup import (
     BackupSettingsRead,
     BackupSettingsUpdate,
     ConnectDriveResponse,
+    DriveBackupFileRead,
+    DriveBackupFilesResponse,
 )
 from backend.app.schemas.pagination import OffsetPage
 from backend.app.security.groups.backups import BackupPermissions
@@ -41,6 +44,10 @@ from backend.app.services.backup_crypto_service import (
     validate_age_recipient,
 )
 from backend.app.services import backup_service as backups
+from backend.app.services.google_drive_service import (
+    DriveReauthError,
+    DriveTemporaryError,
+)
 from backend.app.utils.email import send_email
 from backend.app.utils.utc_now import utc_now
 
@@ -298,3 +305,86 @@ def get_backup_run(
     if row is None:
         api_error(status.HTTP_404_NOT_FOUND, "resource_not_found", _RUN_NOT_FOUND)
     return serialize(BackupRunRead, row)
+
+
+# -- Archivos reales en Google Drive (fase inicial del explorador) -----------------
+
+
+def _drive_or_conflict(session: SessionDep):  # type: ignore[no-untyped-def]
+    """Cliente Drive + carpeta desde la conexión guardada, o 409 legible."""
+    config = backups.get_backup_settings(session)
+    try:
+        client = backups.drive_client_from_config(config)
+    except backups.BackupPermanentError as error:
+        api_error(status.HTTP_409_CONFLICT, error.code, error.summary)
+    assert config.drive_folder_id is not None  # garantizado por drive_client_from_config
+    return client, config.drive_folder_id
+
+
+def _remote_to_read(remote) -> DriveBackupFileRead:  # type: ignore[no-untyped-def]
+    return DriveBackupFileRead(
+        file_id=remote.file_id,
+        name=remote.name,
+        size_bytes=remote.size_bytes,
+        created_time=remote.created_time,
+        artifact_kind=remote.artifact_kind or "restore",
+        backup_run_id=remote.run_id,
+    )
+
+
+@router.get("/backups/drive-files", response_model=DriveBackupFilesResponse)
+def list_drive_backup_files(
+    session: SessionDep,
+    _: BackupPermissions.READ.requiere,
+) -> DriveBackupFilesResponse:
+    """Archivos REALES de la carpeta de respaldos en la cuenta de Drive conectada
+    (nombre, tipo, fecha y tamaño; más reciente primero)."""
+    client, folder_id = _drive_or_conflict(session)
+    try:
+        remotes = client.list_backups(folder_id)
+    except DriveReauthError as error:
+        api_error(status.HTTP_409_CONFLICT, error.code, error.summary)
+    except DriveTemporaryError as error:
+        api_error(status.HTTP_502_BAD_GATEWAY, error.code, error.summary)
+    return DriveBackupFilesResponse(
+        folder_id=folder_id, files=[_remote_to_read(r) for r in remotes]
+    )
+
+
+@router.get("/backups/drive-files/{file_id}/download")
+def download_drive_backup_file(
+    file_id: str,
+    session: SessionDep,
+    _: BackupPermissions.READ.requiere,
+) -> StreamingResponse:
+    """Descarga en STREAMING de un archivo de la carpeta de respaldos. Sólo sirve
+    archivos que pertenezcan a la carpeta configurada (aunque el scope drive.file ya
+    acota a archivos de la app, se valida la pertenencia explícitamente)."""
+    client, folder_id = _drive_or_conflict(session)
+    try:
+        found = client.get_backup_file(file_id)
+    except DriveReauthError as error:
+        api_error(status.HTTP_409_CONFLICT, error.code, error.summary)
+    except DriveTemporaryError as error:
+        api_error(status.HTTP_502_BAD_GATEWAY, error.code, error.summary)
+    if found is None:
+        api_error(status.HTTP_404_NOT_FOUND, "backup_file_not_found", "Archivo no encontrado.")
+    remote, parents = found
+    if folder_id not in parents:
+        api_error(
+            status.HTTP_404_NOT_FOUND,
+            "backup_file_not_found",
+            "El archivo no pertenece a la carpeta de respaldos.",
+        )
+
+    # El nombre viene de nuestros propios uploads (prefijo validado), pero se sanea
+    # igualmente para el header (sin CR/LF ni comillas).
+    safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", remote.name or "respaldo.bin")
+    headers = {"Content-Disposition": f'attachment; filename="{safe_name}"'}
+    if remote.size_bytes is not None:
+        headers["Content-Length"] = str(remote.size_bytes)
+    return StreamingResponse(
+        client.download_chunks(remote.file_id),
+        media_type="application/octet-stream",
+        headers=headers,
+    )

@@ -369,6 +369,101 @@ class BackupApiAndTickTest(unittest.TestCase):
             self.client.post(f"/api/v1/backup-settings/{sid}/run-now").status_code, 403
         )
 
+    # -- Archivos reales en Drive (fase inicial del explorador) --------------------
+
+    def _connect_fake_drive(self) -> None:
+        with Session(self.engine) as session:
+            row = session.exec(select(BackupSettings)).one()
+            row.drive_status = BackupDriveStatus.ACTIVE
+            row.drive_folder_id = "folder-test"
+            row.drive_refresh_token_ciphertext = "cifrado"
+            session.add(row)
+            session.commit()
+
+    def test_drive_files_requires_connection(self) -> None:
+        resp = self.client.get("/api/v1/backups/drive-files")
+        self.assertEqual(resp.status_code, 409, resp.text)
+        self.assertIn("drive_not_connected", resp.text)
+
+    def test_drive_files_lists_folder_contents(self) -> None:
+        from backend.app.services.google_drive_service import RemoteBackupFile
+
+        self._connect_fake_drive()
+        drive = mock.Mock()
+        drive.list_backups.return_value = [
+            RemoteBackupFile(
+                file_id="f1",
+                name="medicopilot-20260702T080000Z-abcd1234.tar",
+                size_bytes=2048,
+                sha256="deadbeef",
+                run_id="11111111-1111-1111-1111-111111111111",
+                artifact_kind="restore",
+                created_time="2026-07-02T08:01:00.000Z",
+            ),
+            RemoteBackupFile(
+                file_id="f2",
+                name="medicopilot-20260702T080000Z-abcd1234.explorer.sqlite",
+                size_bytes=1024,
+                sha256="cafe",
+                run_id="11111111-1111-1111-1111-111111111111",
+                artifact_kind="explorer",
+                created_time="2026-07-02T08:02:00.000Z",
+            ),
+        ]
+        with mock.patch.object(backups, "drive_client_from_config", return_value=drive):
+            resp = self.client.get("/api/v1/backups/drive-files")
+        self.assertEqual(resp.status_code, 200, resp.text)
+        body = resp.json()
+        self.assertEqual(body["folder_id"], "folder-test")
+        self.assertEqual(len(body["files"]), 2)
+        self.assertEqual(body["files"][0]["artifact_kind"], "restore")
+        self.assertEqual(body["files"][1]["name"].split(".")[-1], "sqlite")
+        # La proyección jamás incluye tokens ni sha innecesarios para la vista.
+        self.assertNotIn("drive_refresh_token_ciphertext", resp.text)
+        drive.list_backups.assert_called_once_with("folder-test")
+
+    def test_drive_file_download_streams_and_validates_folder(self) -> None:
+        from backend.app.services.google_drive_service import RemoteBackupFile
+
+        self._connect_fake_drive()
+        remote = RemoteBackupFile(
+            file_id="f1",
+            name="medicopilot-20260702T080000Z-abcd1234.tar",
+            size_bytes=8,
+            sha256=None,
+            run_id=None,
+            artifact_kind="restore",
+            created_time=None,
+        )
+        drive = mock.Mock()
+        drive.get_backup_file.return_value = (remote, ["folder-test"])
+        drive.download_chunks.return_value = iter([b"conte", b"nido"])
+        with mock.patch.object(backups, "drive_client_from_config", return_value=drive):
+            resp = self.client.get("/api/v1/backups/drive-files/f1/download")
+        self.assertEqual(resp.status_code, 200, resp.text)
+        self.assertEqual(resp.content, b"contenido")
+        self.assertIn("attachment", resp.headers["content-disposition"])
+        self.assertIn(".tar", resp.headers["content-disposition"])
+
+        # Archivo fuera de la carpeta configurada: 404 (no se sirve).
+        drive.get_backup_file.return_value = (remote, ["otra-carpeta"])
+        with mock.patch.object(backups, "drive_client_from_config", return_value=drive):
+            resp = self.client.get("/api/v1/backups/drive-files/f1/download")
+        self.assertEqual(resp.status_code, 404)
+
+        # Inexistente: 404.
+        drive.get_backup_file.return_value = None
+        with mock.patch.object(backups, "drive_client_from_config", return_value=drive):
+            resp = self.client.get("/api/v1/backups/drive-files/x/download")
+        self.assertEqual(resp.status_code, 404)
+
+    def test_drive_files_rbac(self) -> None:
+        self._as()  # sin permisos
+        self.assertEqual(self.client.get("/api/v1/backups/drive-files").status_code, 403)
+        self.assertEqual(
+            self.client.get("/api/v1/backups/drive-files/f1/download").status_code, 403
+        )
+
     def test_disconnect_drive_resets_connection_and_keeps_history(self) -> None:
         sid = self._settings_id()
         with Session(self.engine) as session:

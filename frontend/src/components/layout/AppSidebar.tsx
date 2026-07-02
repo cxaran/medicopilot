@@ -163,6 +163,15 @@ function AuditIcon() {
   );
 }
 
+function BackupIcon() {
+  return (
+    <svg {...iconProps} aria-hidden="true">
+      <path d="M7 18a4.5 4.5 0 1 1 .5-8.97 6 6 0 0 1 11.4 1.72A3.75 3.75 0 0 1 18 18H7z" />
+      <path d="M12 12v5m0 0-2-2m2 2 2-2" />
+    </svg>
+  );
+}
+
 function ResourcesIcon() {
   return (
     <svg {...iconProps} aria-hidden="true">
@@ -248,6 +257,13 @@ const ADMIN_NAV: NavItem[] = [
     href: "/resources/audit_events",
     resource: "audit_events",
     icon: <AuditIcon />,
+  },
+  // Archivos reales de la carpeta de respaldos en Drive (fase inicial del explorador).
+  {
+    label: "Respaldos",
+    href: "/backups",
+    resource: "backup_settings",
+    icon: <BackupIcon />,
   },
   { label: "Usuarios", href: "/resources/users", resource: "users", icon: <UsersIcon /> },
   { label: "Roles y permisos", href: "/resources/roles", resource: "roles", icon: <RolesIcon /> },

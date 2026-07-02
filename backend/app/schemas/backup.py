@@ -145,6 +145,25 @@ class ConnectDriveResponse(ApiReadSchema):
     authorization_url: str
 
 
+class DriveBackupFileRead(ApiReadSchema):
+    """Archivo REAL guardado en la carpeta de respaldos de Google Drive (fase inicial
+    del explorador: ver qué hay y descargarlo; sin exploración todavía)."""
+
+    file_id: str
+    name: str
+    size_bytes: Optional[int] = None
+    created_time: Optional[str] = None
+    artifact_kind: str
+    backup_run_id: Optional[str] = None
+
+
+class DriveBackupFilesResponse(ApiReadSchema):
+    """Listado de la carpeta de Drive (más reciente primero)."""
+
+    folder_id: str
+    files: list[DriveBackupFileRead]
+
+
 class BackupRunRead(ApiReadSchema):
     """Detalle de una ejecución del historial (metadata operativa, nunca secretos)."""
 

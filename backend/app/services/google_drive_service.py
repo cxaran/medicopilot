@@ -53,6 +53,7 @@ class RemoteBackupFile:
     sha256: Optional[str]
     run_id: Optional[str]
     artifact_kind: Optional[str]
+    created_time: Optional[str] = None
 
 
 def _classify_http_error(error: Exception) -> Exception:
@@ -251,6 +252,107 @@ class GoogleDriveBackupService:
         except Exception as error:
             raise _classify_http_error(error) from error
         return str(created["id"])
+
+    def list_backups(self, folder_id: str) -> list[RemoteBackupFile]:
+        """Lista los ARCHIVOS reales de la carpeta de respaldos (más reciente
+        primero), con nombre, tamaño, fecha y tipo de artefacto. Pagina hasta
+        agotar (la retención acota la carpeta a decenas de archivos)."""
+        files: list[RemoteBackupFile] = []
+        page_token: Optional[str] = None
+        try:
+            while True:
+                response = (
+                    self._files()
+                    .list(
+                        q=f"'{folder_id}' in parents and trashed = false",
+                        fields="nextPageToken, files(id, name, size, createdTime, appProperties)",
+                        orderBy="createdTime desc",
+                        pageSize=100,
+                        pageToken=page_token,
+                    )
+                    .execute()
+                )
+                for entry in response.get("files", []):
+                    properties = entry.get("appProperties") or {}
+                    size_raw = entry.get("size")
+                    files.append(
+                        RemoteBackupFile(
+                            file_id=str(entry["id"]),
+                            name=str(entry.get("name", "")),
+                            size_bytes=int(size_raw) if size_raw is not None else None,
+                            sha256=properties.get(_PROP_SHA256),
+                            run_id=properties.get(_PROP_RUN_ID),
+                            artifact_kind=properties.get(_PROP_ARTIFACT_KIND) or "restore",
+                            created_time=entry.get("createdTime"),
+                        )
+                    )
+                page_token = response.get("nextPageToken")
+                if not page_token or len(files) >= 1000:
+                    break
+        except Exception as error:
+            raise _classify_http_error(error) from error
+        return files
+
+    def get_backup_file(
+        self, file_id: str
+    ) -> Optional[tuple[RemoteBackupFile, list[str]]]:
+        """Metadata de UN archivo junto con sus carpetas PADRE (el caller valida que
+        pertenezca a la carpeta de respaldos antes de servirlo). ``None`` si no
+        existe, está en la papelera o no es accesible."""
+        from googleapiclient.errors import HttpError
+
+        try:
+            entry = (
+                self._files()
+                .get(
+                    fileId=file_id,
+                    fields="id, name, size, createdTime, appProperties, parents, trashed",
+                )
+                .execute()
+            )
+        except HttpError as error:
+            if error.resp is not None and error.resp.status == 404:
+                return None
+            raise _classify_http_error(error) from error
+        except Exception as error:
+            raise _classify_http_error(error) from error
+        if entry.get("trashed"):
+            return None
+        properties = entry.get("appProperties") or {}
+        size_raw = entry.get("size")
+        remote = RemoteBackupFile(
+            file_id=str(entry["id"]),
+            name=str(entry.get("name", "")),
+            size_bytes=int(size_raw) if size_raw is not None else None,
+            sha256=properties.get(_PROP_SHA256),
+            run_id=properties.get(_PROP_RUN_ID),
+            artifact_kind=properties.get(_PROP_ARTIFACT_KIND) or "restore",
+            created_time=entry.get("createdTime"),
+        )
+        return remote, list(entry.get("parents") or [])
+
+    def download_chunks(self, file_id: str, chunk_size: int = 8 * 1024 * 1024):
+        """Descarga el archivo por CHUNKS (generator de bytes) con la carga
+        reanudable del cliente de Google — apto para respaldos grandes sin cargar
+        todo en memoria."""
+        import io
+
+        from googleapiclient.http import MediaIoBaseDownload
+
+        request = self._files().get_media(fileId=file_id)
+        buffer = io.BytesIO()
+        downloader = MediaIoBaseDownload(buffer, request, chunksize=chunk_size)
+        done = False
+        try:
+            while not done:
+                _status, done = downloader.next_chunk()
+                data = buffer.getvalue()
+                if data:
+                    yield data
+                buffer.seek(0)
+                buffer.truncate(0)
+        except Exception as error:
+            raise _classify_http_error(error) from error
 
     def delete_backup(self, file_id: str) -> None:
         """Borra un respaldo remoto (retención). Un 404 se trata como ya borrado."""
