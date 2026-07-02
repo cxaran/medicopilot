@@ -3,6 +3,7 @@ from backend.app.models.agent_persona import AgentPersona
 from backend.app.models.ai_provider_credential import AiProviderCredential
 from backend.app.models.appointment import Appointment
 from backend.app.models.audit_event import AuditEvent
+from backend.app.models.backup import BackupOauthState, BackupRun, BackupSettings
 from backend.app.models.base import Base
 from backend.app.models.clinical_code import ClinicalCode
 from backend.app.models.clinical_document import ClinicalDocument
@@ -20,6 +21,9 @@ from backend.app.models.enums import (
     AiOutputStatus,
     AiProvider,
     AppointmentStatus,
+    BackupDriveStatus,
+    BackupRunStatus,
+    BackupTriggerKind,
     ClinicalCodeSystem,
     ClinicalDocumentStatus,
     ClinicalDocumentType,
@@ -77,6 +81,12 @@ __all__ = [
     "Appointment",
     "AppointmentStatus",
     "AuditEvent",
+    "BackupDriveStatus",
+    "BackupOauthState",
+    "BackupRun",
+    "BackupRunStatus",
+    "BackupSettings",
+    "BackupTriggerKind",
     "Base",
     "ClinicalCode",
     "ClinicalCodeSystem",

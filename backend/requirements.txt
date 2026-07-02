@@ -44,3 +44,11 @@ pypdf==6.14.2
 # backend sigue en psycopg2.
 taskiq==0.12.4
 taskiq-postgres[psycopg]==0.8.0
+
+# Respaldos cifrados hacia Google Drive (una sola cuenta, scope drive.file). OAuth con
+# las libs mantenidas de Google; el refresh token se cifra en reposo con Fernet
+# (cryptography, ya presente) y el ARCHIVO se cifra con el binario `age` de la imagen.
+google-auth==2.43.0
+google-auth-oauthlib==1.2.2
+google-auth-httplib2==0.2.2
+google-api-python-client==2.187.0

@@ -214,6 +214,23 @@ class Settings(BaseSettings):
     taskiq_cron: str = "0 2 * * *"
     taskiq_timezone: str = "America/Monterrey"
 
+    # Respaldos cifrados hacia Google Drive (una sola cuenta, scope drive.file). El
+    # horario/retención EDITABLES viven en la tabla backup_settings (no aquí); estos
+    # settings son el interruptor global y los secretos de despliegue. Apagado por
+    # defecto: la API y el worker arrancan igual que antes sin configurar nada.
+    backups_enabled: bool = False
+    backup_temp_dir: str = "/tmp/medicopilot-backups"
+    backup_run_lease_minutes: int = 120
+    backup_max_attempts: int = 3
+    # OAuth de la app de Google (web application). El client secret NUNCA se persiste
+    # en PostgreSQL ni se loguea; sólo vive en el .env del despliegue.
+    google_drive_client_id: str | None = None
+    google_drive_client_secret: SecretStr | None = None
+    google_drive_redirect_uri: str | None = None
+    # Clave Fernet DEDICADA que cifra en reposo el refresh token de Google (NO el
+    # archivo del respaldo, que se cifra con age y la clave pública del administrador).
+    backup_token_encryption_key: SecretStr | None = None
+
     postgres_user: str
     postgres_password: str
     postgres_server: str
