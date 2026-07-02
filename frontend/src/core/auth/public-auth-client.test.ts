@@ -8,6 +8,7 @@ import {
   requestPasswordReset,
   requestRegistration,
   resetPassword,
+  unlockAccount,
 } from "./public-auth-client.ts";
 
 // public-auth-client delega en browserApi (credentials:"include") -> requestJson ->
@@ -88,6 +89,20 @@ test("resetPassword: POST .../password/reset con el payload exacto", async (t) =
   assert.ok(captured);
   assert.equal(captured.url, "/api/v1/auth/password/reset");
   assert.equal(captured.init.body, JSON.stringify(payload));
+});
+
+test("unlockAccount: POST .../auth/unlock con body {token} y credentials:include", async (t) => {
+  let captured: { url: unknown; init: RequestInit } | undefined;
+  t.mock.method(globalThis, "fetch", async (url: unknown, init: RequestInit) => {
+    captured = { url, init };
+    return jsonResponse(200, { message: "Cuenta desbloqueada correctamente" });
+  });
+  await unlockAccount("tok-desbloqueo");
+  assert.ok(captured);
+  assert.equal(captured.url, "/api/v1/auth/unlock");
+  assert.equal(captured.init.method, "POST");
+  assert.equal(captured.init.credentials, "include");
+  assert.equal(captured.init.body, JSON.stringify({ token: "tok-desbloqueo" }));
 });
 
 test("public-auth client: un 4xx se propaga como ApiRequestError normalizado", async (t) => {

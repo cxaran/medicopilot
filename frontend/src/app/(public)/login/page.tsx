@@ -26,20 +26,22 @@ export default async function LoginPage() {
   return (
     <PublicAuthShell title="Iniciar sesión">
       <LoginForm />
-      {policy.password_reset_enabled || policy.registration_enabled ? (
-        <div className="mt-6 space-y-2 text-sm text-[var(--tx2)]">
-          {policy.password_reset_enabled ? (
-            <p>
-              <AuthLink href="/forgot-password">¿Olvidaste tu contraseña?</AuthLink>
-            </p>
-          ) : null}
-          {policy.registration_enabled ? (
-            <p>
-              ¿No tienes cuenta? <AuthLink href="/register">Crear cuenta</AuthLink>
-            </p>
-          ) : null}
-        </div>
-      ) : null}
+      <div className="mt-6 space-y-2 text-sm text-[var(--tx2)]">
+        {policy.password_reset_enabled ? (
+          <p>
+            <AuthLink href="/forgot-password">¿Olvidaste tu contraseña?</AuthLink>
+          </p>
+        ) : null}
+        {policy.registration_enabled ? (
+          <p>
+            ¿No tienes cuenta? <AuthLink href="/register">Crear cuenta</AuthLink>
+          </p>
+        ) : null}
+        {/* El desbloqueo no depende de la política: el correo de bloqueo siempre envía token. */}
+        <p>
+          ¿Cuenta bloqueada? <AuthLink href="/unlock">Desbloquear con token</AuthLink>
+        </p>
+      </div>
     </PublicAuthShell>
   );
 }
