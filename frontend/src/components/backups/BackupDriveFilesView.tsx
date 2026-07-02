@@ -128,13 +128,23 @@ export function BackupDriveFilesView({ result }: Readonly<{ result: DriveFilesRe
                   </td>
                   <td className="px-4 py-3 text-[var(--tx2)]">{formatBytes(file.sizeBytes)}</td>
                   <td className="px-4 py-3 text-right">
-                    <a
-                      href={downloadHref(file.fileId)}
-                      className="rounded-[8px] border border-[var(--border2)] bg-[var(--panel2)] px-3 py-1.5 text-xs font-semibold text-[var(--tx)] transition hover:opacity-90"
-                      download
-                    >
-                      Descargar
-                    </a>
+                    <div className="inline-flex items-center gap-2">
+                      {file.artifactKind === "explorer" && (
+                        <Link
+                          href={`/backups/explore?file=${encodeURIComponent(file.fileId)}&name=${encodeURIComponent(file.name)}`}
+                          className="rounded-[8px] bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-[var(--on-accent)] transition hover:opacity-90"
+                        >
+                          Explorar
+                        </Link>
+                      )}
+                      <a
+                        href={downloadHref(file.fileId)}
+                        className="rounded-[8px] border border-[var(--border2)] bg-[var(--panel2)] px-3 py-1.5 text-xs font-semibold text-[var(--tx)] transition hover:opacity-90"
+                        download
+                      >
+                        Descargar
+                      </a>
+                    </div>
                   </td>
                 </tr>
               ))}

@@ -14,6 +14,19 @@ const nextConfig: NextConfig = {
   // funciona (vercel/next.js#80665), por eso compose.dev.yml arranca el contenedor con
   // `next dev --webpack` (+ WATCHPACK_POLLING). Solo afecta a `next dev`.
   watchOptions: { pollIntervalMs: 500 },
+  // sql.js (visor de respaldos) corre SÓLO en el navegador (WASM en /sql-wasm.wasm),
+  // pero su bundle referencia módulos de Node: se apagan en el bundle de cliente.
+  webpack: (config, { isServer }) => {
+    if (!isServer) {
+      config.resolve.fallback = {
+        ...config.resolve.fallback,
+        fs: false,
+        path: false,
+        crypto: false,
+      };
+    }
+    return config;
+  },
   async rewrites() {
     if (!apiProxyTarget) {
       return [];

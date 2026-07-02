@@ -65,6 +65,8 @@
     "test:audio-panel": "node --no-warnings --import ./scripts/test-register.mjs --test src/core/audio-transcription/panel-view.test.ts",
     "test:audio-recorder": "node --no-warnings --import ./scripts/test-register.mjs --test src/core/audio-transcription/recorder.test.ts",
     "test:audio-vad": "node --no-warnings --import ./scripts/test-register.mjs --test src/core/audio-transcription/vad.test.ts",
+    "test:backups-drive": "node --no-warnings --import ./scripts/test-register.mjs --test src/core/backups/drive-files.test.ts",
+    "test:backups-explorer": "node --no-warnings --import ./scripts/test-register.mjs --test src/core/backups/explorer-db.test.ts",
     "test:reports": "node --no-warnings --import ./scripts/test-register.mjs --test src/core/reports/reports.test.ts",
     "test:scales-ui": "node --no-warnings --import ./scripts/test-register.mjs --test src/core/clinical-scales/scales.test.ts",
     "test:med-reconciliation-ui": "node --no-warnings --import ./scripts/test-register.mjs --test src/core/medication-reconciliation/reconciliation.test.ts",
@@ -116,6 +118,7 @@
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",
     "@tailwindcss/postcss": "4.3.1",
+    "age-encryption": "^0.3.0",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.8",
     "katex": "^0.17.0",
@@ -127,6 +130,7 @@
     "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
+    "sql.js": "^1.14.1",
     "tailwindcss": "4.3.1",
     "xlsx": "^0.18.5"
   },
@@ -135,6 +139,7 @@
     "@types/node": "26.0.1",
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
+    "@types/sql.js": "^1.4.11",
     "eslint": "9.39.4",
     "eslint-config-next": "16.2.9",
     "openapi-typescript": "7.13.0",
