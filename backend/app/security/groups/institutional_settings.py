@@ -1,7 +1,7 @@
 from backend.app.security.security_group import SecurityGroup
 
 
-class InstitutionalSettingPermissions(SecurityGroup):
+class InstitutionalSettingPermissions(SecurityGroup, label="Configuración institucional"):
     # Administración de la configuración institucional (umbrales/metas/intervalos clínicos
     # configurables). Rol de administración; la lectura también alimenta al copiloto.
     READ = ("institutional_settings:read", "Listar configuración institucional")

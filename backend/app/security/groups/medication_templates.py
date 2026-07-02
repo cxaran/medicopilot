@@ -1,7 +1,7 @@
 from backend.app.security.security_group import SecurityGroup
 
 
-class MedicationTemplatePermissions(SecurityGroup):
+class MedicationTemplatePermissions(SecurityGroup, label="Plantillas de medicamentos"):
     """Permisos del catálogo de plantillas de medicamentos frecuentes.
 
     El ``status`` (active/inactive) es estado operativo editable vía

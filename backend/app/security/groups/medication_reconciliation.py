@@ -1,7 +1,7 @@
 from backend.app.security.security_group import SecurityGroup
 
 
-class MedicationReconciliationPermissions(SecurityGroup):
+class MedicationReconciliationPermissions(SecurityGroup, label="Conciliación de medicación"):
     # Capacidad de SÓLO LECTURA: consolidar la medicación activa del paciente y marcar
     # discrepancias para revisión del médico. Permiso propio (no se reusa un read clínico)
     # porque es una vista transversal de seguridad del medicamento que una organización puede

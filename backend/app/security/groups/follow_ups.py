@@ -1,7 +1,7 @@
 from backend.app.security.security_group import SecurityGroup
 
 
-class FollowUpPermissions(SecurityGroup):
+class FollowUpPermissions(SecurityGroup, label="Pendientes de seguimiento"):
     # Capacidad de SÓLO LECTURA: reunir los pendientes accionables del médico (tareas abiertas/
     # vencidas, pacientes que no asistieron y resultados anormales sin revisar) para su revisión.
     # Permiso propio (no se reusa un read de tareas/citas/labs) porque es una vista transversal de

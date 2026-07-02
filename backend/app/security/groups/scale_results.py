@@ -1,7 +1,7 @@
 from backend.app.security.security_group import SecurityGroup
 
 
-class ScaleResultPermissions(SecurityGroup):
+class ScaleResultPermissions(SecurityGroup, label="Resultados de escalas clínicas"):
     # Resultados de escalas clínicas computadas y aprobadas por el médico (borradores P1
     # persistidos). Misma familia de roles clínicos que resultados de laboratorio/eventos.
     READ = ("scale_results:read", "Listar resultados de escalas clínicas")

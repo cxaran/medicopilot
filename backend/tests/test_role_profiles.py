@@ -87,8 +87,12 @@ class ClinicalRoleProfileTest(unittest.TestCase):
 
     def test_no_destructive_or_admin_permissions(self) -> None:
         perms = clinical_role_permissions()
-        # Sin borrado de recursos ni administración de usuarios/roles.
-        self.assertFalse(any(p.endswith(":delete") for p in perms))
+        # Sin borrado de recursos ni administración de usuarios/roles. Única excepción
+        # documentada en role_profiles: ``messages:delete`` (baja lógica del historial
+        # de chat del copiloto, nunca de datos clínicos).
+        self.assertFalse(
+            any(p.endswith(":delete") and p != "messages:delete" for p in perms)
+        )
         self.assertFalse(any(p.startswith("users:") for p in perms))
         self.assertFalse(any(p.startswith("roles:") for p in perms))
 

@@ -1,7 +1,7 @@
 from backend.app.security.security_group import SecurityGroup
 
 
-class QualityCheckPermissions(SecurityGroup):
+class QualityCheckPermissions(SecurityGroup, label="Verificaciones de calidad/seguridad"):
     # Capacidad de SÓLO LECTURA: ejecutar verificaciones deterministas de calidad/seguridad
     # clínica que MARCAN posibles problemas para revisión del médico. No corrige ni escribe
     # nada. Se declara como permiso propio (no se reusa un read clínico) porque es una

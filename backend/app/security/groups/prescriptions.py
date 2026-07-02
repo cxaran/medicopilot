@@ -1,7 +1,7 @@
 from backend.app.security.security_group import SecurityGroup
 
 
-class PrescriptionPermissions(SecurityGroup):
+class PrescriptionPermissions(SecurityGroup, label="Recetas médicas"):
     """Permisos de recetas. Los renglones de medicamento heredan este grupo: leer un
     renglón exige ``prescriptions:read`` y crearlo/editarlo/eliminarlo,
     ``prescriptions:update``. No existe un grupo ``prescription_items``."""

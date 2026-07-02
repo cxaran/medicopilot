@@ -1,7 +1,7 @@
 from backend.app.security.security_group import SecurityGroup
 
 
-class ClinicalDocumentPermissions(SecurityGroup):
+class ClinicalDocumentPermissions(SecurityGroup, label="Documentos clínicos"):
     """Permisos del recurso de archivos clínicos.
 
     ``DOWNLOAD`` es un permiso explícito y **separado** de ``READ``: leer la metadata

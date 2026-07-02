@@ -38,6 +38,27 @@ class ConversationRead(ApiReadSchema):
     updated_at: Optional[datetime] = None
 
 
+class ConversationResetRequest(ApiWriteSchema):
+    """Reinicio del hilo: baja lógica en lote de sus mensajes.
+
+    Sin ``from_sequence_index`` se reinicia la conversación COMPLETA; con él, desde ese punto
+    (inclusive) hasta el final. Borra historial de chat, nunca datos clínicos.
+    """
+
+    from_sequence_index: Optional[int] = Field(
+        default=None,
+        ge=0,
+        title="Desde el índice",
+        description="Primer sequence_index a eliminar (inclusive); nulo = todo el hilo.",
+    )
+
+
+class ConversationResetResult(ApiReadSchema):
+    """Resultado del reinicio: cuántos mensajes se dieron de baja lógica."""
+
+    deleted_count: int
+
+
 class ConversationListItem(ApiReadSchema):
     """Versión de listado compatible con ``ResourceQuery``."""
 

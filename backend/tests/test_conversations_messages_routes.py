@@ -65,8 +65,10 @@ _TEST_PG_URL = os.environ.get("TEST_POSTGRES_URL", "")
 _ALL_PERMS = (
     "conversations:read",
     "conversations:create",
+    "conversations:reset",
     "messages:read",
     "messages:create",
+    "messages:delete",
 )
 
 
@@ -231,6 +233,25 @@ class ChatPersistenceRoutesTest(unittest.TestCase):
         resp = self._append(uuid.uuid4())
         self.assertEqual(resp.status_code, 404, resp.text)
 
+    def test_append_bumps_conversation_updated_at(self) -> None:
+        # La conversación registra su ÚLTIMA ACTIVIDAD al agregar mensajes: es lo que ordena los
+        # chats recientes del sidebar (sort=-updated_at, nulls last).
+        conv = self._new_conversation().json()["id"]
+        with Session(self.engine) as session:
+            before = session.get(Conversation, uuid.UUID(conv))
+            assert before is not None
+            initial_updated_at = before.updated_at
+
+        self.assertEqual(self._append(conv, content="Actividad").status_code, 201)
+        with Session(self.engine) as session:
+            after = session.get(Conversation, uuid.UUID(conv))
+            assert after is not None
+            self.assertIsNotNone(after.updated_at)
+            if initial_updated_at is not None:
+                assert after.updated_at is not None
+                self.assertGreater(after.updated_at, initial_updated_at)
+            self.assertEqual(after.updated_by, self.actor_id)
+
     def test_list_messages_excludes_soft_deleted(self) -> None:
         conv = self._new_conversation().json()["id"]
         keep = self._append(conv, content="Se queda").json()["id"]
@@ -246,6 +267,70 @@ class ChatPersistenceRoutesTest(unittest.TestCase):
         ids = {row["id"] for row in listed["items"]}
         self.assertIn(keep, ids)
         self.assertNotIn(gone, ids)
+
+    # ----- Gestión del historial: borrar mensajes y reiniciar el hilo -----
+
+    def test_delete_message_soft_deletes_and_hides_from_list(self) -> None:
+        conv = self._new_conversation().json()["id"]
+        keep = self._append(conv, content="Se queda").json()["id"]
+        gone = self._append(conv, content="Se borra").json()["id"]
+
+        resp = self.client.delete(f"/api/v1/messages/{gone}")
+        self.assertEqual(resp.status_code, 204, resp.text)
+
+        listed = self.client.get(f"/api/v1/messages?conversation_id={conv}").json()
+        ids = {row["id"] for row in listed["items"]}
+        self.assertIn(keep, ids)
+        self.assertNotIn(gone, ids)
+        # Baja LÓGICA con autoría: la fila sigue en la tabla, marcada.
+        with Session(self.engine) as session:
+            row = session.get(Message, uuid.UUID(gone))
+            assert row is not None
+            self.assertIsNotNone(row.deleted_at)
+            self.assertEqual(row.deleted_by, self.actor_id)
+        # Borrarlo de nuevo: ya no está vigente → 404 (mismo contrato que el detalle).
+        self.assertEqual(self.client.delete(f"/api/v1/messages/{gone}").status_code, 404)
+
+    def test_reset_conversation_full_clears_and_restarts_sequence(self) -> None:
+        conv = self._new_conversation().json()["id"]
+        for content in ("Uno", "Dos", "Tres"):
+            self._append(conv, content=content)
+
+        resp = self.client.post(f"/api/v1/conversations/{conv}/reset", json={})
+        self.assertEqual(resp.status_code, 200, resp.text)
+        self.assertEqual(resp.json()["deleted_count"], 3)
+
+        listed = self.client.get(f"/api/v1/messages?conversation_id={conv}").json()
+        self.assertEqual(listed["items"], [])
+        # El hilo sigue vivo y el orden vuelve a empezar (máximo vigente + 1 = 0).
+        self.assertEqual(
+            self.client.get(f"/api/v1/conversations/{conv}").status_code, 200
+        )
+        fresh = self._append(conv, content="De cero")
+        self.assertEqual(fresh.json()["sequence_index"], 0)
+
+    def test_reset_conversation_from_sequence_index_keeps_prefix(self) -> None:
+        conv = self._new_conversation().json()["id"]
+        for content in ("Cero", "Uno", "Dos", "Tres"):
+            self._append(conv, content=content)
+
+        resp = self.client.post(
+            f"/api/v1/conversations/{conv}/reset", json={"from_sequence_index": 2}
+        )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        self.assertEqual(resp.json()["deleted_count"], 2)
+
+        listed = self.client.get(f"/api/v1/messages?conversation_id={conv}").json()
+        contents = [row["content"] for row in listed["items"]]
+        self.assertEqual(contents, ["Cero", "Uno"])
+        # El siguiente append continúa donde quedó el prefijo vigente.
+        self.assertEqual(self._append(conv, content="Nuevo").json()["sequence_index"], 2)
+
+    def test_reset_nonexistent_conversation_rejected(self) -> None:
+        resp = self.client.post(
+            f"/api/v1/conversations/{uuid.uuid4()}/reset", json={}
+        )
+        self.assertEqual(resp.status_code, 404, resp.text)
 
     def test_invalid_role_rejected_by_api(self) -> None:
         conv = self._new_conversation().json()["id"]
@@ -285,6 +370,27 @@ class ChatPersistenceRoutesTest(unittest.TestCase):
             403,
         )
         self.assertEqual(self._append(uuid.uuid4()).status_code, 403)
+        self.assertEqual(
+            self.client.delete(f"/api/v1/messages/{uuid.uuid4()}").status_code, 403
+        )
+        self.assertEqual(
+            self.client.post(
+                f"/api/v1/conversations/{uuid.uuid4()}/reset", json={}
+            ).status_code,
+            403,
+        )
+
+    def test_delete_requires_delete_permission_and_reset_requires_reset(self) -> None:
+        # Con sólo leer/crear (sin messages:delete ni conversations:reset) la gestión se rechaza.
+        conv = self._new_conversation().json()["id"]
+        msg = self._append(conv).json()["id"]
+        self._as("conversations:read", "conversations:create",
+                 "messages:read", "messages:create")
+        self.assertEqual(self.client.delete(f"/api/v1/messages/{msg}").status_code, 403)
+        self.assertEqual(
+            self.client.post(f"/api/v1/conversations/{conv}/reset", json={}).status_code,
+            403,
+        )
 
 
 if __name__ == "__main__":

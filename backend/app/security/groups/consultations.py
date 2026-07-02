@@ -1,7 +1,7 @@
 from backend.app.security.security_group import SecurityGroup
 
 
-class ConsultationPermissions(SecurityGroup):
+class ConsultationPermissions(SecurityGroup, label="Consultas médicas"):
     READ = ("consultations:read", "Listar consultas médicas")
     CREATE = ("consultations:create", "Crear consultas médicas")
     UPDATE = ("consultations:update", "Editar borradores de consulta")

@@ -1,7 +1,7 @@
 from backend.app.security.security_group import SecurityGroup
 
 
-class MedicalHistoryVersionPermissions(SecurityGroup):
+class MedicalHistoryVersionPermissions(SecurityGroup, label="Historia clínica"):
     READ = ("medical_history_versions:read", "Listar versiones de historia clínica")
     CREATE = ("medical_history_versions:create", "Crear borradores de historia clínica")
     UPDATE = ("medical_history_versions:update", "Editar borradores de historia clínica")

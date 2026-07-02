@@ -10,6 +10,8 @@ pasando por la aprobación P1; este perfil sólo habilita OFRECERLA.
 Regla del perfil clínico: puede CREAR todos los recursos clínicos EXCEPTO los restringidos
 (resultados de escalas, antecedentes, inmunizaciones y notas clínicas estructuradas), que quedan en
 sólo lectura. Nunca incluye borrado (``*:delete``) ni administración de usuarios/roles/configuración.
+Única excepción de borrado: el HISTORIAL DE CHAT del copiloto (``messages:delete`` y
+``conversations:reset``), que es baja lógica de mensajes del hilo, nunca de datos clínicos.
 """
 
 from backend.app.security.catalog import declared_permissions
@@ -54,9 +56,12 @@ _RESTRICTED_READ_ONLY: set[str] = {
 
 # Persistencia del chat del copiloto (chat-first): leer y crear conversaciones/mensajes. Persistir
 # el hilo NO es una escritura clínica; habilita que el rol Médico tenga historial por paciente.
+# EXCEPCIÓN a la regla "sin *:delete": ``messages:delete``/``conversations:reset`` borran (baja
+# lógica) HISTORIAL DE CHAT del propio copiloto, nunca datos clínicos; permiten limpiar mensajes
+# sueltos y reiniciar un hilo (completo o desde un punto).
 _CHAT_PERSISTENCE: set[str] = {
-    "conversations:read", "conversations:create",
-    "messages:read", "messages:create",
+    "conversations:read", "conversations:create", "conversations:reset",
+    "messages:read", "messages:create", "messages:delete",
 }
 
 # Apoyo / referencia / copiloto: sólo lectura.
