@@ -42,6 +42,7 @@ from backend.app.bootstrap.service import (  # noqa: E402
     BootstrapUserInput,
     get_platform_setup_status,
     initialize_platform,
+    sync_system_admin_role_permissions,
 )
 from backend.app.models import Base  # noqa: E402
 from backend.app.models.setup import PlatformSetup  # noqa: E402
@@ -105,6 +106,7 @@ class PlatformSetupServiceTest(unittest.TestCase):
             ).all()
 
         self.assertIsNotNone(setup)
+        assert setup is not None  # narrowing para el type-checker
         self.assertEqual(setup.status, "completed")
         self.assertEqual(setup.completion_origin, "bootstrap")
         self.assertEqual(setup.completed_by_user_id, users[0].id)
@@ -116,6 +118,49 @@ class PlatformSetupServiceTest(unittest.TestCase):
         self.assertEqual(set(system_accesses), permissions)
         self.assertEqual(extra_accesses, ["users:read"])
         self.assertEqual(len(user_roles), 2)
+
+    def test_sync_system_admin_role_adds_permissions_declared_after_setup(self) -> None:
+        engine = self._engine()
+        with Session(engine) as session:
+            result = initialize_platform(session, self._payload())
+            session.commit()
+
+            # Simula un permiso declarado DESPUÉS del setup (fila ausente: se repone) y uno
+            # desactivado por un administrador (se respeta, no se reactiva).
+            removed = session.exec(
+                select(RoleAccess).where(
+                    RoleAccess.role_id == result.system_admin_role.id,
+                    RoleAccess.access == "conversations:reset",
+                )
+            ).one()
+            session.delete(removed)
+            disabled = session.exec(
+                select(RoleAccess).where(
+                    RoleAccess.role_id == result.system_admin_role.id,
+                    RoleAccess.access == "messages:delete",
+                )
+            ).one()
+            disabled.is_active = False
+            session.commit()
+
+            added = sync_system_admin_role_permissions(session)
+            session.commit()
+
+            accesses = {
+                access.access: access.is_active
+                for access in session.exec(
+                    select(RoleAccess).where(
+                        RoleAccess.role_id == result.system_admin_role.id
+                    )
+                ).all()
+            }
+
+        self.assertEqual(added, 1)
+        self.assertTrue(accesses["conversations:reset"])
+        self.assertFalse(accesses["messages:delete"])  # decisión del admin respetada
+        with Session(engine) as session:
+            # Idempotente: en la segunda pasada no queda nada por agregar.
+            self.assertEqual(sync_system_admin_role_permissions(session), 0)
 
     def test_invalid_permission_rolls_back_without_partial_data(self) -> None:
         engine = self._engine()
