@@ -158,7 +158,7 @@ export function ResourceRowActions({
 
   return (
     <>
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="flex flex-wrap items-center gap-1.5">
         {actions.map((action) => {
           // enabled_when es guía de UI: si no se cumple, el botón se ve deshabilitado
           // (aria-disabled + tooltip) y el click se ignora. El backend revalida igual.
@@ -174,9 +174,11 @@ export function ResourceRowActions({
                   onActionClick(action);
                 }
               }}
-              className={`text-sm font-medium underline-offset-2 hover:underline ${
-                action.danger ? "text-[var(--danger)]" : "text-[var(--accent-tx)] hover:text-[var(--tx)]"
-              } ${enabled ? "" : "cursor-not-allowed opacity-50 hover:no-underline"}`}
+              className={`rounded-full px-2.5 py-1 text-[12.5px] font-medium whitespace-nowrap transition ${
+                action.danger
+                  ? "text-[var(--danger)] hover:bg-[color-mix(in_srgb,var(--danger)_12%,transparent)]"
+                  : "text-[var(--accent-tx)] hover:bg-[var(--accent-dim)]"
+              } ${enabled ? "" : "cursor-not-allowed opacity-50 hover:bg-transparent"}`}
             >
               {action.label}
             </button>

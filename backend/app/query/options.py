@@ -36,7 +36,9 @@ class QueryOptions:
     )
     column_bindings: Mapping[str, QueryColumn] = field(default_factory=_empty_column_bindings)
     default_sort: str | None = None
-    max_limit: int = 100
+    # 500: habilita la descarga por chunks del export del frontend con pocos
+    # round-trips; sigue siendo un tope sano por request para este consultorio.
+    max_limit: int = 500
     max_in_values: int = 100
     max_sort_terms: int = 3
     max_sort_length: int = 200

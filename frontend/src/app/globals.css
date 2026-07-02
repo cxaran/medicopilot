@@ -327,6 +327,166 @@ input::placeholder {
   .mc-menu-btn { display: flex !important; }
 }
 
+/*
+ * ====================================================================
+ * Tabla de recursos (tanda 0) — acciones de fila flotantes.
+ * La celda de acciones es sticky al borde derecho del viewport de scroll:
+ * queda visible sin importar el ancho de la tabla ni la posicion del scroll
+ * horizontal. En dispositivos con puntero las acciones se revelan al pasar
+ * el cursor por la fila; la pestana persistente (⋯) es el toggle explicito
+ * para tactil/teclado, donde no existe hover.
+ * ====================================================================
+ */
+.rt-viewport { position: relative; }
+.rt-scroller { overflow: auto; -webkit-overflow-scrolling: touch; }
+
+/* Header sticky dentro del scroller (la tabla también scrollea en Y cuando el
+   caller acota max-height). Cada th lleva su fondo + hairline inferior propios
+   porque los bordes del tr no viajan con position:sticky. Los z-index dejan el
+   header por ENCIMA de las celdas sticky del cuerpo al scrollear verticalmente. */
+.rt-thead th {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  background: var(--panel);
+  box-shadow: inset 0 -1px 0 var(--border);
+}
+.rt-thead .rt-actions-head { z-index: 7; }
+.rt-viewport[data-clip-top="1"] .rt-thead th {
+  box-shadow:
+    inset 0 -1px 0 var(--border),
+    0 5px 10px -6px rgba(20, 17, 16, 0.2);
+}
+
+/* Sombras de borde: solo cuando hay contenido recortado hacia ese lado. */
+.rt-shade {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 26px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 4;
+}
+.rt-shade-left { left: 0; background: linear-gradient(to right, rgba(20, 17, 16, 0.12), transparent); }
+.rt-shade-right { right: 0; background: linear-gradient(to left, rgba(20, 17, 16, 0.12), transparent); }
+.rt-viewport[data-clip-left="1"] .rt-shade-left { opacity: 1; }
+.rt-viewport[data-clip-right="1"] .rt-shade-right { opacity: 1; }
+
+/* Fila: --row-bg alimenta el degradado de la celda sticky para que el fondo
+   de las acciones combine con el estado hover de la fila. */
+.rt-row { --row-bg: var(--panel); transition: background-color 0.18s cubic-bezier(0.4, 0, 0.2, 1); }
+.rt-row:hover { --row-bg: var(--panel2); background: var(--panel2); }
+
+/* Celda de acciones anclada al borde visible del scroll. */
+.rt-actions-cell {
+  position: sticky;
+  right: 0;
+  z-index: 2;
+  background: linear-gradient(to right, transparent, var(--row-bg, var(--panel)) 34%);
+}
+.rt-actions-head {
+  position: sticky;
+  right: 0;
+  /* El header no lleva banda de color: el sticky cubre con el fondo del panel.
+     top/z-index los aporta .rt-thead th (esquina sticky en ambos ejes). */
+  background: var(--panel);
+}
+
+/* En tactil no hay hover que revele el embudo de filtro de la columna: se
+   muestra siempre (la regla es unlayered → gana a la utility opacity-0). */
+@media (hover: none) {
+  .rt-col-filter {
+    opacity: 1;
+  }
+}
+
+/* Encabezados redimensionables (patrón de Eseasa): el resize nativo del th ajusta
+   el ancho de la columna arrastrando la esquina inferior derecha; el grip visual
+   se oculta. Progressive enhancement: donde el navegador no soporte resize en
+   celdas de tabla, simplemente no pasa nada. */
+.rt-th-resize {
+  resize: horizontal;
+  overflow: hidden;
+}
+.rt-th-resize::-webkit-resizer {
+  display: none;
+}
+
+/* Pestana persistente: siempre visible; unico toggle donde no hay hover. */
+.rt-anchor { position: relative; display: inline-flex; align-items: center; }
+.rt-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--elev);
+  color: var(--tx3);
+  cursor: pointer;
+  box-shadow: var(--soft);
+  transition:
+    color 0.18s,
+    border-color 0.18s,
+    background-color 0.18s,
+    transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.rt-tab:hover { color: var(--accent-tx); border-color: var(--accent-bd); }
+.rt-anchor[data-open="1"] .rt-tab {
+  color: var(--accent-tx);
+  background: var(--accent-dim);
+  border-color: var(--accent-bd);
+  transform: rotate(90deg);
+}
+
+/* Flyout: pildora elevada que se despliega hacia la izquierda de la pestana.
+   Oculto con opacity (no visibility) para que el foco de teclado pueda entrar
+   a los enlaces y revelarlo via :focus-within. */
+.rt-flyout {
+  position: absolute;
+  top: 50%;
+  right: calc(100% + 8px);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 2px;
+  /* max-content: el shrink-to-fit del posicionamiento absoluto colapsaria al ancho
+     del ancla (la pestana); el tope lo pone max-width y flex-wrap hace el resto. */
+  width: max-content;
+  max-width: min(70vw, 440px);
+  padding: 4px;
+  border-radius: 15px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--elev) 92%, transparent);
+  backdrop-filter: blur(10px) saturate(160%);
+  box-shadow: var(--soft2);
+  opacity: 0;
+  transform: translateY(-50%) translateX(10px) scale(0.96);
+  transform-origin: right center;
+  pointer-events: none;
+  transition:
+    opacity 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+    transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  z-index: 5;
+}
+.rt-flyout:focus-within,
+.rt-anchor[data-open="1"] .rt-flyout {
+  opacity: 1;
+  transform: translateY(-50%);
+  pointer-events: auto;
+}
+@media (hover: hover) {
+  .rt-row:hover .rt-flyout {
+    opacity: 1;
+    transform: translateY(-50%);
+    pointer-events: auto;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
