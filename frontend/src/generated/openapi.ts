@@ -1170,6 +1170,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/conversations/{item_id}/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reset Conversation
+         * @description Reinicia el hilo con baja LÓGICA en lote de sus mensajes vigentes.
+         *
+         *     Sin ``from_sequence_index`` se vacía la conversación completa (el hilo queda utilizable y el
+         *     ``sequence_index`` vuelve a empezar en 0, porque el siguiente índice se calcula sobre los
+         *     vigentes); con él, se eliminan desde ese punto (inclusive) hasta el final. La conversación en
+         *     sí NO se elimina. Borra historial de chat, nunca datos clínicos.
+         */
+        post: operations["reset_conversation_api_v1_conversations__item_id__reset_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/doctors": {
         parameters: {
             query?: never;
@@ -1236,10 +1261,25 @@ export interface paths {
         get: operations["get_message_api_v1_messages__item_id__get"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete Message
+         * @description Baja LÓGICA de un mensaje puntual del hilo (limpieza del chat, no un borrado clínico).
+         *
+         *     El mensaje deja de aparecer en los listados; el resto del hilo conserva su orden (el
+         *     ``sequence_index`` de los demás no se recalcula).
+         */
+        delete: operations["delete_message_api_v1_messages__item_id__delete"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Update Message
+         * @description Actualiza los METADATOS de presentación de un mensaje vigente (sólo ``payload``).
+         *
+         *     Permite reflejar estado que cambia DESPUÉS del alta —p. ej. una interfaz generada ya usada,
+         *     para restaurarla contraída al recargar el hilo—. El contenido, el rol y el ``sequence_index``
+         *     son inmutables por esta vía; no es una escritura clínica.
+         */
+        patch: operations["update_message_api_v1_messages__item_id__patch"];
         trace?: never;
     };
     "/api/v1/follow-ups/summary": {
@@ -4262,6 +4302,28 @@ export interface components {
             updated_at?: string | null;
         };
         /**
+         * ConversationResetRequest
+         * @description Reinicio del hilo: baja lógica en lote de sus mensajes.
+         *
+         *     Sin ``from_sequence_index`` se reinicia la conversación COMPLETA; con él, desde ese punto
+         *     (inclusive) hasta el final. Borra historial de chat, nunca datos clínicos.
+         */
+        ConversationResetRequest: {
+            /**
+             * Desde el índice
+             * @description Primer sequence_index a eliminar (inclusive); nulo = todo el hilo.
+             */
+            from_sequence_index?: number | null;
+        };
+        /**
+         * ConversationResetResult
+         * @description Resultado del reinicio: cuántos mensajes se dieron de baja lógica.
+         */
+        ConversationResetResult: {
+            /** Deleted Count */
+            deleted_count: number;
+        };
+        /**
          * CredentialLeaseRequest
          * @description Solicitud server-to-server de arriendo de credencial (endpoint interno).
          */
@@ -5419,6 +5481,23 @@ export interface components {
          * @enum {string}
          */
         MessageRole: "user" | "assistant" | "system" | "tool";
+        /**
+         * MessageUpdate
+         * @description Actualización de los METADATOS de presentación de un mensaje.
+         *
+         *     Sólo el ``payload`` (sobres de UI generativa / tool calls / notas): permite reflejar estado
+         *     que cambia DESPUÉS del alta (p. ej. una interfaz ya usada, para restaurarla contraída). El
+         *     contenido, rol y orden del mensaje son inmutables por esta vía.
+         */
+        MessageUpdate: {
+            /**
+             * Payload
+             * @description Payload estructurado de presentación (tool calls / metadatos).
+             */
+            payload?: {
+                [key: string]: unknown;
+            } | null;
+        };
         /**
          * MissedAppointmentRead
          * @description Una cita reciente a la que el paciente no asistió (no_show) o que se canceló.
@@ -11519,6 +11598,43 @@ export interface operations {
             };
         };
     };
+    reset_conversation_api_v1_conversations__item_id__reset_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConversationResetRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationResetResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_doctors_api_v1_doctors_get: {
         parameters: {
             query?: {
@@ -11795,6 +11911,74 @@ export interface operations {
             };
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MessageRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_message_api_v1_messages__item_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_message_api_v1_messages__item_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MessageUpdate"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
