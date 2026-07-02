@@ -4,17 +4,13 @@
  * un contenedor circular con rotacion de matiz (hue-rotate), cinco circulos
  * de colores en orbita bajo una capa de desenfoque, y un brillo superior.
  *
- * Difiere del handoff SOLO en donde vive el box-shadow: en un div HERMANO
- * dedicado (solo sombra, sin hijos), no en un elemento que contenga o anime
- * filtros. Chrome degrada el rasterizado de una sombra cuyo elemento anima
- * `filter` o contiene capas compuestas por filtros animados: ignora el
- * border-radius y la pinta como columna rectangular cortada bajo el orbe.
- * El interior (blur + hue-rotate juntos en una capa, keyframes
- * orb-hue-rotate-blur) se conserva tal cual el handoff: separarlos en capas
- * anidadas rompe el clipping del desenfoque (el glow desborda el circulo del
- * orbe y se corta en el limite rectangular de la capa compuesta). NO
- * reintroducir willChange ni capas de filtro separadas ni sombra en ancestros
- * del subtree filtrado.
+ * Difiere del handoff SOLO en que NO lleva box-shadow (decision de Jordan,
+ * 2026-07-02): Chrome/Windows rasteriza mal la sombra de un elemento que anima
+ * `filter` o contiene capas de filtros animados (ignora el border-radius y la
+ * pinta como columna rectangular cortada), asi que se elimino. El interior
+ * (blur + hue-rotate juntos en una capa, keyframes orb-hue-rotate-blur) se
+ * conserva tal cual el handoff: separar blur y hue en capas anidadas rompe el
+ * clipping del desenfoque (el glow desborda el circulo del orbe).
  *
  * Es marcado puro (sin estado ni hooks), valido tanto en arboles server como
  * client. Las animaciones viven en globals.css (orb-hue-rotate,
@@ -45,8 +41,6 @@ export function AnimatedOrb({ size = 30, variant = "default", className, style }
   const blur = Math.max(5, size * 0.15);
 
   return (
-    // La sombra vive aqui, FUERA de todo elemento con filter: un filter animado en el
-    // mismo elemento re-rasteriza su box-shadow cada frame y Chrome/Windows la pinta mal.
     <div
       aria-hidden="true"
       className={className}
@@ -55,8 +49,10 @@ export function AnimatedOrb({ size = 30, variant = "default", className, style }
         width: size,
         height: size,
         borderRadius: "50%",
+        overflow: "hidden",
         flex: "0 0 auto",
-        boxShadow: "rgba(17,12,46,.12) 0px 12px 26px 0px",
+        backgroundColor: palette.bg,
+        animation: "orb-hue-rotate 8s linear infinite",
         ...style,
       }}
     >
@@ -64,49 +60,38 @@ export function AnimatedOrb({ size = 30, variant = "default", className, style }
         style={{
           position: "absolute",
           inset: 0,
-          borderRadius: "50%",
-          overflow: "hidden",
-          backgroundColor: palette.bg,
-          animation: "orb-hue-rotate 8s linear infinite",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          // consumido por orb-hue-rotate-blur
+          ["--orb-blur" as string]: `${blur}px`,
+          animation: "orb-hue-rotate-blur 6s linear infinite reverse",
         }}
       >
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            // consumido por orb-hue-rotate-blur
-            ["--orb-blur" as string]: `${blur}px`,
-            animation: "orb-hue-rotate-blur 6s linear infinite reverse",
-          }}
-        >
-          {palette.cols.map((color, i) => (
-            <div
-              key={color}
-              className={`orb-c${i + 1}`}
-              style={{
-                position: "absolute",
-                borderRadius: "50%",
-                width: size * CIRCLE_SCALE[i],
-                height: size * CIRCLE_SCALE[i],
-                opacity: CIRCLE_OPACITY[i],
-                backgroundColor: color,
-              }}
-            />
-          ))}
-        </div>
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            borderRadius: "50%",
-            pointerEvents: "none",
-            background: "linear-gradient(to bottom, rgba(255,255,255,.4) 0%, transparent 100%)",
-          }}
-        />
+        {palette.cols.map((color, i) => (
+          <div
+            key={color}
+            className={`orb-c${i + 1}`}
+            style={{
+              position: "absolute",
+              borderRadius: "50%",
+              width: size * CIRCLE_SCALE[i],
+              height: size * CIRCLE_SCALE[i],
+              opacity: CIRCLE_OPACITY[i],
+              backgroundColor: color,
+            }}
+          />
+        ))}
       </div>
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          borderRadius: "50%",
+          pointerEvents: "none",
+          background: "linear-gradient(to bottom, rgba(255,255,255,.4) 0%, transparent 100%)",
+        }}
+      />
     </div>
   );
 }
