@@ -258,6 +258,83 @@ describe("wiring OpenRouter (StartTurn -> lease -> núcleo OpenAI-compat -> stre
     expect(types(resumeSink.events)).toContain("turn.completed");
     expect((await turnStore.get(toolCall.turn_id))?.status).toBe("completed");
   });
+
+  it("relay de tools PARALELAS: drena una a una y reanuda con un mensaje tool por cada tool_call_id", async () => {
+    const secondTool: ModelToolDefinition = {
+      name: "clinical.patient_summary",
+      description: "Resumen del paciente",
+      inputSchema: { type: "object", additionalProperties: false },
+      strict: false
+    };
+    const { startTurn, resume, turnStore, calls } = setup([
+      // El modelo pide DOS tools en el mismo mensaje assistant.
+      sseResponse([
+        JSON.stringify({
+          choices: [
+            {
+              delta: {
+                tool_calls: [
+                  { index: 0, id: "call_a", function: { name: "clinical.list_patients", arguments: "{}" } },
+                  { index: 1, id: "call_b", function: { name: "clinical.patient_summary", arguments: '{"patient_id":"p1"}' } }
+                ]
+              }
+            }
+          ]
+        }),
+        JSON.stringify({ choices: [{ finish_reason: "tool_calls" }] })
+      ]),
+      // Única llamada de reanudación al proveedor (tras drenar ambas tools).
+      sseResponse([
+        JSON.stringify({ choices: [{ delta: { content: "Listo" } }] }),
+        JSON.stringify({ choices: [{ finish_reason: "stop" }] })
+      ])
+    ]);
+    const startSink = createSink();
+    await startTurn.execute(browserSession(), startRequest({ tools: [toolDef, secondTool] }), startSink);
+    const firstCall = startSink.events.find((e) => e.type === "turn.tool_call.ready");
+    if (!firstCall || firstCall.type !== "turn.tool_call.ready") {
+      throw new Error("esperado turn.tool_call.ready");
+    }
+    expect(firstCall.call_id).toBe("call_a");
+
+    // Resultado de la primera: el turno vuelve a waiting_for_tool con la SEGUNDA, sin fetch.
+    const drainSink = createSink();
+    await resume.execute(
+      firstCall.turn_id,
+      { callId: "call_a", result: { status: "success", content: { items: [] } } },
+      drainSink
+    );
+    const secondCall = drainSink.events.find((e) => e.type === "turn.tool_call.ready");
+    if (!secondCall || secondCall.type !== "turn.tool_call.ready") {
+      throw new Error("esperado turn.tool_call.ready de la segunda tool");
+    }
+    expect(secondCall.call_id).toBe("call_b");
+    expect(secondCall.tool_name).toBe("clinical.patient_summary");
+    expect((await turnStore.get(firstCall.turn_id))?.status).toBe("waiting_for_tool");
+    expect(calls).toHaveLength(1); // solo el startTurn ha llamado al proveedor
+
+    // Resultado de la segunda: recién ahora se reanuda con el proveedor y completa.
+    const finalSink = createSink();
+    await resume.execute(
+      firstCall.turn_id,
+      { callId: "call_b", result: { status: "success", content: { summary: "ok" } } },
+      finalSink
+    );
+    expect(types(finalSink.events)).toContain("turn.completed");
+    expect((await turnStore.get(firstCall.turn_id))?.status).toBe("completed");
+
+    // El request de reanudación lleva el assistant con AMBAS tool_calls y un tool por cada id.
+    expect(calls).toHaveLength(2);
+    const sent = JSON.parse(String(calls[1]!.init.body)) as {
+      messages: { role: string; tool_calls?: { id: string }[]; tool_call_id?: string }[];
+    };
+    const assistantMsg = sent.messages.find((m) => m.role === "assistant");
+    expect(assistantMsg?.tool_calls?.map((c) => c.id)).toEqual(["call_a", "call_b"]);
+    expect(sent.messages.filter((m) => m.role === "tool").map((m) => m.tool_call_id)).toEqual([
+      "call_a",
+      "call_b"
+    ]);
+  });
 });
 
 describe("OpenRouter: DISCOVERY RICO (consume metadatos reales de /models)", () => {

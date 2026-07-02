@@ -68,6 +68,12 @@ interface OACStreamChunk {
 
 // --- Estado de continuación del flavor chat_completions. ---------------------------
 
+export interface OACPendingToolCall {
+  id: string;
+  name: string;
+  args: string;
+}
+
 export interface OpenAICompatChatContinuation {
   // Marcador del proveedor dueño (p. ej. "openai" / "openai_chat_completions"): cada adaptador
   // valida el suyo en resumeTurn para no reanudar con un estado ajeno.
@@ -76,6 +82,11 @@ export interface OpenAICompatChatContinuation {
   messages: OACMessage[];
   tools: OACTool[];
   options: GenerationOptions;
+  // Tool calls PARALELAS del mismo mensaje assistant aún sin despachar al navegador. El gateway
+  // relay-a una a la vez; se drenan en la reanudación ANTES de volver al proveedor. Sin esto el
+  // cable queda inválido (el assistant declara N tool_calls pero solo llega 1 mensaje tool) y
+  // upstreams estrictos rechazan con 400.
+  pendingCalls?: OACPendingToolCall[];
 }
 
 export function isOpenAICompatChatContinuation(
@@ -124,6 +135,98 @@ export function toToolResultMessages(results: ToolCallResult[]): OACMessage[] {
     tool_call_id: result.callId,
     content: toolResultContent(result)
   }));
+}
+
+export interface OpenAICompatContinuationAdvance {
+  // Historial con los mensajes tool de los resultados ya añadidos.
+  messages: OACMessage[];
+  // Si el assistant pidió varias tools en paralelo y aún quedan sin resultado, el evento
+  // tool_call.ready de la SIGUIENTE (con el estado ya avanzado); el llamador lo emite y NO
+  // llama al proveedor. null cuando ya hay resultado para todas: se reanuda con `messages`.
+  nextEvent: ProviderEvent | null;
+}
+
+/**
+ * Avanza el estado de continuación con los resultados de tool recibidos. El cable
+ * chat/completions exige un mensaje `tool` por CADA tool_call_id del assistant antes del
+ * siguiente request; como el gateway relay-a una tool por vez, las llamadas paralelas
+ * pendientes se despachan al navegador una a una y solo al drenarlas se vuelve al proveedor.
+ */
+export function advanceOpenAICompatContinuation(
+  state: OpenAICompatChatContinuation,
+  toolResults: ToolCallResult[]
+): OpenAICompatContinuationAdvance {
+  const messages = [...state.messages, ...toToolResultMessages(toolResults)];
+  const pending = state.pendingCalls ?? [];
+  const nextCall = pending[0];
+  if (!nextCall) {
+    return { messages, nextEvent: null };
+  }
+  const continuationState: OpenAICompatChatContinuation = {
+    ...state,
+    messages,
+    pendingCalls: pending.slice(1)
+  };
+  return {
+    messages,
+    nextEvent: {
+      type: "tool_call.ready",
+      continuationState,
+      call: {
+        callId: nextCall.id,
+        name: nextCall.name,
+        arguments: safeParseJson(nextCall.args)
+      }
+    }
+  };
+}
+
+// --- Saneo de nombres de tool para el cable. ----------------------------------------
+//
+// Varios upstreams chat/completions (DeepSeek vía opencode/OpenRouter, la propia OpenAI)
+// exigen nombres de function ^[a-zA-Z0-9_-]+$: NO admiten el punto de nuestros namespaces
+// ("clinical.search_patients", "ui.render_form"). El saneo se aplica SOLO en el cable (tools
+// declaradas y tool_calls del historial reenviado); la tool call emitida al navegador, las
+// pendientes y el estado de continuación conservan el nombre ORIGINAL. Como el saneo es
+// determinista, re-sanear el historial al reanudar reproduce lo que el proveedor generó.
+
+export function sanitizeOACToolName(name: string): string {
+  return name.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64);
+}
+
+/** Mapa inverso saneado→original para recuperar el nombre real de la tool call del stream. */
+export function buildOACToolNameMap(tools: readonly OACTool[]): Record<string, string> {
+  const map: Record<string, string> = {};
+  for (const tool of tools) {
+    map[sanitizeOACToolName(tool.function.name)] = tool.function.name;
+  }
+  return map;
+}
+
+/** Tools con el nombre saneado para el cable (las originales no se mutan). */
+export function sanitizeOACTools(tools: readonly OACTool[]): OACTool[] {
+  return tools.map((tool) => {
+    const sanitized = sanitizeOACToolName(tool.function.name);
+    return sanitized === tool.function.name
+      ? tool
+      : { ...tool, function: { ...tool.function, name: sanitized } };
+  });
+}
+
+/** Historial con los nombres de tool_calls saneados para el cable (p. ej. al reanudar). */
+export function sanitizeOACMessageToolCalls(messages: readonly OACMessage[]): OACMessage[] {
+  return messages.map((message) => {
+    if (!message.tool_calls || message.tool_calls.length === 0) {
+      return message;
+    }
+    return {
+      ...message,
+      tool_calls: message.tool_calls.map((call) => ({
+        ...call,
+        function: { ...call.function, name: sanitizeOACToolName(call.function.name) }
+      }))
+    };
+  });
 }
 
 export function toolResultContent(result: ToolCallResult): string {
@@ -183,14 +286,18 @@ export async function* runOpenAICompatChat(
   params: RunOpenAICompatChatParams
 ): AsyncGenerator<ProviderEvent> {
   const compat = params.model.capabilities.compat;
+  // Nombres de tool SANEADOS solo para el cable (^[a-zA-Z0-9_-]+$; DeepSeek et al. rechazan el
+  // punto con 400). El mapa inverso recupera el nombre original de las tool calls del stream;
+  // params.messages/tools quedan intactos (la continuación conserva nombres originales).
+  const toolNameMap = buildOACToolNameMap(params.tools);
   const body: Record<string, unknown> = {
     model: params.model.route.providerModelId,
-    messages: params.messages,
+    messages: sanitizeOACMessageToolCalls(params.messages),
     stream: true,
     max_tokens: params.options.maxOutputTokens
   };
   if (params.tools.length > 0) {
-    body.tools = params.tools;
+    body.tools = sanitizeOACTools(params.tools);
     body.tool_choice = "auto";
   }
   if (params.options.temperature !== undefined) {
@@ -278,7 +385,18 @@ export async function* runOpenAICompatChat(
   }
 
   if (finishReason === "tool_calls" || toolAccumulators.size > 0) {
-    const calls = [...toolAccumulators.entries()].sort(([a], [b]) => a - b).map(([, v]) => v);
+    // Los ids se resuelven UNA vez: el id del evento al cliente y el del historial reenviado
+    // al proveedor deben coincidir, o el tool_call_id del resultado no casaría al reanudar.
+    // El nombre se REVIERTE al original aquí (el stream trae el saneado, que fue lo declarado):
+    // así continuación, pendientes y eventos llevan el nombre real; un nombre desconocido
+    // (alucinado por el modelo) pasa tal cual.
+    const calls: OACPendingToolCall[] = [...toolAccumulators.entries()]
+      .sort(([a], [b]) => a - b)
+      .map(([, v]) => ({
+        id: v.id || createId("call"),
+        name: toolNameMap[v.name] ?? v.name,
+        args: v.args
+      }));
     const first = calls[0];
     if (!first) {
       yield { type: "completed", usage };
@@ -288,7 +406,7 @@ export async function* runOpenAICompatChat(
       role: "assistant",
       content: assistantText.length > 0 ? assistantText : null,
       tool_calls: calls.map((call) => ({
-        id: call.id || createId("call"),
+        id: call.id,
         type: "function",
         function: { name: call.name, arguments: call.args }
       }))
@@ -298,13 +416,15 @@ export async function* runOpenAICompatChat(
       flavor: "chat_completions",
       messages: [...params.messages, assistantMessage],
       tools: params.tools,
-      options: params.options
+      options: params.options,
+      // Las tool calls paralelas restantes se drenan una a una en la reanudación.
+      pendingCalls: calls.slice(1)
     };
     yield {
       type: "tool_call.ready",
       continuationState,
       call: {
-        callId: first.id || createId("call"),
+        callId: first.id,
         name: first.name,
         arguments: safeParseJson(first.args)
       }

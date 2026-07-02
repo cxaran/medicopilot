@@ -6,7 +6,7 @@ import {
   runOpenAICompatChat,
   toOpenAICompatMessages,
   toOpenAICompatTools,
-  toToolResultMessages,
+  advanceOpenAICompatContinuation,
   toolResultContent,
   safeParseJson,
   readServerSentEvents,
@@ -341,6 +341,13 @@ export class OpenAIProviderAdapter implements ProviderAdapter {
     if (!isOpenAICompatChatContinuation(state, "openai")) {
       throw new GatewayError("INVALID_CONTINUATION_STATE", "Missing or invalid OpenAI chat continuation state");
     }
+    // Si el assistant pidió tools en paralelo, se despacha la siguiente al navegador sin llamar
+    // al proveedor (el cable exige un mensaje tool por cada tool_call_id antes de reanudar).
+    const advance = advanceOpenAICompatContinuation(state, input.toolResults);
+    if (advance.nextEvent) {
+      yield advance.nextEvent;
+      return;
+    }
     yield* runOpenAICompatChat({
       baseUrl: this.baseUrl,
       fetchImpl: this.fetchImpl,
@@ -348,7 +355,7 @@ export class OpenAIProviderAdapter implements ProviderAdapter {
       continuationProtocol: "openai",
       authHeaders: this.authHeaders(input.credential),
       model: input.model,
-      messages: [...state.messages, ...toToolResultMessages(input.toolResults)],
+      messages: advance.messages,
       tools: state.tools,
       options: state.options,
       bodyExtensions: chatReasoningBody(input.model, state.options),
@@ -440,6 +447,11 @@ export class OpenAIProviderAdapter implements ProviderAdapter {
     let usage: TurnUsage = emptyTurnUsage();
     let assistantText = "";
     const toolCalls: { callId: string; name: string; args: string }[] = [];
+    // `response.completed` es el evento TERMINAL del Responses API. El backend de ChatGPT/Codex
+    // normalmente NO envía `data: [DONE]` y puede mantener la conexión abierta (keep-alive) tras
+    // completarse; sin este corte explícito, el `for await` se quedaría bloqueado esperando datos
+    // que no llegan y el turno nunca emitiría `completed` (síntoma: el cliente se queda "Pensando…").
+    let streamCompleted = false;
 
     for await (const data of readServerSentEvents(response.body)) {
       if (data === "[DONE]") {
@@ -481,6 +493,7 @@ export class OpenAIProviderAdapter implements ProviderAdapter {
           if (event.response?.usage) {
             usage = mapResponsesUsage(event.response.usage);
           }
+          streamCompleted = true;
           break;
         }
         case "response.failed":
@@ -489,6 +502,12 @@ export class OpenAIProviderAdapter implements ProviderAdapter {
         }
         default:
           break;
+      }
+
+      // El `break` del switch no rompe el for-await; al ver el evento terminal salimos del bucle
+      // para no quedar bloqueados esperando un `[DONE]` que el backend de ChatGPT no envía.
+      if (streamCompleted) {
+        break;
       }
     }
 

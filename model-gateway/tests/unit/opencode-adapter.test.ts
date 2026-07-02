@@ -207,7 +207,8 @@ describe("OpencodeProviderAdapter.startTurn", () => {
       sseResponse([
         JSON.stringify({
           choices: [
-            { delta: { tool_calls: [{ index: 0, id: "call_1", function: { name: "clinical.search", arguments: '{"q":' } }] } }
+            // El proveedor devuelve el nombre SANEADO (sin punto), porque así se lo enviamos.
+            { delta: { tool_calls: [{ index: 0, id: "call_1", function: { name: "clinical_search", arguments: '{"q":' } }] } }
           ]
         }),
         JSON.stringify({
@@ -277,7 +278,7 @@ describe("OpencodeProviderAdapter.resumeTurn", () => {
       sseResponse([
         JSON.stringify({
           choices: [
-            { delta: { tool_calls: [{ index: 0, id: "call_9", function: { name: "clinical.search", arguments: "{}" } }] } }
+            { delta: { tool_calls: [{ index: 0, id: "call_9", function: { name: "clinical_search", arguments: "{}" } }] } }
           ]
         }),
         JSON.stringify({ choices: [{ delta: {}, finish_reason: "tool_calls" }] })
@@ -328,6 +329,128 @@ describe("OpencodeProviderAdapter.resumeTurn", () => {
     const toolMsg = sent.messages.at(-1);
     expect(toolMsg.role).toBe("tool");
     expect(toolMsg.tool_call_id).toBe("call_9");
+  });
+
+  it("con tool calls PARALELAS drena una a una y solo vuelve al proveedor con todos los resultados", async () => {
+    // 1) El modelo pide DOS tools en el mismo mensaje assistant (índices 0 y 1).
+    const startAdapter = adapterWith([
+      sseResponse([
+        JSON.stringify({
+          choices: [
+            {
+              delta: {
+                tool_calls: [
+                  { index: 0, id: "call_a", function: { name: "clinical_patient_summary", arguments: '{"patient_id":"p1"}' } },
+                  { index: 1, id: "call_b", function: { name: "clinical_search", arguments: '{"q":"labs"}' } }
+                ]
+              }
+            }
+          ]
+        }),
+        JSON.stringify({ choices: [{ delta: {}, finish_reason: "tool_calls" }] })
+      ])
+    ]);
+    const tools: ModelToolDefinition[] = [
+      { name: "clinical.patient_summary", description: "resumen", inputSchema: {}, strict: false },
+      { name: "clinical.search", description: "busca", inputSchema: {}, strict: false }
+    ];
+    const startEvents = await collect(
+      startAdapter.adapter.startTurn({
+        turnId: "t6",
+        model,
+        credential: lease,
+        messages: userMessage,
+        tools,
+        options,
+        signal: new AbortController().signal
+      })
+    );
+    expect(startEvents).toHaveLength(1);
+    const firstCall = startEvents[0]!;
+    if (firstCall.type !== "tool_call.ready") {
+      throw new Error("se esperaba tool_call.ready");
+    }
+    expect(firstCall.call.callId).toBe("call_a");
+    expect(firstCall.call.name).toBe("clinical.patient_summary");
+
+    // 2) Resultado de la PRIMERA: se despacha la SEGUNDA sin llamar al proveedor.
+    const drain = adapterWith([]);
+    const drainEvents = await collect(
+      drain.adapter.resumeTurn({
+        turnId: "t6",
+        model,
+        credential: lease,
+        toolResults: [{ callId: "call_a", result: { status: "success", content: { ok: true } } }],
+        continuationState: firstCall.continuationState ?? null,
+        signal: new AbortController().signal
+      })
+    );
+    expect(drain.calls).toHaveLength(0);
+    expect(drainEvents).toHaveLength(1);
+    const secondCall = drainEvents[0]!;
+    if (secondCall.type !== "tool_call.ready") {
+      throw new Error("se esperaba tool_call.ready");
+    }
+    expect(secondCall.call.callId).toBe("call_b");
+    expect(secondCall.call.name).toBe("clinical.search");
+    expect(secondCall.call.arguments).toEqual({ q: "labs" });
+
+    // 3) Resultado de la SEGUNDA: recién ahora se reanuda con el proveedor, con un mensaje
+    // tool por CADA tool_call_id del assistant (lo que DeepSeek exige).
+    const { adapter, calls } = adapterWith([
+      sseResponse([
+        JSON.stringify({ choices: [{ delta: { content: "Listo." } }] }),
+        JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })
+      ])
+    ]);
+    const finalEvents = await collect(
+      adapter.resumeTurn({
+        turnId: "t6",
+        model,
+        credential: lease,
+        toolResults: [{ callId: "call_b", result: { status: "success", content: { hits: 2 } } }],
+        continuationState: secondCall.continuationState ?? null,
+        signal: new AbortController().signal
+      })
+    );
+    expect(finalEvents.at(-1)!.type).toBe("completed");
+
+    const sent = JSON.parse(String(calls[0]!.init.body));
+    const assistantMsg = sent.messages.find((m: { role: string }) => m.role === "assistant");
+    expect(assistantMsg.tool_calls).toHaveLength(2);
+    const toolMsgs = sent.messages.filter((m: { role: string }) => m.role === "tool");
+    expect(toolMsgs.map((m: { tool_call_id: string }) => m.tool_call_id)).toEqual(["call_a", "call_b"]);
+  });
+
+  it("genera un id consistente entre el evento y el historial cuando el proveedor no manda id", async () => {
+    const startAdapter = adapterWith([
+      sseResponse([
+        JSON.stringify({
+          choices: [{ delta: { tool_calls: [{ index: 0, function: { name: "clinical_search", arguments: "{}" } }] } }]
+        }),
+        JSON.stringify({ choices: [{ delta: {}, finish_reason: "tool_calls" }] })
+      ])
+    ]);
+    const startEvents = await collect(
+      startAdapter.adapter.startTurn({
+        turnId: "t7",
+        model,
+        credential: lease,
+        messages: userMessage,
+        tools: [{ name: "clinical.search", description: "busca", inputSchema: {}, strict: false }],
+        options,
+        signal: new AbortController().signal
+      })
+    );
+    const toolEvent = startEvents[0]!;
+    if (toolEvent.type !== "tool_call.ready") {
+      throw new Error("se esperaba tool_call.ready");
+    }
+    const state = toolEvent.continuationState as { messages: { role: string; tool_calls?: { id: string }[] }[] };
+    const assistantMsg = state.messages.find((m) => m.role === "assistant");
+    // El id emitido al cliente y el guardado en el historial deben ser EL MISMO, o el
+    // tool_call_id del resultado no casaría al reanudar.
+    expect(assistantMsg!.tool_calls![0]!.id).toBe(toolEvent.call.callId);
   });
 
   it("lanza GatewayError si la continuationState es inválida", async () => {
@@ -455,8 +578,10 @@ describe("opencode: forma exacta del request a /chat/completions (pin)", () => {
     );
     const body = bodyOf(calls);
     expect(body.tool_choice).toBe("auto");
+    // El nombre se SANEA al enviarlo (clinical.search -> clinical_search): los upstreams
+    // estrictos (DeepSeek vía opencode) rechazan el '.' con 400 invalid_request_error.
     expect(body.tools).toEqual([
-      { type: "function", function: { name: "clinical.search", description: "busca", parameters: { type: "object" } } }
+      { type: "function", function: { name: "clinical_search", description: "busca", parameters: { type: "object" } } }
     ]);
   });
 

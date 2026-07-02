@@ -442,9 +442,12 @@ export class AnthropicProviderAdapter implements ProviderAdapter {
           assistantContent.push({ type: "text", text: block.text });
         }
       }
+      // El id se resuelve UNA vez: debe coincidir entre el historial reenviado y el evento al
+      // cliente, o el tool_use_id del resultado no casaría al reanudar.
+      const toolUseId = toolUse.id || createId("call");
       assistantContent.push({
         type: "tool_use",
-        id: toolUse.id || createId("call"),
+        id: toolUseId,
         name: toolUse.name,
         input: safeParseJson(toolUse.json)
       });
@@ -459,7 +462,7 @@ export class AnthropicProviderAdapter implements ProviderAdapter {
         type: "tool_call.ready",
         continuationState,
         call: {
-          callId: toolUse.id || createId("call"),
+          callId: toolUseId,
           name: toolUse.name,
           arguments: safeParseJson(toolUse.json)
         }

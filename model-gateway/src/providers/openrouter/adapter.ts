@@ -4,7 +4,7 @@ import {
   runOpenAICompatChat,
   toOpenAICompatMessages,
   toOpenAICompatTools,
-  toToolResultMessages,
+  advanceOpenAICompatContinuation,
   isOpenAICompatChatContinuation
 } from "../openai-compat/chat.js";
 import type { GenerationOptions } from "../../application/capabilities/capability-negotiator.js";
@@ -136,6 +136,13 @@ export class OpenRouterProviderAdapter implements ProviderAdapter {
     if (!isOpenAICompatChatContinuation(state, OPENROUTER_CONTINUATION)) {
       throw new GatewayError("INVALID_CONTINUATION_STATE", "Missing or invalid OpenRouter continuation state");
     }
+    // Si el assistant pidió tools en paralelo, se despacha la siguiente al navegador sin llamar
+    // al proveedor (el cable exige un mensaje tool por cada tool_call_id antes de reanudar).
+    const advance = advanceOpenAICompatContinuation(state, input.toolResults);
+    if (advance.nextEvent) {
+      yield advance.nextEvent;
+      return;
+    }
     yield* runOpenAICompatChat({
       baseUrl: this.baseUrl,
       fetchImpl: this.fetchImpl,
@@ -143,7 +150,7 @@ export class OpenRouterProviderAdapter implements ProviderAdapter {
       continuationProtocol: OPENROUTER_CONTINUATION,
       authHeaders: this.authHeaders(input.credential),
       model: input.model,
-      messages: [...state.messages, ...toToolResultMessages(input.toolResults)],
+      messages: advance.messages,
       tools: state.tools,
       options: state.options,
       bodyExtensions: reasoningBody(input.model, state.options),

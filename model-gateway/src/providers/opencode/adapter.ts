@@ -123,6 +123,16 @@ interface OpencodeContinuationState {
   messages: OpenAIMessage[];
   tools: OpenAITool[];
   options: GenerationOptions;
+  // Mapa nombre-saneado -> nombre-original de tool. Los nombres con '.' (namespacing del
+  // copiloto, p. ej. "clinical.list_patients") violan el patrón ^[a-zA-Z0-9_-]{1,64}$ que
+  // exigen OpenAI/Anthropic y algunos upstreams (DeepSeek vía opencode) rechazan con 400.
+  // Se sanea al enviar y se revierte al emitir la tool call al cliente, que conoce el original.
+  toolNameMap: Record<string, string>;
+  // Tool calls PARALELAS del mismo mensaje assistant aún sin despachar al navegador. El gateway
+  // relay-a una a la vez (waiting_for_tool); estas se drenan en resumeTurn ANTES de volver al
+  // proveedor. Sin esto, el cable queda inválido: el assistant declara N tool_calls pero solo
+  // llega 1 mensaje tool, y upstreams estrictos (DeepSeek) rechazan con 400.
+  pendingCalls?: { id: string; name: string; args: string }[];
 }
 
 function isOpencodeContinuationState(state: unknown): state is OpencodeContinuationState {
@@ -194,11 +204,13 @@ export class OpencodeProviderAdapter implements ProviderAdapter {
     input.signal.throwIfAborted();
     const messages = toOpenAIMessages(input.messages);
     const tools = toOpenAITools(input.tools);
+    const toolNameMap = buildToolNameMap(input.tools);
     yield* this.runCompletion({
       model: input.model,
       credential: input.credential,
       messages,
       tools,
+      toolNameMap,
       options: input.options,
       signal: input.signal
     });
@@ -219,12 +231,36 @@ export class OpencodeProviderAdapter implements ProviderAdapter {
       tool_call_id: result.callId,
       content: toolResultContent(result)
     }));
+    const messages = [...state.messages, ...toolMessages];
+
+    // Si el assistant pidió varias tools en paralelo, se despacha la SIGUIENTE al navegador sin
+    // llamar al proveedor: el cable exige un mensaje tool por cada tool_call_id antes de reanudar.
+    const pending = state.pendingCalls ?? [];
+    const nextCall = pending[0];
+    if (nextCall) {
+      const continuationState: OpencodeContinuationState = {
+        ...state,
+        messages,
+        pendingCalls: pending.slice(1)
+      };
+      yield {
+        type: "tool_call.ready",
+        continuationState,
+        call: {
+          callId: nextCall.id,
+          name: (state.toolNameMap ?? {})[nextCall.name] ?? nextCall.name,
+          arguments: safeParseJson(nextCall.args)
+        }
+      };
+      return;
+    }
 
     yield* this.runCompletion({
       model: input.model,
       credential: input.credential,
-      messages: [...state.messages, ...toolMessages],
+      messages,
       tools: state.tools,
+      toolNameMap: state.toolNameMap ?? {},
       options: state.options,
       signal: input.signal
     });
@@ -240,6 +276,7 @@ export class OpencodeProviderAdapter implements ProviderAdapter {
     credential: ProviderCredentialLease;
     messages: OpenAIMessage[];
     tools: OpenAITool[];
+    toolNameMap: Record<string, string>;
     options: GenerationOptions;
     signal: AbortSignal;
   }): AsyncGenerator<ProviderEvent> {
@@ -357,9 +394,11 @@ export class OpencodeProviderAdapter implements ProviderAdapter {
     }
 
     if (finishReason === "tool_calls" || toolAccumulators.size > 0) {
+      // Los ids se resuelven UNA vez: el id del evento al cliente y el del historial reenviado
+      // al proveedor deben coincidir, o el tool_call_id del resultado no casaría al reanudar.
       const calls = [...toolAccumulators.entries()]
         .sort(([a], [b]) => a - b)
-        .map(([, value]) => value);
+        .map(([, value]) => ({ id: value.id || createId("call"), name: value.name, args: value.args }));
       const first = calls[0];
       if (!first) {
         // finish_reason=tool_calls sin acumular ninguna: trátalo como completado.
@@ -371,7 +410,7 @@ export class OpencodeProviderAdapter implements ProviderAdapter {
         role: "assistant",
         content: assistantText.length > 0 ? assistantText : null,
         tool_calls: calls.map((call) => ({
-          id: call.id || createId("call"),
+          id: call.id,
           type: "function",
           function: { name: call.name, arguments: call.args }
         }))
@@ -381,16 +420,21 @@ export class OpencodeProviderAdapter implements ProviderAdapter {
         protocol: this.providerId,
         messages: [...params.messages, assistantMessage],
         tools: params.tools,
-        options: params.options
+        toolNameMap: params.toolNameMap,
+        options: params.options,
+        // Las tool calls paralelas restantes se drenan una a una en resumeTurn.
+        pendingCalls: calls.slice(1)
       };
 
       // El gateway reenvía una tool call por vez (waiting_for_tool); se emite la primera.
+      // El nombre se revierte al original (con '.') que conoce el cliente; el historial
+      // reenviado al proveedor (assistantMessage) conserva el saneado que él mismo emitió.
       yield {
         type: "tool_call.ready",
         continuationState,
         call: {
-          callId: first.id || createId("call"),
-          name: first.name,
+          callId: first.id,
+          name: params.toolNameMap[first.name] ?? first.name,
           arguments: safeParseJson(first.args)
         }
       };
@@ -523,11 +567,29 @@ function toOpenAIMessages(messages: CanonicalMessage[]): OpenAIMessage[] {
   });
 }
 
+// Sanea un nombre de tool al patrón aceptado por OpenAI/Anthropic y upstreams estrictos
+// (^[a-zA-Z0-9_-]{1,64}$): reemplaza cualquier carácter inválido (p. ej. '.') por '_' y
+// trunca a 64. Determinista; la reversión usa el mapa construido por buildToolNameMap.
+function sanitizeToolName(name: string): string {
+  return name.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64);
+}
+
+// Mapa nombre-saneado -> nombre-original, para revertir el nombre de la tool call que emite
+// el proveedor (que ve el saneado) al original que conoce el cliente. Si dos nombres colisionan
+// al sanear (caso teórico improbable con el namespacing por '.'), gana el último.
+function buildToolNameMap(tools: ModelToolDefinition[]): Record<string, string> {
+  const map: Record<string, string> = {};
+  for (const tool of tools) {
+    map[sanitizeToolName(tool.name)] = tool.name;
+  }
+  return map;
+}
+
 function toOpenAITools(tools: ModelToolDefinition[]): OpenAITool[] {
   return tools.map((tool) => ({
     type: "function",
     function: {
-      name: tool.name,
+      name: sanitizeToolName(tool.name),
       description: tool.description,
       parameters: tool.inputSchema,
       ...(tool.strict ? { strict: true } : {})

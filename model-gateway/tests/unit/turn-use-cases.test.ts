@@ -27,7 +27,8 @@ const baseSettings: GatewaySettings = {
   devTicket: "test-ticket",
   agentTicketSecret: "",
   opencodeBaseUrl: "https://opencode.test/v1",
-  opencodeDefaultModel: "test-model"
+  opencodeDefaultModel: "test-model",
+  fakeEnabled: true
 };
 
 function createCapturingTelemetry(): TelemetryPort & {
