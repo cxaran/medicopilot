@@ -644,6 +644,187 @@ class BackupApiAndTickTest(unittest.TestCase):
             assert config.next_run_at is not None and previous_next is not None
             self.assertGreater(config.next_run_at, previous_next)
 
+    # -- Artefacto de exploración: estados, errores y retención en pareja ----------
+
+    def _explorer_run(self) -> uuid.UUID:
+        from backend.app.models.enums import BackupExplorerStatus
+
+        with Session(self.engine) as session:
+            run = BackupRun(
+                status=BackupRunStatus.SUCCEEDED,
+                trigger_kind=BackupTriggerKind.MANUAL,
+                explorer_status=BackupExplorerStatus.BUILDING,
+                explorer_policy_version=1,
+            )
+            session.add(run)
+            session.commit()
+            return run.id
+
+    def test_new_runs_get_initial_explorer_status_by_setting(self) -> None:
+        from backend.app.models.enums import BackupExplorerStatus
+
+        with Session(self.engine) as session:
+            run_off = backups.enqueue_manual_run(session)
+            session.commit()
+            self.assertEqual(run_off.explorer_status, BackupExplorerStatus.NOT_REQUESTED)
+            self.assertIsNone(run_off.explorer_policy_version)
+        with mock.patch.object(backups.settings, "backup_explorer_enabled", True):
+            with Session(self.engine) as session:
+                run_on = backups.enqueue_manual_run(session)
+                session.commit()
+                self.assertEqual(run_on.explorer_status, BackupExplorerStatus.BUILDING)
+                self.assertEqual(run_on.explorer_policy_version, 1)
+
+    def test_explorer_success_marks_ready_without_touching_restore(self) -> None:
+        import tempfile as tempfile_module
+        from pathlib import Path
+
+        from backend.app.models.enums import BackupExplorerStatus
+
+        run_id = self._explorer_run()
+        workdir = Path(tempfile_module.mkdtemp())
+        sqlite_path = workdir / "explorer.sqlite"
+        sqlite_path.write_bytes(b"sqlite-falso-para-subida")
+        drive = mock.Mock()
+        drive.find_backup_by_run_id.return_value = None
+        drive.upload_backup.return_value = "drive-explorer-1"
+
+        BackupService(worker_id="tx")._process_explorer(
+            run_id,
+            sqlite_path=sqlite_path,
+            workdir=workdir,
+            recipient=None,  # cifrado opcional: sin recipient sube el .sqlite plano
+            folder_id="folder1",
+            prefix="medicopilot",
+            now_utc=datetime(2026, 7, 2, 8, 0),
+            drive=drive,
+        )
+        with Session(self.engine) as session:
+            run = session.get(BackupRun, run_id)
+            assert run is not None
+            self.assertEqual(run.status, BackupRunStatus.SUCCEEDED)  # intacto
+            self.assertEqual(run.explorer_status, BackupExplorerStatus.READY)
+            assert run.explorer_file_name is not None
+            self.assertTrue(run.explorer_file_name.endswith(".explorer.sqlite"))
+            self.assertEqual(run.explorer_drive_file_id, "drive-explorer-1")
+        kwargs = drive.upload_backup.call_args.kwargs
+        self.assertEqual(kwargs["artifact_kind"], "explorer")
+
+    def test_explorer_reauth_fails_without_retry_and_flags_settings(self) -> None:
+        import tempfile as tempfile_module
+        from pathlib import Path
+
+        from backend.app.models.enums import BackupExplorerStatus
+        from backend.app.services.google_drive_service import DriveReauthError
+
+        run_id = self._explorer_run()
+        workdir = Path(tempfile_module.mkdtemp())
+        sqlite_path = workdir / "explorer.sqlite"
+        sqlite_path.write_bytes(b"x")
+        drive = mock.Mock()
+        drive.find_backup_by_run_id.return_value = None
+        drive.upload_backup.side_effect = DriveReauthError(
+            "drive_needs_reauth", "Reconecta."
+        )
+        BackupService(worker_id="tx")._process_explorer(
+            run_id,
+            sqlite_path=sqlite_path,
+            workdir=workdir,
+            recipient=None,
+            folder_id="folder1",
+            prefix="medicopilot",
+            now_utc=datetime(2026, 7, 2, 8, 0),
+            drive=drive,
+        )
+        with Session(self.engine) as session:
+            run = session.get(BackupRun, run_id)
+            config = session.exec(select(BackupSettings)).one()
+            assert run is not None
+            self.assertEqual(run.status, BackupRunStatus.SUCCEEDED)  # restore intacto
+            self.assertEqual(run.explorer_status, BackupExplorerStatus.FAILED)
+            self.assertEqual(run.explorer_error_code, "google_drive_reauth_required")
+            self.assertEqual(config.drive_status, BackupDriveStatus.NEEDS_REAUTH)
+        # Reauth NO reintenta: una sola llamada de subida.
+        self.assertEqual(drive.upload_backup.call_count, 1)
+
+    def test_explorer_temporary_upload_error_retries_three_times(self) -> None:
+        import tempfile as tempfile_module
+        from pathlib import Path
+
+        from backend.app.models.enums import BackupExplorerStatus
+        from backend.app.services.google_drive_service import DriveTemporaryError
+
+        run_id = self._explorer_run()
+        workdir = Path(tempfile_module.mkdtemp())
+        sqlite_path = workdir / "explorer.sqlite"
+        sqlite_path.write_bytes(b"x")
+        drive = mock.Mock()
+        drive.find_backup_by_run_id.return_value = None
+        drive.upload_backup.side_effect = DriveTemporaryError("drive_unavailable", "503.")
+        with mock.patch("time.sleep"):
+            BackupService(worker_id="tx")._process_explorer(
+                run_id,
+                sqlite_path=sqlite_path,
+                workdir=workdir,
+                recipient=None,
+                folder_id="folder1",
+                prefix="medicopilot",
+                now_utc=datetime(2026, 7, 2, 8, 0),
+                drive=drive,
+            )
+        self.assertEqual(drive.upload_backup.call_count, 3)
+        with Session(self.engine) as session:
+            run = session.get(BackupRun, run_id)
+            assert run is not None
+            self.assertEqual(run.status, BackupRunStatus.SUCCEEDED)
+            self.assertEqual(run.explorer_status, BackupExplorerStatus.FAILED)
+
+    def test_retention_prunes_pair_and_keeps_restore_if_explorer_delete_fails(self) -> None:
+        from backend.app.services.google_drive_service import DriveTemporaryError
+
+        old = datetime.utcnow() - timedelta(days=30)
+        with Session(self.engine) as session:
+            prunable = BackupRun(
+                status=BackupRunStatus.SUCCEEDED,
+                trigger_kind=BackupTriggerKind.MANUAL,
+                finished_at=old,
+                drive_file_id="restore-old",
+                explorer_drive_file_id="explorer-old",
+                retention_roles=["daily"],
+            )
+            keeper = BackupRun(
+                status=BackupRunStatus.SUCCEEDED,
+                trigger_kind=BackupTriggerKind.MANUAL,
+                finished_at=datetime.utcnow(),
+                drive_file_id="restore-new",
+                retention_roles=["daily", "monthly", "yearly"],
+            )
+            session.add(prunable)
+            session.add(keeper)
+            session.commit()
+            prunable_id = prunable.id
+
+        # 1) El borrado del explorer falla: el restore se CONSERVA (sigue succeeded).
+        drive = mock.Mock()
+        drive.delete_backup.side_effect = DriveTemporaryError("drive_unavailable", "503.")
+        BackupService(worker_id="tr")._apply_retention((1, 12, 5), drive)
+        with Session(self.engine) as session:
+            run = session.get(BackupRun, prunable_id)
+            assert run is not None
+            self.assertEqual(run.status, BackupRunStatus.SUCCEEDED)
+            self.assertEqual(run.drive_file_id, "restore-old")
+
+        # 2) La siguiente rotación borra la PAREJA (explorer primero) y marca pruned.
+        drive = mock.Mock()
+        BackupService(worker_id="tr")._apply_retention((1, 12, 5), drive)
+        deleted = [call.args[0] for call in drive.delete_backup.call_args_list]
+        self.assertEqual(deleted, ["explorer-old", "restore-old"])
+        with Session(self.engine) as session:
+            run = session.get(BackupRun, prunable_id)
+            assert run is not None
+            self.assertEqual(run.status, BackupRunStatus.PRUNED)
+            self.assertIsNone(run.explorer_drive_file_id)
+
     def test_scheduled_window_without_active_drive_is_skipped_visibly(self) -> None:
         with Session(self.engine) as session:
             config = session.exec(select(BackupSettings)).one()

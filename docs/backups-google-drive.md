@@ -94,6 +94,34 @@ clínicos, usuarios, tokens ni rutas).
 Los resúmenes de error son SEGUROS: jamás tokens, contraseñas, rutas, argumentos de
 `pg_dump` ni texto crudo de Google (el detalle técnico vive sólo en logs internos).
 
+## Artefacto de EXPLORACIÓN (opcional, `BACKUP_EXPLORER_ENABLED`)
+
+Además del archivo restaurable, cada respaldo puede generar un **SQLite legible**
+(`{prefix}-{ts}-{run}.explorer.sqlite[.age]`) construido del **mismo snapshot
+PostgreSQL** que el dump (`pg_export_snapshot` + `pg_dump --snapshot` + `SET
+TRANSACTION SNAPSHOT`): ambos representan exactamente el mismo instante. Pensado para
+un explorador futuro de respaldos históricos.
+
+- **Contenido**: todo lo legible, descubierto DINÁMICAMENTE del catálogo de PostgreSQL
+  (sin modelos ni RESOURCE_REGISTRY: también tablas/columnas históricas). Sin
+  anonimizar. JSON/arrays/UUID/fechas/enums/PKs/FKs se conservan; sólo se excluyen
+  binarios (bytea/oid), columnas sensibles (password/token/secret/credential/
+  ciphertext…), esquemas de sistema, `alembic_version` y tablas de Taskiq.
+- **Formato interno**: identificadores seguros (`t_<hash>`, `c_<posición>`),
+  `__mp_record_key` por fila (base64url del JSON canónico de la PK; `row:<n>` sin PK)
+  y metadata `__mp_meta/__mp_tables/__mp_columns/__mp_relations` (relaciones sólo de
+  FKs reales, con navegabilidad calculada). Validado con `PRAGMA integrity_check`.
+- **Estados propios** (`explorer_status`: not_requested/building/ready/failed): un
+  explorer fallido **jamás** invalida un restore correcto. Reauth de Drive marca
+  `needs_reauth` (alerta persistente) sin reintentos; errores temporales de subida
+  reintentan hasta 3 veces en la misma ejecución.
+- **Cifrado y subida**: mismo recipient opcional de age y misma carpeta de Drive; los
+  archivos se distinguen por `appProperties.medicopilot_artifact_kind`
+  (`restore`/`explorer`).
+- **Retención en pareja**: la rotación borra primero el explorer y sólo marca `pruned`
+  cuando ambos artefactos quedaron fuera; si el borrado del explorer falla, el restore
+  se conserva y la siguiente rotación reintenta.
+
 ## Retención
 
 Cada éxito recibe roles en **fechas locales** (zona configurada): `daily` siempre;
@@ -117,7 +145,8 @@ Recursos declarativos (UI genérica existente, sin pantallas a medida):
   (encola manual y despierta el tick). Todo cambio de configuración (PATCH, conectar,
   desconectar, generar clave) envía el correo resumen al administrador.
 - **`backup_runs`** (solo lectura con `backups:read`): historial con estado, origen,
-  ventana, archivo, tamaño, roles de retención, intentos y error.
+  ventana, archivo, tamaño, roles de retención, intentos, error y el estado/tamaño
+  del artefacto de exploración.
 
 Callback OAuth: `GET /api/v1/backups/google-drive/callback` (exige la sesión del
 administrador) → redirige a `/resources/backup_settings?drive=connected|error`.

@@ -46,6 +46,7 @@ from backend.app.core.settings import settings
 from backend.app.models.backup import BackupOauthState, BackupRun, BackupSettings
 from backend.app.models.enums import (
     BackupDriveStatus,
+    BackupExplorerStatus,
     BackupRunStatus,
     BackupTriggerKind,
 )
@@ -199,6 +200,23 @@ def build_backup_filename(
     stamp = now_utc.strftime("%Y%m%dT%H%M%SZ")
     suffix = ".tar.age" if encrypted else ".tar"
     return f"{prefix}-{stamp}-{run_id.hex[:8]}{suffix}"
+
+
+def build_explorer_filename(
+    prefix: str, now_utc: datetime, run_id: uuid.UUID, *, encrypted: bool
+) -> str:
+    """Nombre del artefacto de EXPLORACIÓN, hermano del restaurable:
+    ``{prefix}-{timestampUTC}-{run corto}.explorer.sqlite[.age]``."""
+    stamp = now_utc.strftime("%Y%m%dT%H%M%SZ")
+    suffix = ".explorer.sqlite.age" if encrypted else ".explorer.sqlite"
+    return f"{prefix}-{stamp}-{run_id.hex[:8]}{suffix}"
+
+
+def initial_explorer_status() -> tuple[Optional[BackupExplorerStatus], Optional[int]]:
+    """Estado inicial del artefacto de exploración al CREAR una ejecución."""
+    if settings.backup_explorer_enabled:
+        return BackupExplorerStatus.BUILDING, 1
+    return BackupExplorerStatus.NOT_REQUESTED, None
 
 
 def compute_retention_roles(*, month_taken: bool, year_taken: bool) -> list[str]:
@@ -541,10 +559,13 @@ def backup_settings_email(config: BackupSettings, identity_plain: Optional[str])
 
 def enqueue_manual_run(session: Session) -> BackupRun:
     """Crea la ejecución manual (queued, reclamable de inmediato por el tick)."""
+    explorer_status, policy = initial_explorer_status()
     run = BackupRun(
         status=BackupRunStatus.QUEUED,
         trigger_kind=BackupTriggerKind.MANUAL,
         next_attempt_at=utc_now(),
+        explorer_status=explorer_status,
+        explorer_policy_version=policy,
     )
     session.add(run)
     return run
@@ -637,12 +658,15 @@ class BackupService:
             )
             return
 
+        explorer_status, policy = initial_explorer_status()
         session.add(
             BackupRun(
                 status=BackupRunStatus.QUEUED,
                 trigger_kind=BackupTriggerKind.SCHEDULED,
                 scheduled_for=scheduled_for,
                 next_attempt_at=now,
+                explorer_status=explorer_status,
+                explorer_policy_version=policy,
             )
         )
 
@@ -742,7 +766,7 @@ class BackupService:
             run = session.get(BackupRun, run_id)
             assert run is not None
             existing_sha = run.ciphertext_sha256
-        remote = drive.find_backup_by_run_id(folder_id, str(run_id))
+        remote = drive.find_backup_by_run_id(folder_id, str(run_id), artifact_kind="restore")
         if remote is not None and existing_sha and remote.sha256 == existing_sha:
             self._finish_succeeded(
                 run_id,
@@ -756,15 +780,28 @@ class BackupService:
                 retention=retention,
                 drive=drive,
             )
+            # Restore reconciliado sin regenerar nada: un explorer aún "building" de
+            # este run no puede construirse ya del MISMO instante → failed honesto.
+            self._mark_explorer_failed(
+                run_id,
+                code="explorer_snapshot_lost",
+                summary="El respaldo se reconcilió sin regenerar; no hay snapshot para el explorador.",
+            )
             return
 
         temp_root = Path(settings.backup_temp_dir)
         temp_root.mkdir(parents=True, exist_ok=True)
         workdir = Path(tempfile.mkdtemp(prefix="run-", dir=temp_root))
+        explorer_sqlite: Optional[Path] = None
         try:
             dump_path = workdir / "database.dump"
-            self._pg_dump(dump_path)
-            self._pg_restore_list(dump_path)
+            # Snapshot COMPARTIDO: el dump restaurable y el explorer SQLite leen el
+            # MISMO instante de la base (pg_dump --snapshot + SET TRANSACTION
+            # SNAPSHOT). El snapshot se mantiene abierto sólo lo que tardan ambos.
+            with exported_read_snapshot() as snapshot_id:
+                self._pg_dump(dump_path, snapshot_id)
+                self._pg_restore_list(dump_path)
+                explorer_sqlite = self._build_explorer(run_id, workdir, snapshot_id)
 
             manifest_path = workdir / "manifest.json"
             manifest_path.write_text(
@@ -815,22 +852,37 @@ class BackupService:
                 file_name=file_name,
                 run_id=str(run_id),
                 sha256=ciphertext_sha256,
+                artifact_kind="restore",
             )
+
+            self._finish_succeeded(
+                run_id,
+                file_name=file_name,
+                file_size_bytes=file_size,
+                ciphertext_sha256=ciphertext_sha256,
+                drive_file_id=drive_file_id,
+                drive_folder_id=folder_id,
+                recipient=recipient,
+                timezone_name=timezone_name,
+                retention=retention,
+                drive=drive,
+            )
+
+            # El artefacto de EXPLORACIÓN se procesa DESPUÉS del éxito del restore y
+            # sus fallos jamás lo invalidan (estado y errores propios en explorer_*).
+            if explorer_sqlite is not None:
+                self._process_explorer(
+                    run_id,
+                    sqlite_path=explorer_sqlite,
+                    workdir=workdir,
+                    recipient=recipient,
+                    folder_id=folder_id,
+                    prefix=prefix,
+                    now_utc=now,
+                    drive=drive,
+                )
         finally:
             shutil.rmtree(workdir, ignore_errors=True)
-
-        self._finish_succeeded(
-            run_id,
-            file_name=file_name,
-            file_size_bytes=file_size,
-            ciphertext_sha256=ciphertext_sha256,
-            drive_file_id=drive_file_id,
-            drive_folder_id=folder_id,
-            recipient=recipient,
-            timezone_name=timezone_name,
-            retention=retention,
-            drive=drive,
-        )
 
     def _pg_dump(self, output_path: Path, snapshot_id: Optional[str] = None) -> None:
         """pg_dump -Fc de UNA base (sin roles/tablespaces globales), credenciales sólo
@@ -897,6 +949,189 @@ class BackupService:
             raise BackupTemporaryError(
                 "dump_unreadable", "El archivo generado por pg_dump no es legible."
             )
+
+    # -- artefacto de exploración ---------------------------------------------------
+
+    def _build_explorer(
+        self, run_id: uuid.UUID, workdir: Path, snapshot_id: str
+    ) -> Optional[Path]:
+        """Construye el SQLite de exploración DENTRO del snapshot compartido. Un
+        fallo aquí marca explorer_status=failed y devuelve None: el respaldo
+        restaurable continúa intacto."""
+        if not settings.backup_explorer_enabled:
+            return None
+        with Session(engine) as session:
+            run = session.get(BackupRun, run_id)
+            if run is None or run.explorer_status != BackupExplorerStatus.BUILDING:
+                return None
+        from backend.app.services.explorer_snapshot_service import (
+            ExplorerSnapshotError,
+            explorer_snapshot_service,
+        )
+
+        started = datetime.now(dt_timezone.utc)
+        logger.info("backup.explorer.started backup_run_id=%s", run_id)
+        sqlite_path = workdir / "explorer.sqlite"
+        try:
+            result = explorer_snapshot_service.build(
+                source_dsn=source_postgres_dsn(),
+                snapshot_id=snapshot_id,
+                output_path=sqlite_path,
+                backup_run_id=run_id,
+            )
+        except ExplorerSnapshotError as error:
+            self._mark_explorer_failed(run_id, code=error.code, summary=error.summary)
+            return None
+        except Exception:
+            logger.exception("backup.explorer.failed backup_run_id=%s", run_id)
+            self._mark_explorer_failed(
+                run_id,
+                code="explorer_unexpected_error",
+                summary="Error inesperado al construir el artefacto de exploración.",
+            )
+            return None
+        duration_ms = int((datetime.now(dt_timezone.utc) - started).total_seconds() * 1000)
+        logger.info(
+            "backup.explorer.built backup_run_id=%s table_count=%s row_count=%s duration_ms=%s",
+            run_id,
+            result.table_count,
+            result.row_count,
+            duration_ms,
+        )
+        return sqlite_path
+
+    def _process_explorer(
+        self,
+        run_id: uuid.UUID,
+        *,
+        sqlite_path: Path,
+        workdir: Path,
+        recipient: Optional[str],
+        folder_id: str,
+        prefix: str,
+        now_utc: datetime,
+        drive: GoogleDriveBackupService,
+    ) -> None:
+        """Cifra (si hay recipient) y sube el explorer, con hasta 3 intentos para
+        fallos TEMPORALES de la subida dentro de esta misma ejecución. Reauth marca
+        needs_reauth (alerta persistente) sin reintentos; nada de esto toca el
+        estado succeeded del restore."""
+        try:
+            file_name = build_explorer_filename(
+                prefix, now_utc, run_id, encrypted=recipient is not None
+            )
+            if recipient is not None:
+                upload_path = workdir / file_name
+                encrypt_file_with_age(sqlite_path, upload_path, recipient)
+                logger.info("backup.explorer.encrypted backup_run_id=%s", run_id)
+            else:
+                upload_path = sqlite_path
+            sha256 = sha256_of_file(upload_path)
+            size = upload_path.stat().st_size
+
+            # Idempotencia: si un intento previo YA subió este explorer, se adopta.
+            remote = drive.find_backup_by_run_id(
+                folder_id, str(run_id), artifact_kind="explorer"
+            )
+            if remote is not None and remote.sha256 == sha256:
+                drive_file_id = remote.file_id
+            else:
+                drive_file_id = self._upload_explorer_with_retries(
+                    drive=drive,
+                    folder_id=folder_id,
+                    upload_path=upload_path,
+                    file_name=file_name,
+                    run_id=run_id,
+                    sha256=sha256,
+                )
+        except DriveReauthError as error:
+            self._mark_explorer_failed(
+                run_id,
+                code="google_drive_reauth_required",
+                summary="La cuenta de Google Drive requiere reconexión.",
+            )
+            with Session(engine) as session:
+                config = get_backup_settings(session, for_update=True)
+                config.drive_status = BackupDriveStatus.NEEDS_REAUTH
+                config.last_error_code = error.code
+                config.last_error_summary = error.summary
+                config.last_error_at = utc_now()
+                session.add(config)
+                session.commit()
+            return
+        except (DriveTemporaryError, BackupCryptoError) as error:
+            self._mark_explorer_failed(run_id, code=error.code, summary=error.summary)
+            return
+        except Exception:
+            logger.exception("backup.explorer.failed backup_run_id=%s", run_id)
+            self._mark_explorer_failed(
+                run_id,
+                code="explorer_unexpected_error",
+                summary="Error inesperado al subir el artefacto de exploración.",
+            )
+            return
+
+        with Session(engine) as session:
+            run = session.get(BackupRun, run_id)
+            if run is None:
+                return
+            run.explorer_status = BackupExplorerStatus.READY
+            run.explorer_file_name = file_name
+            run.explorer_file_size_bytes = size
+            run.explorer_ciphertext_sha256 = sha256
+            run.explorer_drive_file_id = drive_file_id
+            run.explorer_created_at = utc_now()
+            run.explorer_error_code = None
+            run.explorer_error_summary = None
+            session.add(run)
+            session.commit()
+        logger.info(
+            "backup.explorer.uploaded backup_run_id=%s file_size_bytes=%s", run_id, size
+        )
+
+    def _upload_explorer_with_retries(
+        self,
+        *,
+        drive: GoogleDriveBackupService,
+        folder_id: str,
+        upload_path: Path,
+        file_name: str,
+        run_id: uuid.UUID,
+        sha256: str,
+    ) -> str:
+        """Hasta 3 intentos DENTRO de la misma ejecución para fallos temporales de la
+        subida (no se re-corre el respaldo ni se regenera el explorer)."""
+        import time as time_module
+
+        last_error: Optional[DriveTemporaryError] = None
+        for attempt in range(3):
+            try:
+                return drive.upload_backup(
+                    folder_id=folder_id,
+                    file_path=upload_path,
+                    file_name=file_name,
+                    run_id=str(run_id),
+                    sha256=sha256,
+                    artifact_kind="explorer",
+                )
+            except DriveTemporaryError as error:
+                last_error = error
+                if attempt < 2:
+                    time_module.sleep(2 * (attempt + 1))
+        assert last_error is not None
+        raise last_error
+
+    def _mark_explorer_failed(self, run_id: uuid.UUID, *, code: str, summary: str) -> None:
+        with Session(engine) as session:
+            run = session.get(BackupRun, run_id)
+            if run is None:
+                return
+            run.explorer_status = BackupExplorerStatus.FAILED
+            run.explorer_error_code = code
+            run.explorer_error_summary = summary
+            session.add(run)
+            session.commit()
+        logger.info("backup.explorer.failed backup_run_id=%s error_code=%s", run_id, code)
 
     # -- desenlaces ---------------------------------------------------------------
 
@@ -1011,6 +1246,13 @@ class BackupService:
                     run = session.get(BackupRun, prune_id)
                     if run is None or run.drive_file_id is None:
                         continue
+                    # PAREJA: primero el explorer; si su borrado falla, el restore se
+                    # conserva y la siguiente rotación reintenta (pruned exige ambos
+                    # artefactos fuera).
+                    if run.explorer_drive_file_id is not None:
+                        drive.delete_backup(run.explorer_drive_file_id)
+                        run.explorer_drive_file_id = None
+                        logger.info("backup.explorer.pruned backup_run_id=%s", prune_id)
                     drive.delete_backup(run.drive_file_id)
                     run.status = BackupRunStatus.PRUNED
                     run.pruned_at = utc_now()

@@ -17,9 +17,11 @@ from typing import Any, Optional
 BACKUP_FOLDER_NAME = "MediCopilot Backups"
 DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file"
 
-# appProperties con las que se reconcilian subidas tras un timeout (idempotencia).
+# appProperties con las que se reconcilian subidas tras un timeout (idempotencia) y
+# se distingue el tipo de artefacto de un mismo respaldo (restore vs explorer).
 _PROP_RUN_ID = "medicopilot_backup_run_id"
 _PROP_SHA256 = "medicopilot_sha256"
+_PROP_ARTIFACT_KIND = "medicopilot_artifact_kind"
 
 
 class DriveTemporaryError(Exception):
@@ -50,6 +52,7 @@ class RemoteBackupFile:
     size_bytes: Optional[int]
     sha256: Optional[str]
     run_id: Optional[str]
+    artifact_kind: Optional[str]
 
 
 def _classify_http_error(error: Exception) -> Exception:
@@ -172,8 +175,12 @@ class GoogleDriveBackupService:
 
     # -- Archivos ----------------------------------------------------------------
 
-    def find_backup_by_run_id(self, folder_id: str, run_id: str) -> Optional[RemoteBackupFile]:
-        """Busca en la carpeta un respaldo ya subido para este run (idempotencia)."""
+    def find_backup_by_run_id(
+        self, folder_id: str, run_id: str, artifact_kind: str = "restore"
+    ) -> Optional[RemoteBackupFile]:
+        """Busca en la carpeta el artefacto YA subido de este run y tipo
+        (idempotencia). Los archivos anteriores a la distinción de tipos no llevan
+        ``artifact_kind``: cuentan como ``restore`` (compatibilidad)."""
         query = (
             f"'{folder_id}' in parents and trashed = false "
             f"and appProperties has {{ key='{_PROP_RUN_ID}' and value='{run_id}' }}"
@@ -184,25 +191,27 @@ class GoogleDriveBackupService:
                 .list(
                     q=query,
                     fields="files(id, name, size, appProperties)",
-                    pageSize=5,
+                    pageSize=10,
                 )
                 .execute()
             )
         except Exception as error:
             raise _classify_http_error(error) from error
-        files = response.get("files", [])
-        if not files:
-            return None
-        first = files[0]
-        properties = first.get("appProperties") or {}
-        size_raw = first.get("size")
-        return RemoteBackupFile(
-            file_id=str(first["id"]),
-            name=str(first.get("name", "")),
-            size_bytes=int(size_raw) if size_raw is not None else None,
-            sha256=properties.get(_PROP_SHA256),
-            run_id=properties.get(_PROP_RUN_ID),
-        )
+        for entry in response.get("files", []):
+            properties = entry.get("appProperties") or {}
+            kind = properties.get(_PROP_ARTIFACT_KIND) or "restore"
+            if kind != artifact_kind:
+                continue
+            size_raw = entry.get("size")
+            return RemoteBackupFile(
+                file_id=str(entry["id"]),
+                name=str(entry.get("name", "")),
+                size_bytes=int(size_raw) if size_raw is not None else None,
+                sha256=properties.get(_PROP_SHA256),
+                run_id=properties.get(_PROP_RUN_ID),
+                artifact_kind=kind,
+            )
+        return None
 
     def upload_backup(
         self,
@@ -212,8 +221,10 @@ class GoogleDriveBackupService:
         file_name: str,
         run_id: str,
         sha256: str,
+        artifact_kind: str = "restore",
     ) -> str:
-        """Sube el archivo cifrado (resumable) y devuelve el id remoto."""
+        """Sube el archivo (resumable) y devuelve el id remoto. ``artifact_kind``
+        distingue el respaldo restaurable del artefacto de exploración."""
         from googleapiclient.http import MediaFileUpload
 
         media = MediaFileUpload(
@@ -229,6 +240,7 @@ class GoogleDriveBackupService:
                         "appProperties": {
                             _PROP_RUN_ID: run_id,
                             _PROP_SHA256: sha256,
+                            _PROP_ARTIFACT_KIND: artifact_kind,
                         },
                     },
                     media_body=media,

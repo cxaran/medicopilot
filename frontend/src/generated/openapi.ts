@@ -3106,6 +3106,16 @@ export interface components {
          */
         BackupDriveStatus: "disconnected" | "active" | "needs_reauth";
         /**
+         * BackupExplorerStatus
+         * @description Estado del artefacto de EXPLORACIÓN (SQLite legible) de un respaldo.
+         *
+         *     Independiente del status principal: un respaldo restaurable correcto sigue
+         *     ``succeeded`` aunque su explorer haya fallado. Enum NO nativo (VARCHAR + CHECK);
+         *     el valor más largo es ``not_requested`` (13).
+         * @enum {string}
+         */
+        BackupExplorerStatus: "not_requested" | "building" | "ready" | "failed";
+        /**
          * BackupRunListItem
          * @description Versión de listado del historial de respaldos.
          */
@@ -3135,6 +3145,10 @@ export interface components {
             attempt_count: number;
             /** Error */
             error_code?: string | null;
+            /** Explorador */
+            explorer_status?: components["schemas"]["BackupExplorerStatus"] | null;
+            /** Explorador (bytes) */
+            explorer_file_size_bytes?: number | null;
             /**
              * Creado
              * Format: date-time
@@ -3183,6 +3197,9 @@ export interface components {
             error_summary?: string | null;
             /** Pruned At */
             pruned_at?: string | null;
+            explorer_status?: components["schemas"]["BackupExplorerStatus"] | null;
+            /** Explorer File Size Bytes */
+            explorer_file_size_bytes?: number | null;
             /**
              * Created At
              * Format: date-time
