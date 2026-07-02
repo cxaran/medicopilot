@@ -603,6 +603,156 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/backup-settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Backup Settings */
+        get: operations["list_backup_settings_api_v1_backup_settings_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/backup-settings/{item_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Backup Settings Detail */
+        get: operations["get_backup_settings_detail_api_v1_backup_settings__item_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Backup Settings
+         * @description Edita la configuración. Reglas de fondo: zona IANA real, recipient de age
+         *     UTILIZABLE (se valida invocando age), y ``enabled=true`` sólo con la
+         *     configuración completa. Cambios de horario recalculan ``next_run_at``.
+         */
+        patch: operations["update_backup_settings_api_v1_backup_settings__item_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/backup-settings/{item_id}/connect-drive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Connect Drive */
+        post: operations["connect_drive_api_v1_backup_settings__item_id__connect_drive_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/backups/google-drive/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Google Drive Callback
+         * @description Callback OAuth de Google. Redirige a la pantalla de respaldos del frontend con
+         *     un resultado NO sensible (?drive=connected|error).
+         */
+        get: operations["google_drive_callback_api_v1_backups_google_drive_callback_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/backup-settings/{item_id}/disconnect-drive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Disconnect Drive */
+        post: operations["disconnect_drive_api_v1_backup_settings__item_id__disconnect_drive_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/backup-settings/{item_id}/run-now": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Backup Now
+         * @description Encola un respaldo manual y despierta el tick (si el broker no está arriba, el
+         *     tick del siguiente minuto lo toma igual: la cola es la verdad).
+         */
+        post: operations["run_backup_now_api_v1_backup_settings__item_id__run_now_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/backup-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Backup Runs */
+        get: operations["list_backup_runs_api_v1_backup_runs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/backup-runs/{item_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Backup Run */
+        get: operations["get_backup_run_api_v1_backup_runs__item_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/bootstrap/status": {
         parameters: {
             query?: never;
@@ -2923,6 +3073,245 @@ export interface components {
             /** Password Reset Enabled */
             password_reset_enabled: boolean;
         };
+        /**
+         * BackupDriveStatus
+         * @description Estado de la conexión con Google Drive para respaldos.
+         *
+         *     ``needs_reauth`` detiene los reintentos: el token dejó de servir y sólo una
+         *     reconexión del administrador lo resuelve. Enum NO nativo (VARCHAR + CHECK); el
+         *     valor más largo es ``needs_reauth`` (12).
+         * @enum {string}
+         */
+        BackupDriveStatus: "disconnected" | "active" | "needs_reauth";
+        /**
+         * BackupRunListItem
+         * @description Versión de listado del historial de respaldos.
+         */
+        BackupRunListItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Estado */
+            status: components["schemas"]["BackupRunStatus"];
+            /** Origen */
+            trigger_kind: components["schemas"]["BackupTriggerKind"];
+            /** Ventana */
+            scheduled_for?: string | null;
+            /** Inicio */
+            started_at?: string | null;
+            /** Fin */
+            finished_at?: string | null;
+            /** Archivo */
+            file_name?: string | null;
+            /** Tamaño (bytes) */
+            file_size_bytes?: number | null;
+            /** Retención */
+            retention_roles: unknown[];
+            /** Intentos */
+            attempt_count: number;
+            /** Error */
+            error_code?: string | null;
+            /**
+             * Creado
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
+         * BackupRunRead
+         * @description Detalle de una ejecución del historial (metadata operativa, nunca secretos).
+         */
+        BackupRunRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            status: components["schemas"]["BackupRunStatus"];
+            trigger_kind: components["schemas"]["BackupTriggerKind"];
+            /** Scheduled For */
+            scheduled_for?: string | null;
+            /** Next Attempt At */
+            next_attempt_at?: string | null;
+            /** Attempt Count */
+            attempt_count: number;
+            /** Started At */
+            started_at?: string | null;
+            /** Finished At */
+            finished_at?: string | null;
+            /** File Name */
+            file_name?: string | null;
+            /** File Size Bytes */
+            file_size_bytes?: number | null;
+            /** Ciphertext Sha256 */
+            ciphertext_sha256?: string | null;
+            /** Drive File Id */
+            drive_file_id?: string | null;
+            /** Drive Folder Id */
+            drive_folder_id?: string | null;
+            /** Encryption Fingerprint */
+            encryption_fingerprint?: string | null;
+            /** Retention Roles */
+            retention_roles: unknown[];
+            /** Error Code */
+            error_code?: string | null;
+            /** Error Summary */
+            error_summary?: string | null;
+            /** Pruned At */
+            pruned_at?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /**
+         * BackupRunStatus
+         * @description Estado de una ejecución de respaldo (historial funcional).
+         *
+         *     Terminales: ``succeeded``, ``failed``, ``skipped`` y ``pruned`` (respaldo remoto
+         *     rotado por retención; la fila se conserva). Enum NO nativo (VARCHAR + CHECK); el
+         *     valor más largo es ``succeeded`` (9).
+         * @enum {string}
+         */
+        BackupRunStatus: "queued" | "running" | "retrying" | "succeeded" | "failed" | "skipped" | "pruned";
+        /**
+         * BackupSettingsListItem
+         * @description Versión de listado del singleton (una fila; la ALERTA persistente viaja aquí).
+         */
+        BackupSettingsListItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Habilitado */
+            enabled: boolean;
+            /** Zona horaria */
+            timezone: string;
+            /**
+             * Hora diaria
+             * Format: time
+             */
+            daily_time: string;
+            /** Google Drive */
+            drive_status: components["schemas"]["BackupDriveStatus"];
+            /** Próximo respaldo */
+            next_run_at?: string | null;
+            /** Último error */
+            last_error_code?: string | null;
+            /** Error registrado */
+            last_error_at?: string | null;
+            /**
+             * Creado
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
+         * BackupSettingsRead
+         * @description Configuración completa (sin secretos: el token cifrado jamás se proyecta).
+         */
+        BackupSettingsRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Enabled */
+            enabled: boolean;
+            /** Timezone */
+            timezone: string;
+            /**
+             * Daily Time
+             * Format: time
+             */
+            daily_time: string;
+            /** Next Run At */
+            next_run_at?: string | null;
+            /** Filename Prefix */
+            filename_prefix: string;
+            /** Retention Daily Count */
+            retention_daily_count: number;
+            /** Retention Monthly Count */
+            retention_monthly_count: number;
+            /** Retention Yearly Count */
+            retention_yearly_count: number;
+            /** Age Recipient */
+            age_recipient?: string | null;
+            /** Age Recipient Fingerprint */
+            age_recipient_fingerprint?: string | null;
+            drive_status: components["schemas"]["BackupDriveStatus"];
+            /** Drive Folder Id */
+            drive_folder_id?: string | null;
+            /** Drive Connected At */
+            drive_connected_at?: string | null;
+            /** Last Error Code */
+            last_error_code?: string | null;
+            /** Last Error Summary */
+            last_error_summary?: string | null;
+            /** Last Error At */
+            last_error_at?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Updated At */
+            updated_at?: string | null;
+            /** Updated By */
+            updated_by?: string | null;
+        };
+        /**
+         * BackupSettingsUpdate
+         * @description Actualización parcial de la configuración de respaldos (campos EDITABLES).
+         *
+         *     Las validaciones de fondo (zona IANA real, recipient de age utilizable, requisitos
+         *     para ``enabled=true``) viven en el router/servicio; aquí van los rangos y formas.
+         */
+        BackupSettingsUpdate: {
+            /**
+             * Habilitado
+             * @description Respaldo diario habilitado (requiere Drive conectado y cifrado configurado).
+             */
+            enabled?: boolean | null;
+            /**
+             * Zona horaria
+             * @description Zona IANA en la que se interpreta la hora diaria (p. ej. America/Monterrey).
+             */
+            timezone?: string | null;
+            /**
+             * Hora diaria
+             * @description Hora local del respaldo diario.
+             */
+            daily_time?: string | null;
+            /**
+             * Prefijo del archivo
+             * @description 2-48 caracteres; letras, números, guion y guion bajo; inicia alfanumérico.
+             */
+            filename_prefix?: string | null;
+            /** Copias diarias */
+            retention_daily_count?: number | null;
+            /** Copias mensuales */
+            retention_monthly_count?: number | null;
+            /** Copias anuales */
+            retention_yearly_count?: number | null;
+            /**
+             * Recipient de age (clave pública)
+             * @description Clave PÚBLICA age1… con la que se cifra el respaldo; la privada nunca se sube.
+             */
+            age_recipient?: string | null;
+        };
+        /**
+         * BackupTriggerKind
+         * @description Origen de una ejecución de respaldo: programada o manual del administrador.
+         * @enum {string}
+         */
+        BackupTriggerKind: "scheduled" | "manual";
         /** Body_upload_clinical_document_api_v1_clinical_documents_post */
         Body_upload_clinical_document_api_v1_clinical_documents_post: {
             /**
@@ -3858,6 +4247,14 @@ export interface components {
          * @enum {string}
          */
         Comparator: "gte" | "lte" | "gt" | "lt" | "eq";
+        /**
+         * ConnectDriveResponse
+         * @description Respuesta de la acción conectar Drive: URL de autorización de Google.
+         */
+        ConnectDriveResponse: {
+            /** Authorization Url */
+            authorization_url: string;
+        };
         /**
          * ConnectionTicketRead
          * @description Ticket de conexión al Agent Gateway emitido a un usuario con sesión válida.
@@ -5583,6 +5980,18 @@ export interface components {
         OffsetPage_AuditEventListItem_: {
             /** Items */
             items: components["schemas"]["AuditEventListItem"][];
+            pagination: components["schemas"]["OffsetPagination"];
+        };
+        /** OffsetPage[BackupRunListItem] */
+        OffsetPage_BackupRunListItem_: {
+            /** Items */
+            items: components["schemas"]["BackupRunListItem"][];
+            pagination: components["schemas"]["OffsetPagination"];
+        };
+        /** OffsetPage[BackupSettingsListItem] */
+        OffsetPage_BackupSettingsListItem_: {
+            /** Items */
+            items: components["schemas"]["BackupSettingsListItem"][];
             pagination: components["schemas"]["OffsetPagination"];
         };
         /** OffsetPage[ClinicalCodeListItem] */
@@ -9741,6 +10150,324 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MessageResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_backup_settings_api_v1_backup_settings_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+                /** @description Campos de orden separados por coma. Use '-' para orden descendente. */
+                sort?: string;
+                id_in?: string[] | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OffsetPage_BackupSettingsListItem_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_backup_settings_detail_api_v1_backup_settings__item_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupSettingsRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_backup_settings_api_v1_backup_settings__item_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BackupSettingsUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupSettingsRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    connect_drive_api_v1_backup_settings__item_id__connect_drive_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectDriveResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    google_drive_callback_api_v1_backups_google_drive_callback_get: {
+        parameters: {
+            query?: {
+                code?: string | null;
+                state?: string | null;
+                error?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    disconnect_drive_api_v1_backup_settings__item_id__disconnect_drive_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupSettingsRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_backup_now_api_v1_backup_settings__item_id__run_now_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupRunRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_backup_runs_api_v1_backup_runs_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+                /** @description Campos de orden separados por coma. Use '-' para orden descendente. */
+                sort?: string;
+                status?: components["schemas"]["BackupRunStatus"] | null;
+                trigger_kind?: components["schemas"]["BackupTriggerKind"] | null;
+                id_in?: string[] | null;
+                created_at_on?: string | null;
+                created_at_before?: string | null;
+                created_at_after?: string | null;
+                created_at_from?: string | null;
+                created_at_to?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OffsetPage_BackupRunListItem_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_backup_run_api_v1_backup_runs__item_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupRunRead"];
                 };
             };
             /** @description Validation Error */
