@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { AnimatedOrb } from "@/components/ui/AnimatedOrb";
 import { Markdown } from "@/components/copilot/Markdown";
@@ -373,11 +373,6 @@ export function CopilotPanel({
   // por defecto: hasta cargar el catálogo no se ofrece ninguna escritura (defensa en
   // profundidad; FastAPI revalida igual). ``toolCatalog`` es la vista de procedencia/auditoría.
   const [toolCatalog, setToolCatalog] = useState<ToolCatalogEntry[]>([]);
-  // Sugerencias de inicio DERIVADAS de las tools disponibles (RBAC) + muestreo aleatorio. Se
-  // recalculan solo con el chat vacío (al abrir/cambiar de chat o al cargar el catálogo); si aún
-  // no hay catálogo o ninguna elegible, caen a la lista fija. Math.random vive en un efecto
-  // (cliente) para no romper la hidratación de SSR.
-  const [startSuggestions, setStartSuggestions] = useState<string[]>([]);
   const creatableRef = useRef<Set<string>>(new Set());
   // Permisos de la sesión (/auth/me): gate alternativo ``requiredPermissions`` de las escrituras
   // cuyo recurso no publica formulario genérico en el catálogo (p. ej. scale_results).
@@ -611,18 +606,19 @@ export function CopilotPanel({
     activeContextRef.current = activeContext;
   }, [activeContext]);
 
-  // Muestrea las sugerencias de inicio cuando el chat está vacío (al abrir/cambiar de chat o al
-  // cargar el catálogo de tools). Derivadas de las tools disponibles para el rol; si aún no hay
-  // catálogo o ninguna elegible, cae a la lista fija. Solo con el chat vacío para no re-mezclar
-  // mientras se conversa.
-  useEffect(() => {
-    if (messages.length > 0) return;
+  // Sugerencias de inicio DERIVADAS de las tools disponibles (RBAC) + muestreo aleatorio; si aún
+  // no hay catálogo o ninguna elegible, caen a la lista fija. Derivación en render (useMemo), no
+  // estado+efecto: con el catálogo vacío (SSR y primer render del cliente) ninguna sugerencia es
+  // elegible —todas exigen tools— y cae DETERMINISTA a la lista fija, así que Math.random solo
+  // corre tras la hidratación, cuando llega el catálogo (sin mismatch). Se muestran únicamente
+  // con el chat vacío (ver render), por lo que recomputar durante la conversación es invisible.
+  const startSuggestions = useMemo(() => {
     const ctx = activeContext ? "patient" : "global";
     const dynamic = buildStartSuggestions(toolCatalog, ctx, 4);
-    setStartSuggestions(
-      dynamic.length > 0 ? dynamic : [...(activeContext ? PATIENT_SUGGESTIONS : GLOBAL_SUGGESTIONS)],
-    );
-  }, [toolCatalog, activeContext, messages.length]);
+    return dynamic.length > 0
+      ? dynamic
+      : [...(activeContext ? PATIENT_SUGGESTIONS : GLOBAL_SUGGESTIONS)];
+  }, [toolCatalog, activeContext]);
 
   // Espeja las tools MCP en un ref para los handlers del turno (closures con deps vacías).
   useEffect(() => {
