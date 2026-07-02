@@ -84,6 +84,27 @@ class PatientSearchScoringTest(unittest.TestCase):
         assert s is not None  # acentos/mayúsculas normalizados
         self.assertGreater(s.name_overlap, 0.5)
 
+    def test_partial_single_token_name_matches_long_full_name(self) -> None:
+        # Buscar SOLO el nombre de pila debe encontrar al paciente de nombre completo (cobertura,
+        # no Jaccard). Antes "jordan" daba 0 contra "Jordan Michelt Aran Pérez".
+        c = _cand(name="Jordan Michelt Aran Pérez", curp=None, phone=None, email=None)
+        s = score_candidate(SearchQuery(name="jordan"), c)
+        assert s is not None
+        self.assertEqual(s.name_overlap, 1.0)  # el token buscado aparece en el nombre
+
+    def test_full_name_excludes_sibling_sharing_surnames(self) -> None:
+        # Buscar el nombre COMPLETO de A no debe sugerir a un familiar B que comparte 2 de 4 tokens
+        # (mismos apellidos). Con nombre completo el umbral de cobertura es más exigente.
+        sibling = _cand(name="Luna Michelt Aran Guzman", curp=None, phone=None, email=None)
+        self.assertIsNone(score_candidate(SearchQuery(name="Jordan Michelt Aran Perez"), sibling))
+
+    def test_name_typo_is_tolerated(self) -> None:
+        # Un error de tipeo en el nombre no debe impedir la coincidencia (similitud difusa).
+        c = _cand(name="Jordan Michelt Aran Pérez", curp=None, phone=None, email=None)
+        s = score_candidate(SearchQuery(name="jordna"), c)
+        assert s is not None
+        self.assertGreater(s.name_overlap, 0.5)
+
     def test_birth_date_corroborates_name_to_fuerte(self) -> None:
         c = _cand(name="María López", curp=None, phone=None, email=None)
         s = score_candidate(

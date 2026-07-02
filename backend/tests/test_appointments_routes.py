@@ -413,16 +413,19 @@ class AppointmentRoutesTest(_AppointmentTestMixin, unittest.TestCase):
         self.assertEqual(confirmed["pagination"]["total"], 1)
 
     def test_scheduled_date_range_filters(self) -> None:
+        # ``scheduled_date`` (columna ``date`` en ``filter_fields``) publica igualdad por día
+        # (``scheduled_date``) y rango por extremos (``scheduled_date_gte``/``_lte``), fecha
+        # civil inclusiva, sin operadores de calendario ni zona horaria.
         self._create_id(scheduled_time=self._time(9))
         self._create_id(scheduled_time=self._time(15))
-        on = self.client.get(_BASE, params={"scheduled_date_on": "2026-07-01"}).json()
+        on = self.client.get(_BASE, params={"scheduled_date": "2026-07-01"}).json()
         self.assertEqual(on["pagination"]["total"], 2)
-        before = self.client.get(_BASE, params={"scheduled_date_before": "2026-07-01"}).json()
-        self.assertEqual(before["pagination"]["total"], 0)
-        after = self.client.get(_BASE, params={"scheduled_date_after": "2026-07-02"}).json()
+        after = self.client.get(_BASE, params={"scheduled_date_gte": "2026-07-02"}).json()
         self.assertEqual(after["pagination"]["total"], 0)
+        before = self.client.get(_BASE, params={"scheduled_date_lte": "2026-06-30"}).json()
+        self.assertEqual(before["pagination"]["total"], 0)
         between = self.client.get(
-            _BASE, params={"scheduled_date_from": "2026-07-01", "scheduled_date_to": "2026-07-01"}
+            _BASE, params={"scheduled_date_gte": "2026-07-01", "scheduled_date_lte": "2026-07-01"}
         ).json()
         self.assertEqual(between["pagination"]["total"], 2)
 

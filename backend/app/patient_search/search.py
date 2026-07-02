@@ -13,6 +13,7 @@ umbral de inclusión NO se devuelve el candidato (no se fabrica una coincidencia
 
 from dataclasses import dataclass
 from datetime import date
+from difflib import SequenceMatcher
 from typing import Optional
 from uuid import UUID
 
@@ -24,12 +25,26 @@ _W_CURP = 60
 _W_PHONE = 45
 _W_DOB = 25
 _W_EMAIL = 15
-_W_NAME = 40  # se multiplica por el solapamiento de tokens (0..1)
+_W_NAME = 40  # se multiplica por la cobertura del nombre buscado (0..1)
 
-# Umbral de inclusión por nombre: al menos ~1 token compartido de 2-3 (Jaccard ≥ 0.34).
-_NAME_INCLUDE_THRESHOLD = 0.34
+# Umbral de inclusión por nombre: COBERTURA mínima de los tokens BUSCADOS presentes en el nombre
+# del candidato (no Jaccard: buscar "jordan" debe encontrar a "Jordan Michelt Aran Pérez"). 0.5 =
+# al menos la mitad de lo buscado aparece (con un solo token, ese token debe coincidir).
+_NAME_INCLUDE_THRESHOLD = 0.5
+# Para un nombre COMPLETO (3+ tokens) se exige MÁS cobertura, para no traer a un familiar que comparte
+# apellidos: buscar "Jordan Michelt Aran Pérez" (4 tokens) no debe sugerir a "Luna Michelt Aran Guzman"
+# (coinciden 2/4 = 0.5). Los nombres parciales (1-2 tokens) y los typos siguen entrando con 0.5.
+_NAME_INCLUDE_THRESHOLD_FULL = 0.6
 # Umbral de nombre "bueno" para elevar a nivel ``fuerte`` junto con fecha/correo.
-_NAME_STRONG_THRESHOLD = 0.5
+_NAME_STRONG_THRESHOLD = 0.7
+
+
+def _name_include_threshold(n_query_tokens: int) -> float:
+    """Cobertura mínima para incluir por nombre: 0.5 con nombre parcial (1-2 tokens), mayor con
+    nombre completo (3+) para no sugerir familiares que comparten apellidos."""
+    return _NAME_INCLUDE_THRESHOLD if n_query_tokens <= 2 else _NAME_INCLUDE_THRESHOLD_FULL
+# Similitud mínima (0..1) para que dos tokens cuenten como el mismo (tolera errores de tipeo).
+_TOKEN_FUZZY_THRESHOLD = 0.8
 # Mínimo de dígitos para considerar comparable un teléfono (evita falsos por sufijos cortos).
 _PHONE_MIN_DIGITS = 7
 
@@ -59,11 +74,27 @@ def _phones_match(a: str, b: str) -> bool:
     return a == b or a.endswith(b) or b.endswith(a)
 
 
-def _name_overlap(a: frozenset[str], b: frozenset[str]) -> float:
-    """Índice de Jaccard de los tokens del nombre (0..1). 0 si alguno está vacío."""
-    if not a or not b:
+def _token_similarity(a: str, b: str) -> float:
+    """Similitud (0..1) entre dos tokens de nombre. Tolerante: igualdad exacta = 1.0; uno prefijo
+    del otro (3+ caracteres) = 0.9 (capta nombres truncados/parciales); en otro caso, ratio de
+    edición (difflib) si supera el umbral difuso (capta errores de tipeo), o 0."""
+    if a == b:
+        return 1.0
+    if len(a) >= 3 and len(b) >= 3 and (a.startswith(b) or b.startswith(a)):
+        return 0.9
+    ratio = SequenceMatcher(None, a, b).ratio()
+    return ratio if ratio >= _TOKEN_FUZZY_THRESHOLD else 0.0
+
+
+def _name_coverage(query: frozenset[str], candidate: frozenset[str]) -> float:
+    """COBERTURA (0..1) de los tokens BUSCADOS dentro del nombre del candidato: promedio de la
+    mejor similitud de cada token de la búsqueda contra los del nombre. Premia que lo buscado
+    aparezca en el nombre (insensible a acentos/mayúsculas, tolerante a tipeo y a nombres
+    parciales) SIN penalizar nombres largos —al revés que el índice de Jaccard—. 0 si alguno vacío."""
+    if not query or not candidate:
         return 0.0
-    return len(a & b) / len(a | b)
+    total = sum(max((_token_similarity(q, c) for c in candidate), default=0.0) for q in query)
+    return total / len(query)
 
 
 @dataclass(frozen=True)
@@ -134,17 +165,18 @@ def score_candidate(query: SearchQuery, candidate: CandidateInput) -> Optional[S
         score += _W_EMAIL
         reasons.append("correo coincide")
 
-    overlap = _name_overlap(_name_tokens(query.name), _name_tokens(candidate.full_name))
+    q_name_tokens = _name_tokens(query.name)
+    overlap = _name_coverage(q_name_tokens, _name_tokens(candidate.full_name))
     if overlap > 0:
         score += round(_W_NAME * overlap)
-        reasons.append(f"nombre similar ({int(round(overlap * 100))}%)")
+        reasons.append(f"nombre coincide con lo buscado ({int(round(overlap * 100))}%)")
 
     included = (
         curp_match
         or phone_match
         or dob_match
         or email_match
-        or overlap >= _NAME_INCLUDE_THRESHOLD
+        or overlap >= _name_include_threshold(len(q_name_tokens))
     )
     if not included:
         return None

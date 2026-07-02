@@ -681,14 +681,14 @@ APPOINTMENTS = ResourceQuery(
     schema=AppointmentListItem,
     options=QueryOptions(
         # ``patient_id``/``doctor_id`` (UUID) y ``status`` (enum) por igualdad (select).
-        # ``scheduled_date`` (``date``) admite rango de calendario (on/before/after/between),
-        # igual que antes ``scheduled_at``: el contrato publica esos operadores y el frontend
-        # de la agenda los consume sin cambios. Al ser columna ``date`` (fecha civil), el
-        # compilador compara la fecha DIRECTAMENTE, sin límites de día por zona horaria. La
-        # cita se agenda por fecha; la hora (``scheduled_time``) es opcional y sólo ordena.
-        # Búsqueda libre acotada a ``reason`` (no a ``internal_notes``). Los listados excluyen
-        # citas eliminadas vía stmt base en el router.
-        filter_fields=("patient_id", "doctor_id", "status"),
+        # ``scheduled_date`` (``date``) está en ``filter_fields``: al ser de tipo fecha recibe
+        # automáticamente igualdad (ese día) + rango por extremos ``gte``/``lte`` (fecha civil,
+        # comparación directa sin zona horaria). El contrato PUBLICA esos operadores
+        # (proyección de filtros) y el frontend de la agenda los consume. La cita se agenda
+        # por fecha; la hora (``scheduled_time``) es opcional y sólo ordena. Búsqueda libre
+        # acotada a ``reason`` (no a ``internal_notes``). Los listados excluyen citas
+        # eliminadas vía stmt base en el router.
+        filter_fields=("patient_id", "doctor_id", "status", "scheduled_date"),
         sort_fields=(
             "scheduled_date",
             "scheduled_time",
@@ -698,7 +698,6 @@ APPOINTMENTS = ResourceQuery(
         ),
         search_fields=("reason",),
         in_fields=("id",),
-        field_operators={"scheduled_date": _CREATED_AT_OPERATORS},
         default_sort="scheduled_date",
     ),
 )

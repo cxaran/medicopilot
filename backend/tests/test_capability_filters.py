@@ -217,6 +217,25 @@ class FilterableFieldsTest(unittest.TestCase):
         self.assertEqual(list(fields.keys()), ["name", "is_active", "created_at"])
         self.assertNotIn("id", fields)
 
+    def test_date_field_publishes_equality_and_range_bounds(self) -> None:
+        # Un campo ``date`` en ``filter_fields`` (``scheduled_date`` de las citas) publica
+        # AUTOMÁTICAMENTE igualdad por día (``eq``) + extremos de rango ``gte``/``lte`` (un
+        # solo valor cada uno, widget de fecha). En fechas, los extremos llevan la zona en
+        # que el cliente interpreta las fechas civiles (default UTC en tests).
+        fields = self._fields_by_key(self._list("appointments", "appointments:read"))
+        scheduled = fields["scheduled_date"]
+        self.assertEqual(scheduled["value_type"], "date")
+        ops = self._by_key(scheduled)
+        self.assertEqual(list(ops.keys()), ["eq", "gte", "lte"])
+        self.assertEqual(ops["eq"]["parameter_name"], "scheduled_date")
+        self.assertEqual(ops["eq"]["widget"], "date")
+        self.assertEqual(ops["gte"]["parameter_name"], "scheduled_date_gte")
+        self.assertEqual(ops["gte"]["widget"], "date")
+        self.assertEqual(ops["gte"]["value_shape"], "single")
+        self.assertEqual(ops["gte"]["calendar_timezone"], "UTC")
+        self.assertEqual(ops["lte"]["parameter_name"], "scheduled_date_lte")
+        self.assertEqual(ops["lte"]["calendar_timezone"], "UTC")
+
 
 class FiltersOpenApiTest(unittest.TestCase):
     def setUp(self) -> None:

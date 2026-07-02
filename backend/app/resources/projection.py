@@ -17,7 +17,7 @@ import annotated_types as at
 from pydantic import BaseModel, EmailStr, SecretStr
 from pydantic.fields import FieldInfo
 
-from backend.app.query.operators import Operator
+from backend.app.query.operators import Operator, parameter_name_for
 from backend.app.query.plans import CompiledQueryPlan
 from backend.app.resources.registry import (
     ActionDef,
@@ -314,14 +314,17 @@ def _filter_capabilities(
 
 # --- Filtros declarativos visibles (filterable_fields, C1) ---
 
-# Orden de presentación de los operadores filtrables visibles de un campo. ``in``,
-# ``isnull``, ``gte`` y ``lte`` no se publican como filtros visibles en este alcance.
+# Orden de presentación de los operadores filtrables visibles de un campo. ``gte`` y
+# ``lte`` (rango por extremos: campos de fecha/numéricos en ``filter_fields`` o con
+# ``range`` declarado) SÍ se publican; ``in`` e ``isnull`` quedan fuera de este alcance.
 _FILTERABLE_OPERATOR_ORDER = (
     Operator.CONTAINS,
     Operator.STARTS_WITH,
     Operator.ENDS_WITH,
     Operator.EQ,
     Operator.NE,
+    Operator.GTE,
+    Operator.LTE,
     Operator.ON,
     Operator.BEFORE,
     Operator.AFTER,
@@ -338,12 +341,35 @@ _CALENDAR_LABELS = {
     Operator.BEFORE: "Antes de",
     Operator.AFTER: "Después de",
 }
+# Extremos de un rango por ``gte``/``lte`` (un solo valor cada uno; el cliente compone el
+# rango con ambos). Para fechas son "desde/hasta" inclusivos comparados directamente.
+_RANGE_BOUND_LABELS = {
+    Operator.GTE: "Desde",
+    Operator.LTE: "Hasta",
+}
+_TEMPORAL_VALUE_TYPES = (FieldValueType.DATE, FieldValueType.DATETIME)
+_NUMERIC_VALUE_TYPES = (FieldValueType.INTEGER, FieldValueType.DECIMAL)
 
 
 def _default_eq_widget(value_type: FieldValueType) -> WidgetType:
     if value_type is FieldValueType.BOOLEAN:
         return WidgetType.SWITCH
+    if value_type is FieldValueType.DATE:
+        return WidgetType.DATE
+    if value_type is FieldValueType.DATETIME:
+        return WidgetType.DATETIME
+    if value_type in _NUMERIC_VALUE_TYPES:
+        return WidgetType.NUMBER
     return WidgetType.TEXT
+
+
+def _range_bound_widget(value_type: FieldValueType) -> WidgetType:
+    """Widget del extremo ``gte``/``lte`` según el tipo del campo de rango."""
+    if value_type is FieldValueType.DATE:
+        return WidgetType.DATE
+    if value_type is FieldValueType.DATETIME:
+        return WidgetType.DATETIME
+    return WidgetType.NUMBER
 
 
 def _eq_filter_declaration(
@@ -404,6 +430,19 @@ def _filterable_operator(
             parameter_name=parameter,
             case_sensitive=True,
         )
+    if operator in _RANGE_BOUND_LABELS:
+        # gte/lte: un extremo del rango. En fechas se publica la zona en que el cliente
+        # interpreta las fechas civiles (p. ej. para calcular "hoy"); la comparación en el
+        # backend es DIRECTA (sin límites de día por zona). Los numéricos no llevan zona.
+        is_temporal = value_type in _TEMPORAL_VALUE_TYPES
+        return FilterableOperatorCapability(
+            key=key,
+            label=_RANGE_BOUND_LABELS[operator],
+            value_shape=FilterValueShape.SINGLE,
+            widget=_range_bound_widget(value_type),
+            parameter_name=parameter,
+            calendar_timezone=calendar_tz if is_temporal else None,
+        )
     if operator in _CALENDAR_LABELS:
         return FilterableOperatorCapability(
             key=key,
@@ -453,6 +492,9 @@ def _filterable_fields(
         for descriptor in plan.extended_filters
         if descriptor.operator is Operator.BETWEEN
     }
+    # Campos con rango por extremos (``gte``+``lte``): ``filter_fields`` de tipo
+    # fecha/numérico (operadores por defecto) o ``range`` declarado en ``field_operators``.
+    range_field_names = set(plan.range_fields)
     calendar_tz = plan.calendar_timezone
 
     result: list[FilterableFieldCapability] = []
@@ -479,7 +521,10 @@ def _filterable_fields(
                 )
                 continue
 
-            if operator is Operator.EQ:
+            if operator in (Operator.GTE, Operator.LTE):
+                # gte/lte viven en ``range_fields`` (ambos extremos), con sufijo canónico.
+                parameter = parameter_name_for(name, operator) if name in range_field_names else None
+            elif operator is Operator.EQ:
                 parameter = eq_params.get(name)
             else:
                 parameter = ext_single.get((name, operator))
@@ -525,9 +570,18 @@ def _list_capability(definition: ResourceDefinition) -> ResourceListCapability:
         ui = _ui(field_info)
         visible_in_list = bool(ui.get("list", False))
         has_filter = isinstance(ui.get("filter"), dict)
-        # Se emite metadata pública del campo si está declarado para lista o para filtro,
-        # aunque no sea columna visible (visible_in_list=False).
-        if not (visible_in_list or has_filter):
+        has_label = bool(ui.get("label") or field_info.title)
+        # Campos de SCOPING/filtro declarados en ``filter_fields`` del recurso (p. ej.
+        # ``patient_id``, ``consultation_id``): se emiten como FILTRABLES aunque no sean
+        # columna visible ni tengan ``ui.filter`` explícito, para que el cliente pueda acotar
+        # por ellos (el record panel descubre el parámetro ``eq`` de ``patient_id`` desde aquí).
+        # SÓLO si tienen label (title/ui.label): la proyección exige label a todo campo emitido,
+        # así que un campo de filtro interno sin label (no destinado a la UI) se omite en vez de
+        # romper la capability.
+        is_filter_field = has_label and (name in plan.filter_columns or name in plan.range_fields)
+        # Se emite metadata pública del campo si está declarado para lista, para filtro
+        # explícito (``ui.filter``), o si es un campo de filtro del plan con label (scoping).
+        if not (visible_in_list or has_filter or is_filter_field):
             continue
         cap = ResourceFieldCapability(
             name=name,
