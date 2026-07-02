@@ -50,5 +50,5 @@ taskiq-postgres[psycopg]==0.8.0
 # (cryptography, ya presente) y el ARCHIVO se cifra con el binario `age` de la imagen.
 google-auth==2.43.0
 google-auth-oauthlib==1.2.2
-google-auth-httplib2==0.2.2
+google-auth-httplib2==0.4.0
 google-api-python-client==2.187.0
