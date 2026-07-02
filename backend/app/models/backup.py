@@ -114,6 +114,14 @@ class BackupSettings(Base):
         nullable=True,
         comment="Huella (sha256 truncado) del recipient configurado, para mostrar y auditar.",
     )
+    age_identity_ciphertext: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        comment=(
+            "Identidad PRIVADA de age CIFRADA (Fernet), sólo si el par lo generó el "
+            "sistema. Nunca se proyecta a la API; se reenvía por correo al administrador."
+        ),
+    )
 
     drive_status: Mapped[BackupDriveStatus] = mapped_column(
         SAEnum(

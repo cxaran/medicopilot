@@ -1404,6 +1404,25 @@ RESOURCE_REGISTRY: tuple[ResourceDefinition, ...] = (
                 ),
             ),
             ActionDef(
+                name="generate_encryption_key",
+                label="Generar clave de cifrado",
+                method=HttpMethod.POST,
+                url_template="/api/v1/backup-settings/{id}/generate-encryption-key",
+                scope=ActionScope.ITEM,
+                danger=False,
+                permission=BackupPermissions.CONFIGURE,
+                confirmation=ConfirmationDef(
+                    title="Generar clave de cifrado",
+                    message=(
+                        "Se generará una clave de cifrado para los respaldos y la clave "
+                        "PRIVADA se enviará a tu correo — guárdala: es la única forma de "
+                        "abrir los respaldos cifrados. Reemplaza cualquier clave anterior."
+                    ),
+                    confirm_label="Generar y enviar por correo",
+                    destructive=False,
+                ),
+            ),
+            ActionDef(
                 name="run_now",
                 label="Respaldar ahora",
                 method=HttpMethod.POST,
@@ -1413,7 +1432,7 @@ RESOURCE_REGISTRY: tuple[ResourceDefinition, ...] = (
                 permission=BackupPermissions.CONFIGURE,
                 confirmation=ConfirmationDef(
                     title="Respaldo manual",
-                    message="Se encolará un respaldo cifrado hacia Google Drive.",
+                    message="Se encolará un respaldo hacia Google Drive.",
                     confirm_label="Respaldar",
                     destructive=False,
                 ),

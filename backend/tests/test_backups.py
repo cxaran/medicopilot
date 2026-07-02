@@ -390,6 +390,107 @@ class BackupApiAndTickTest(unittest.TestCase):
         runs = self.client.get("/api/v1/backup-runs").json()["items"]
         self.assertEqual(len(runs), 1)  # el historial se conserva
 
+    # -- Correo de configuración y clave de cifrado --------------------------------
+
+    def _with_fernet_key(self):  # type: ignore[no-untyped-def]
+        from cryptography.fernet import Fernet
+        from pydantic import SecretStr
+
+        return mock.patch.object(
+            backups.settings,
+            "backup_token_encryption_key",
+            SecretStr(Fernet.generate_key().decode()),
+        )
+
+    def test_patch_sends_settings_email_to_the_admin(self) -> None:
+        sid = self._settings_id()
+        with mock.patch(
+            "backend.app.api.v1.backups.send_email", new_callable=mock.AsyncMock
+        ) as send:
+            resp = self.client.patch(
+                f"/api/v1/backup-settings/{sid}", json={"retention_daily_count": 9}
+            )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        send.assert_awaited_once()
+        assert send.await_args is not None
+        kwargs = send.await_args.kwargs
+        self.assertEqual(kwargs["email_to"], "admin@example.com")
+        self.assertIn("9 diarias", kwargs["message"])
+        self.assertIn("SIN CIFRAR", kwargs["message"])
+
+    def test_generate_encryption_key_stores_encrypted_and_mails_private_key(self) -> None:
+        sid = self._settings_id()
+        with self._with_fernet_key(), mock.patch(
+            "backend.app.api.v1.backups.send_email", new_callable=mock.AsyncMock
+        ) as send:
+            resp = self.client.post(
+                f"/api/v1/backup-settings/{sid}/generate-encryption-key"
+            )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        body = resp.json()
+        # La API expone el recipient público pero JAMÁS la identidad privada.
+        assert body["age_recipient"] is not None
+        self.assertTrue(body["age_recipient"].startswith("age1"))
+        self.assertNotIn("age_identity_ciphertext", body)
+        self.assertNotIn("AGE-SECRET-KEY-", resp.text)
+        # El correo SÍ lleva la clave privada (el requisito: que nunca se pierda).
+        send.assert_awaited_once()
+        assert send.await_args is not None
+        message = send.await_args.kwargs["message"]
+        self.assertIn("AGE-SECRET-KEY-", message)
+        self.assertIn("GUARDA ESTE CORREO", message)
+        self.assertIn(body["age_recipient"], message)
+        # Y queda guardada CIFRADA (no en claro) para reenviarse en cada cambio.
+        with Session(self.engine) as session:
+            row = session.exec(select(BackupSettings)).one()
+            assert row.age_identity_ciphertext is not None
+            self.assertNotIn("AGE-SECRET-KEY-", row.age_identity_ciphertext)
+
+    def test_patch_resends_private_key_while_system_generated(self) -> None:
+        sid = self._settings_id()
+        with self._with_fernet_key():
+            with mock.patch(
+                "backend.app.api.v1.backups.send_email", new_callable=mock.AsyncMock
+            ):
+                self.client.post(f"/api/v1/backup-settings/{sid}/generate-encryption-key")
+            with mock.patch(
+                "backend.app.api.v1.backups.send_email", new_callable=mock.AsyncMock
+            ) as send:
+                resp = self.client.patch(
+                    f"/api/v1/backup-settings/{sid}", json={"retention_daily_count": 5}
+                )
+            self.assertEqual(resp.status_code, 200, resp.text)
+            # Cada cambio reenvía la clave: siempre hay un correo reciente con ella.
+            assert send.await_args is not None
+            self.assertIn("AGE-SECRET-KEY-", send.await_args.kwargs["message"])
+
+    def test_external_recipient_clears_stored_identity(self) -> None:
+        sid = self._settings_id()
+        with self._with_fernet_key():
+            with mock.patch(
+                "backend.app.api.v1.backups.send_email", new_callable=mock.AsyncMock
+            ):
+                self.client.post(f"/api/v1/backup-settings/{sid}/generate-encryption-key")
+            external = "age1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqm5ku0f"
+            with mock.patch(
+                "backend.app.api.v1.backups.validate_age_recipient"
+            ), mock.patch(
+                "backend.app.api.v1.backups.send_email", new_callable=mock.AsyncMock
+            ) as send:
+                resp = self.client.patch(
+                    f"/api/v1/backup-settings/{sid}", json={"age_recipient": external}
+                )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        # La identidad del sistema ya no corresponde: se olvida y el correo lo refleja
+        # (clave externa: el administrador conserva su propia privada).
+        with Session(self.engine) as session:
+            row = session.exec(select(BackupSettings)).one()
+            self.assertIsNone(row.age_identity_ciphertext)
+        assert send.await_args is not None
+        message = send.await_args.kwargs["message"]
+        self.assertNotIn("AGE-SECRET-KEY-", message)
+        self.assertIn("clave externa", message)
+
     # -- Máquina de estados del tick ----------------------------------------------
 
     def _make_run(self, **overrides: object) -> uuid.UUID:

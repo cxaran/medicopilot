@@ -412,6 +412,90 @@ def disconnect_drive(session: Session, user_id: uuid.UUID) -> BackupSettings:
     return config
 
 
+def generate_encryption_key(session: Session, user_id: uuid.UUID) -> str:
+    """Genera el par de claves age EN EL SISTEMA, configura el recipient y guarda la
+    identidad privada CIFRADA (Fernet). Devuelve la identidad EN CLARO una sola vez,
+    para enviarla por correo al administrador — la clave que abre los respaldos no
+    debe perderse jamás (requisito explícito del dueño del producto)."""
+    from backend.app.services.backup_crypto_service import generate_age_keypair
+
+    recipient, identity = generate_age_keypair()
+    config = get_backup_settings(session, for_update=True)
+    config.age_recipient = recipient
+    config.age_recipient_fingerprint = age_recipient_fingerprint(recipient)
+    config.age_identity_ciphertext = _fernet().encrypt(identity.encode("utf-8")).decode("utf-8")
+    config.updated_by = user_id
+    session.add(config)
+    return identity
+
+
+def stored_identity_plain(config: BackupSettings) -> Optional[str]:
+    """Identidad privada guardada (si el par lo generó el sistema), descifrada para
+    reenviarla por correo. ``None`` si no hay o si no puede descifrarse."""
+    if not config.age_identity_ciphertext:
+        return None
+    from cryptography.fernet import InvalidToken
+
+    try:
+        return (
+            _fernet()
+            .decrypt(config.age_identity_ciphertext.encode("utf-8"))
+            .decode("utf-8")
+        )
+    except (InvalidToken, BackupPermanentError):
+        return None
+
+
+def backup_settings_email(config: BackupSettings, identity_plain: Optional[str]) -> tuple[str, str]:
+    """(asunto, cuerpo) del correo de configuración de respaldos.
+
+    Resume la configuración aplicada y, si el sistema generó la clave de cifrado,
+    INCLUYE la identidad privada para que el administrador siempre tenga una copia
+    con la que abrir sus respaldos. Es el único lugar (además del momento de
+    generación) donde esa clave sale del sistema.
+    """
+    encryption = "SIN CIFRAR (los respaldos suben como .tar legible)"
+    if config.age_recipient:
+        origin = "generada por el sistema" if identity_plain else "clave externa del administrador"
+        encryption = f"Cifrado con age ({origin}); huella {config.age_recipient_fingerprint}"
+    lines = [
+        "Se actualizó la configuración de respaldos de MediCopilot.",
+        "",
+        f"- Respaldos habilitados: {'sí' if config.enabled else 'no'}",
+        f"- Hora diaria: {config.daily_time.strftime('%H:%M')} ({config.timezone})",
+        f"- Prefijo de archivo: {config.filename_prefix}",
+        (
+            "- Retención: "
+            f"{config.retention_daily_count} diarias, "
+            f"{config.retention_monthly_count} mensuales, "
+            f"{config.retention_yearly_count} anuales"
+        ),
+        f"- Google Drive: {config.drive_status.value}",
+        f"- Cifrado: {encryption}",
+    ]
+    if config.age_recipient:
+        lines += ["", f"Clave PÚBLICA (recipient): {config.age_recipient}"]
+    if identity_plain:
+        lines += [
+            "",
+            "CLAVE PRIVADA DE CIFRADO — GUARDA ESTE CORREO:",
+            identity_plain,
+            "",
+            "Esta clave es la ÚNICA forma de abrir los respaldos cifrados. Si se",
+            "pierde, los respaldos cifrados no podrán recuperarse. Para restaurar:",
+            "descarga el archivo .tar.age de Google Drive y ejecuta",
+            "  age --decrypt -i <archivo-con-esta-clave> respaldo.tar.age > respaldo.tar",
+            "luego extrae el tar y usa pg_restore con database.dump.",
+        ]
+    else:
+        lines += [
+            "",
+            "Los respaldos sin cifrar se restauran descargando el .tar de Google",
+            "Drive, extrayéndolo y usando pg_restore con database.dump.",
+        ]
+    return "MediCopilot: configuración de respaldos actualizada", "\n".join(lines)
+
+
 def enqueue_manual_run(session: Session) -> BackupRun:
     """Crea la ejecución manual (queued, reclamable de inmediato por el tick)."""
     run = BackupRun(

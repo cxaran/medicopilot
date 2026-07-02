@@ -100,6 +100,54 @@ def encrypt_file_with_age(plain_path: Path, encrypted_path: Path, recipient: str
         )
 
 
+def generate_age_keypair() -> tuple[str, str]:
+    """Genera un par de claves age con ``age-keygen`` y devuelve
+    ``(recipient_publico, identidad_privada)``.
+
+    La identidad (``AGE-SECRET-KEY-1…``) es la que ABRE los respaldos: quien la llama
+    debe hacerla llegar al administrador (correo) y/o guardarla cifrada — perderla
+    vuelve ilegibles los respaldos cifrados con su recipient.
+    """
+    try:
+        result = subprocess.run(
+            ["age-keygen"],
+            capture_output=True,
+            shell=False,
+            check=False,
+            timeout=_VALIDATE_TIMEOUT_SECONDS,
+            text=True,
+        )
+    except FileNotFoundError as error:
+        raise BackupCryptoError(
+            "age_keygen_missing", "El binario age-keygen no está instalado en la imagen."
+        ) from error
+    except subprocess.TimeoutExpired as error:
+        raise BackupCryptoError(
+            "age_keygen_timeout", "La generación de la clave de cifrado excedió el tiempo."
+        ) from error
+    if result.returncode != 0:
+        raise BackupCryptoError(
+            "age_keygen_failed", "No se pudo generar la clave de cifrado."
+        )
+
+    # Salida de age-keygen: comentarios (# created / # public key: age1...) y la
+    # identidad AGE-SECRET-KEY-1... en su propia línea. stderr también anuncia la
+    # pública en versiones recientes; se parsea stdout que es estable.
+    recipient = ""
+    identity = ""
+    for line in result.stdout.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("# public key:"):
+            recipient = stripped.removeprefix("# public key:").strip()
+        elif stripped.startswith("AGE-SECRET-KEY-"):
+            identity = stripped
+    if not recipient or not identity:
+        raise BackupCryptoError(
+            "age_keygen_unparseable", "La salida de age-keygen no tuvo la forma esperada."
+        )
+    return recipient, identity
+
+
 def sha256_of_file(path: Path) -> str:
     """SHA-256 (hex) de un archivo, en streaming (los respaldos pueden ser grandes)."""
     digest = hashlib.sha256()

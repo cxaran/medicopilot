@@ -41,6 +41,7 @@ from backend.app.services.backup_crypto_service import (
     validate_age_recipient,
 )
 from backend.app.services import backup_service as backups
+from backend.app.utils.email import send_email
 from backend.app.utils.utc_now import utc_now
 
 logger = logging.getLogger("backend.backups")
@@ -52,6 +53,15 @@ _RUN_NOT_FOUND = "Ejecución de respaldo no encontrada"
 
 # Pantalla del frontend a la que vuelve el callback OAuth (resultado NO sensible).
 _FRONTEND_BACKUPS_PATH = "/resources/backup_settings"
+
+
+async def _send_settings_email(email_to: str, row) -> None:  # type: ignore[no-untyped-def]
+    """Correo con la configuración aplicada y, si el sistema generó la clave de
+    cifrado, la identidad privada (para que nunca se pierda). Best-effort: un fallo
+    de SMTP no revierte el cambio de configuración (send_email ya lo traga con warn).
+    """
+    subject, body = backups.backup_settings_email(row, backups.stored_identity_plain(row))
+    await send_email(subject=subject, email_to=email_to, message=body)
 
 
 @router.get("/backup-settings", response_model=OffsetPage[BackupSettingsListItem])
@@ -75,7 +85,7 @@ def get_backup_settings_detail(
 
 
 @router.patch("/backup-settings/{item_id}", response_model=BackupSettingsRead)
-def update_backup_settings(
+async def update_backup_settings(
     item_id: UUID,
     payload: BackupSettingsUpdate,
     session: SessionDep,
@@ -104,6 +114,12 @@ def update_backup_settings(
         except BackupCryptoError as error:
             api_error(status.HTTP_422_UNPROCESSABLE_ENTITY, error.code, error.summary)
         row.age_recipient_fingerprint = age_recipient_fingerprint(data["age_recipient"])
+    if "age_recipient" in data and data["age_recipient"] != row.age_recipient:
+        # Recipient nuevo (externo o borrado): la identidad guardada por el sistema ya
+        # no corresponde a esa clave y se olvida (el admin externo tiene su privada).
+        row.age_identity_ciphertext = None
+        if data["age_recipient"] is None:
+            row.age_recipient_fingerprint = None
 
     for field, value in data.items():
         setattr(row, field, value)
@@ -130,6 +146,37 @@ def update_backup_settings(
     session.add(row)
     session.commit()
     session.refresh(row)
+    # Cada cambio de configuración se notifica por correo al administrador que lo
+    # hizo, incluyendo la clave de cifrado si el sistema la generó (requisito del
+    # dueño: que la clave que abre los respaldos nunca se pierda).
+    await _send_settings_email(current_user.email, row)
+    return serialize(BackupSettingsRead, row)
+
+
+@router.post(
+    "/backup-settings/{item_id}/generate-encryption-key",
+    response_model=BackupSettingsRead,
+)
+async def generate_encryption_key(
+    item_id: UUID,
+    session: SessionDep,
+    current_user: CurrentUser,
+    _: BackupPermissions.CONFIGURE.requiere,
+) -> BackupSettingsRead:
+    """Genera el par de claves age EN EL SISTEMA y activa el cifrado. La identidad
+    privada viaja por CORREO al administrador (y queda guardada cifrada para
+    reenviarse en cada cambio); la API nunca la devuelve."""
+    row = get_or_404(session, BackupSettings, item_id, _SETTINGS_NOT_FOUND)
+    try:
+        backups.generate_encryption_key(session, current_user.id)
+    except BackupCryptoError as error:
+        api_error(status.HTTP_409_CONFLICT, error.code, error.summary)
+    except backups.BackupPermanentError as error:
+        # Sin BACKUP_TOKEN_ENCRYPTION_KEY no hay dónde guardar la identidad cifrada.
+        api_error(status.HTTP_409_CONFLICT, error.code, error.summary)
+    session.commit()
+    session.refresh(row)
+    await _send_settings_email(current_user.email, row)
     return serialize(BackupSettingsRead, row)
 
 
@@ -152,8 +199,9 @@ def connect_drive(
 
 
 @router.get("/backups/google-drive/callback")
-def google_drive_callback(
+async def google_drive_callback(
     session: SessionDep,
+    current_user: CurrentUser,
     _: BackupPermissions.CONFIGURE.requiere,
     code: str | None = None,
     state: str | None = None,
@@ -169,6 +217,8 @@ def google_drive_callback(
     try:
         backups.complete_drive_connection(session, state=state, code=code)
         session.commit()
+        row = backups.get_backup_settings(session)
+        await _send_settings_email(current_user.email, row)
     except backups.BackupPermanentError:
         session.rollback()
         # El motivo exacto queda en logs; a la URL sólo viaja el desenlace.
@@ -184,7 +234,7 @@ def google_drive_callback(
 @router.post(
     "/backup-settings/{item_id}/disconnect-drive", response_model=BackupSettingsRead
 )
-def disconnect_drive(
+async def disconnect_drive(
     item_id: UUID,
     session: SessionDep,
     current_user: CurrentUser,
@@ -194,6 +244,7 @@ def disconnect_drive(
     row = backups.disconnect_drive(session, current_user.id)
     session.commit()
     session.refresh(row)
+    await _send_settings_email(current_user.email, row)
     return serialize(BackupSettingsRead, row)
 
 

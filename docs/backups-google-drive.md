@@ -13,6 +13,13 @@ recipient de age configurado —el estado por defecto— el respaldo sube **sin 
 Advertencia consciente: sin cifrar, cualquiera con acceso a la cuenta de Drive puede
 leer la base clínica completa.
 
+**La clave que abre los respaldos nunca se pierde**: la acción "Generar clave de
+cifrado" crea el par age EN el sistema, guarda la identidad privada CIFRADA (Fernet)
+y la envía por CORREO al administrador; además, **cada cambio de configuración**
+reenvía un correo con el resumen aplicado y la clave privada (mientras el par sea del
+sistema). Si el administrador pega un recipient externo, el sistema olvida la
+identidad guardada (esa privada la conserva él) y el correo lo indica.
+
 ## Arquitectura en una vista
 
 ```
@@ -105,7 +112,10 @@ Recursos declarativos (UI genérica existente, sin pantallas a medida):
   despliegue; el recipient NO es requisito).
   Acciones: **Conectar Google Drive** (devuelve `authorization_url`; el frontend
   redirige), **Desconectar** (apaga y olvida token/carpeta; conserva historial y
-  archivos) y **Respaldar ahora** (encola manual y despierta el tick).
+  archivos), **Generar clave de cifrado** (par age del sistema; la privada viaja por
+  correo y queda guardada cifrada — la API nunca la devuelve) y **Respaldar ahora**
+  (encola manual y despierta el tick). Todo cambio de configuración (PATCH, conectar,
+  desconectar, generar clave) envía el correo resumen al administrador.
 - **`backup_runs`** (solo lectura con `backups:read`): historial con estado, origen,
   ventana, archivo, tamaño, roles de retención, intentos y error.
 

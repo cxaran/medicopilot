@@ -643,6 +643,28 @@ export interface paths {
         patch: operations["update_backup_settings_api_v1_backup_settings__item_id__patch"];
         trace?: never;
     };
+    "/api/v1/backup-settings/{item_id}/generate-encryption-key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Generate Encryption Key
+         * @description Genera el par de claves age EN EL SISTEMA y activa el cifrado. La identidad
+         *     privada viaja por CORREO al administrador (y queda guardada cifrada para
+         *     reenviarse en cada cambio); la API nunca la devuelve.
+         */
+        post: operations["generate_encryption_key_api_v1_backup_settings__item_id__generate_encryption_key_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/backup-settings/{item_id}/connect-drive": {
         parameters: {
             query?: never;
@@ -3301,8 +3323,8 @@ export interface components {
             /** Copias anuales */
             retention_yearly_count?: number | null;
             /**
-             * Recipient de age (clave pública)
-             * @description Clave PÚBLICA age1… con la que se cifra el respaldo; la privada nunca se sube.
+             * Recipient de age (clave pública, opcional)
+             * @description OPCIONAL. Sin recipient el respaldo sube SIN cifrar (.tar); con la clave PÚBLICA age1… se cifra antes de subir (la privada nunca se sube).
              */
             age_recipient?: string | null;
         };
@@ -10249,6 +10271,39 @@ export interface operations {
                 "application/json": components["schemas"]["BackupSettingsUpdate"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupSettingsRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    generate_encryption_key_api_v1_backup_settings__item_id__generate_encryption_key_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {
