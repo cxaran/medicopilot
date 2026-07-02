@@ -8,9 +8,11 @@ import { buildToolCatalog, effectiveTools } from "../tool-catalog.ts";
 import { buildClinicalActionPlan } from "../approval-protocol.ts";
 
 // EPIC ESCALAS fase 2: resultados de escalas persistidos. La lectura (list_scale_results) no
-// se gatea en cliente (FastAPI exige scale_results:read). La escritura
-// (create_scale_result_draft) pasa por el protocolo de aprobación P1 (plan canónico inmutable
-// + gating por permiso de creación). El servidor recomputa el puntaje; el cliente no lo provee.
+// se gatea en cliente (FastAPI exige scale_results:read). Las escrituras
+// (create/update_scale_result_draft) pasan por el protocolo de aprobación P1 (plan canónico
+// inmutable). Como scale_results NO publica forms.create/update en el catálogo (su insumo JSON
+// no es un formulario genérico), el gating usa ``requiredPermissions`` con los permisos de la
+// sesión. El servidor recomputa el puntaje; el cliente no lo provee.
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -114,6 +116,89 @@ test("create_scale_result_draft: gated por permiso de creación en scale_results
   assert.ok(effective.has("clinical.create_scale_result_draft"));
 });
 
+test("escrituras de escalas: el gate pasa por requiredPermissions (scale_results no publica forms)", () => {
+  const tools = listTools();
+  // Sin permisos en sesión y sin recurso creable: ambas gateadas, nombrando el permiso faltante.
+  const closed = buildToolCatalog(tools, new Set<string>(), undefined, new Set<string>());
+  const create = closed.find((e) => e.name === "clinical.create_scale_result_draft");
+  const update = closed.find((e) => e.name === "clinical.update_scale_result_draft");
+  assert.equal(create?.status, "gated_out");
+  assert.match(String(create?.reason), /scale_results:create/);
+  assert.equal(update?.status, "gated_out");
+  assert.match(String(update?.reason), /scale_results:update/);
+
+  // Con el permiso de sesión correspondiente, cada una se habilita por separado.
+  const canCreate = new Set(
+    effectiveTools(tools, new Set<string>(), new Set(["scale_results:create"])).map((t) => t.name),
+  );
+  assert.ok(canCreate.has("clinical.create_scale_result_draft"));
+  assert.ok(!canCreate.has("clinical.update_scale_result_draft"));
+
+  const canUpdate = new Set(
+    effectiveTools(tools, new Set<string>(), new Set(["scale_results:update"])).map((t) => t.name),
+  );
+  assert.ok(canUpdate.has("clinical.update_scale_result_draft"));
+  assert.ok(!canUpdate.has("clinical.create_scale_result_draft"));
+});
+
+test("update_scale_result_draft: es escritura y arma el plan canónico de aprobación", () => {
+  const tool = getTool("clinical.update_scale_result_draft");
+  assert.ok(tool, "la tool debe existir");
+  if (!tool) return;
+  assert.equal(tool.kind, "write");
+  assert.ok(tool.approval, "debe declarar metadata de aprobación");
+
+  const args = {
+    result_id: "22222222-2222-2222-2222-222222222222",
+    inputs: { chf: true, hypertension: true, age: 80, diabetes: true,
+      stroke_tia_thromboembolism: false, vascular_disease: false, sex: "female" },
+  };
+  const plan = buildClinicalActionPlan(tool, args);
+  assert.equal(plan.actionType, "update_scale_result_draft");
+  assert.equal(plan.targetResource, "scale_results");
+  assert.match(plan.humanReadableSummary, /recomputa/);
+  assert.deepEqual(plan.exactPayload, args);
+  assert.ok(Object.isFrozen(plan.exactPayload));
+});
+
+test("update_scale_result_draft: requiere result_id y rechaza campos extra", () => {
+  assert.equal(
+    resolveToolCall("clinical.update_scale_result_draft", { inputs: {} }).outcome,
+    "invalid_args",
+  );
+  assert.equal(
+    resolveToolCall("clinical.update_scale_result_draft", {
+      result_id: "22222222-2222-2222-2222-222222222222",
+      score: 9, // el puntaje NUNCA se acepta del cliente
+    }).outcome,
+    "invalid_args",
+  );
+});
+
+test("update_scale_result_draft: PATCH a /scale-results/{id} SIN result_id en el body", async (t) => {
+  let capturedUrl = "";
+  let capturedMethod = "";
+  let capturedBody: unknown = null;
+  t.mock.method(globalThis, "fetch", async (url: unknown, init: RequestInit) => {
+    capturedUrl = String(url);
+    capturedMethod = String(init.method);
+    capturedBody = JSON.parse(String(init.body));
+    return jsonResponse(200, { id: "x", score: 6, interpretation_label: "Riesgo alto" });
+  });
+  const inputs = { chf: true, hypertension: true, age: 80, diabetes: true,
+    stroke_tia_thromboembolism: false, vascular_disease: false, sex: "female" };
+  const resolved = resolveToolCall("clinical.update_scale_result_draft", {
+    result_id: "22222222-2222-2222-2222-222222222222",
+    inputs,
+  });
+  assert.equal(resolved.outcome, "ready");
+  if (resolved.outcome !== "ready") throw new Error("no ready");
+  await executeTool(resolved.tool, resolved.args);
+  assert.equal(capturedUrl, "/api/v1/scale-results/22222222-2222-2222-2222-222222222222");
+  assert.equal(capturedMethod, "PATCH");
+  assert.deepEqual(capturedBody, { inputs });
+});
+
 test("scale results: lectura no gateada + descubribles por tool_search", () => {
   const tools = listTools();
   const catalog = buildToolCatalog(tools, new Set<string>());
@@ -124,6 +209,7 @@ test("scale results: lectura no gateada + descubribles por tool_search", () => {
   for (const { query, name } of [
     { query: "resultados de escalas guardados del paciente", name: "clinical.list_scale_results" },
     { query: "guardar resultado de escala CHA2DS2-VASc", name: "clinical.create_scale_result_draft" },
+    { query: "corregir insumo de un resultado de escala guardado", name: "clinical.update_scale_result_draft" },
   ]) {
     const hits = searchTools(query, tools, 10);
     assert.ok(hits.some((hit) => hit.name === name), `tool_search('${query}') -> ${name}`);

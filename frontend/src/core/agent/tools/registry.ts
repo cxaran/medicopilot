@@ -93,6 +93,12 @@ export interface ToolApprovalMeta {
   // backend sólo expone el form/acción si concede el permiso, así que el gate de "creable" no aplica
   // (cubre update/acciones sobre recursos editables pero no creables). Igual pasa por aprobación P1.
   preauthorized?: boolean;
+  // Gate ALTERNATIVO por permiso explícito (de la sesión /auth/me) para recursos que a propósito
+  // NO publican formulario genérico en el catálogo (p. ej. scale_results: su insumo JSON no se
+  // renderiza como form, así que forms.create/update no existen y la señal "creable" nunca llega).
+  // La tool se declara si el médico tiene TODOS estos permisos. Defensa en profundidad: FastAPI
+  // revalida cada ejecución; esto solo evita ofrecer al modelo lo que el médico no puede hacer.
+  requiredPermissions?: readonly string[];
 }
 
 export interface ToolDefinition {
@@ -1741,12 +1747,79 @@ const TOOLS: ToolDefinition[] = [
     approval: {
       actionType: "create_scale_result_draft",
       targetResource: "scale_results",
+      // scale_results no publica forms.create (su insumo JSON no es un form genérico):
+      // se gatea por el permiso explícito, no por la señal "creable" del catálogo.
+      requiredPermissions: ["scale_results:create"],
       summarize: (args) =>
         `Guardar el resultado de la escala "${String(args.scale_id ?? "—")}" para el paciente ` +
         `${String(args.patient_id ?? "—")} (el servidor recomputa el puntaje).`,
     },
     execute: (args, ctx) =>
       ctx.api(`/api/v1/scale-results`, { method: "POST", body: args as Record<string, unknown> }),
+  },
+  {
+    // EPIC ESCALAS: corregir un resultado GUARDADO sin borrar y recrear ("capturé mal un
+    // insumo"). El servidor RECOMPUTA el puntaje desde la escala guardada + los nuevos
+    // inputs (jamás confía en un puntaje del cliente) y conserva la identidad de la escala
+    // (scale_id no cambia en una edición). También permite re-vincular la consulta.
+    name: "clinical.update_scale_result_draft",
+    description:
+      "Corrige un resultado de escala clínica YA GUARDADO: envía los inputs corregidos y el " +
+      "servidor RECOMPUTA el puntaje, interpretación y fuente desde la escala original (no se " +
+      "acepta un puntaje directo ni cambiar de escala; para otra escala, crea un resultado " +
+      "nuevo). También puede re-vincular la consulta asociada. Acción de escritura: requiere " +
+      "confirmación explícita del médico. Úsala cuando un insumo se capturó mal; muestra antes " +
+      "el nuevo cómputo con clinical.compute_scale para que el médico apruebe el dato exacto.",
+    kind: "write",
+    inputSchema: {
+      type: "object",
+      properties: {
+        result_id: {
+          type: "string",
+          description: "Id (UUID) del resultado guardado (de clinical.list_scale_results).",
+          format: "uuid",
+        },
+        inputs: {
+          type: "object",
+          description:
+            "Insumos corregidos COMPLETOS de la escala (el servidor los valida y recomputa; " +
+            "422 nombrando el campo si faltan o son inválidos).",
+          additionalProperties: true,
+        },
+        consultation_id: {
+          type: "string",
+          description: "Id (UUID) de la consulta a vincular (opcional).",
+          format: "uuid",
+        },
+      },
+      required: ["result_id"],
+      additionalProperties: false,
+    },
+    approval: {
+      actionType: "update_scale_result_draft",
+      targetResource: "scale_results",
+      requiredPermissions: ["scale_results:update"],
+      summarize: (args) =>
+        `Corregir el resultado de escala ${String(args.result_id ?? "—")}` +
+        (args.inputs !== undefined
+          ? " con nuevos insumos (el servidor recomputa el puntaje)"
+          : "") +
+        (args.consultation_id !== undefined
+          ? `, vinculándolo a la consulta ${String(args.consultation_id)}`
+          : "") +
+        ".",
+    },
+    execute: (args, ctx) => {
+      const { result_id: resultId, ...body } = args as {
+        result_id: string;
+        inputs?: Record<string, unknown>;
+        consultation_id?: string;
+      };
+      return ctx.api(`/api/v1/scale-results/${encodeURIComponent(resultId)}`, {
+        method: "PATCH",
+        body,
+      });
+    },
   },
   {
     // STRUCTURED HISTORY (gap 6): listar los antecedentes ESTRUCTURADOS de un paciente

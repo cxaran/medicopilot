@@ -78,11 +78,17 @@ export function creatableResources(catalog: ResourceCatalog): Set<string> {
  * pasa ``declaredNames`` (descubrimiento a escala), una tool NO gateada se marca "declared" si
  * está en ese set (núcleo + meta + cargadas) o "discoverable" si solo está disponible bajo
  * demanda. Sin ``declaredNames`` (compat), toda tool no gateada queda "declared".
+ *
+ * ``granted`` (permisos de la sesión, /auth/me) habilita el gate ALTERNATIVO
+ * ``approval.requiredPermissions`` de las escrituras cuyo recurso NO publica formulario
+ * genérico en el catálogo (p. ej. scale_results). Sin ``granted`` (compat), esas tools
+ * quedan gateadas salvo que su recurso sí sea creable.
  */
 export function buildToolCatalog(
   tools: readonly ToolDefinition[],
   creatable: Set<string>,
   declaredNames?: ReadonlySet<string>,
+  granted?: ReadonlySet<string>,
 ): ToolCatalogEntry[] {
   // Estado de una tool que pasa el gating de rol: declarada o solo descubrible bajo demanda.
   const availableStatus = (name: string): ToolStatus =>
@@ -115,7 +121,14 @@ export function buildToolCatalog(
         reason: availableReason(tool.name),
       };
     }
-    if (target && creatable.has(target)) {
+    const required = tool.approval?.requiredPermissions;
+    const permitted =
+      (target !== null && creatable.has(target)) ||
+      (required !== undefined &&
+        required.length > 0 &&
+        granted !== undefined &&
+        required.every((permission) => granted.has(permission)));
+    if (permitted) {
       return {
         name: tool.name,
         kind: "write",
@@ -131,9 +144,11 @@ export function buildToolCatalog(
       source,
       targetResource: target,
       status: "gated_out",
-      reason: target
-        ? `El médico no tiene permiso para crear en ${target}.`
-        : "La herramienta de escritura no declara recurso destino.",
+      reason: required?.length
+        ? `El médico no tiene los permisos requeridos (${required.join(", ")}).`
+        : target
+          ? `El médico no tiene permiso para crear en ${target}.`
+          : "La herramienta de escritura no declara recurso destino.",
     };
   });
 }
@@ -142,9 +157,10 @@ export function buildToolCatalog(
 export function effectiveTools(
   tools: readonly ToolDefinition[],
   creatable: Set<string>,
+  granted?: ReadonlySet<string>,
 ): ToolDefinition[] {
   const declared = new Set(
-    buildToolCatalog(tools, creatable)
+    buildToolCatalog(tools, creatable, undefined, granted)
       .filter((entry) => entry.status === "declared")
       .map((entry) => entry.name),
   );

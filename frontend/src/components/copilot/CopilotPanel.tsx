@@ -121,7 +121,7 @@ import { listAgentMemories } from "@/core/agent-memories/agent-memories-client";
 import { getAgentPersona } from "@/core/agent-persona/agent-persona-client";
 import { composeLeadingLayers, type PersonaFields } from "@/core/agent/persona";
 import { browserApi } from "@/core/api/browser-client";
-import type { ResourceCatalog } from "@/core/api/contracts";
+import type { ResourceCatalog, SessionUser } from "@/core/api/contracts";
 import { isUiSpec, type UiSpec } from "@/core/agent/tools/ui-spec";
 import { GeneratedUi } from "@/components/copilot/GeneratedUi";
 import { parseComposerPalette, type ComposerCommand } from "@/core/chat-shell/composer-commands";
@@ -379,6 +379,9 @@ export function CopilotPanel({
   // (cliente) para no romper la hidratación de SSR.
   const [startSuggestions, setStartSuggestions] = useState<string[]>([]);
   const creatableRef = useRef<Set<string>>(new Set());
+  // Permisos de la sesión (/auth/me): gate alternativo ``requiredPermissions`` de las escrituras
+  // cuyo recurso no publica formulario genérico en el catálogo (p. ej. scale_results).
+  const grantedRef = useRef<Set<string>>(new Set());
   // Descubrimiento a escala (tool_search/tool_describe): nombres de tools CARGADAS bajo demanda
   // en este hilo. Se suman al set declarado en los turnos siguientes (el set por turno se
   // mantiene pequeño: núcleo + meta + cargadas). Persiste durante la vida del panel.
@@ -639,26 +642,34 @@ export function CopilotPanel({
   }, [models, selectedModel]);
 
   // Carga el catálogo de recursos (permission-projected) para gatear las tools de escritura
-  // por rol y mostrar la procedencia. Si falla, queda vacío -> ninguna escritura se ofrece.
+  // por rol y mostrar la procedencia, junto con los permisos de la sesión (gate alternativo
+  // ``requiredPermissions``). Si falla, queda vacío -> ninguna escritura se ofrece.
   useEffect(() => {
     let active = true;
-    browserApi<ResourceCatalog>("/api/v1/resources")
-      .then((catalog) => {
+    Promise.all([
+      browserApi<ResourceCatalog>("/api/v1/resources"),
+      // Si /auth/me falla, se degrada a "sin permisos extra" sin tirar el catálogo.
+      browserApi<SessionUser>("/api/v1/auth/me").catch(() => null),
+    ])
+      .then(([catalog, session]) => {
         if (!active) return;
         const creatable = creatableResources(catalog);
+        const granted = new Set(session?.permissions ?? []);
         creatableRef.current = creatable;
+        grantedRef.current = granted;
         // Deriva las tools genéricas del contrato (precedencia: las hand-written de listTools ganan).
         const derived = deriveResourceTools(catalog, listTools());
         derivedToolsRef.current = derived;
         const tools = [...listTools(), ...derived, ...mcpTools];
-        const eff = effectiveTools(tools, creatable);
+        const eff = effectiveTools(tools, creatable, granted);
         setToolCatalog(
-          buildToolCatalog(tools, creatable, declaredToolNames(eff, loadedToolsRef.current)),
+          buildToolCatalog(tools, creatable, declaredToolNames(eff, loadedToolsRef.current), granted),
         );
       })
       .catch(() => {
         if (!active) return;
         creatableRef.current = new Set();
+        grantedRef.current = new Set();
         derivedToolsRef.current = [];
         const tools = [...listTools(), ...mcpTools];
         const eff = effectiveTools(tools, new Set());
@@ -842,6 +853,7 @@ export function CopilotPanel({
       const extraTools = effectiveTools(
         [...listTools(), ...derivedToolsRef.current, ...mcpToolsRef.current],
         creatableRef.current,
+        grantedRef.current,
       );
       const resolved = resolveToolCall(toolName, args, extraTools);
       if (resolved.outcome !== "ready") {
@@ -871,7 +883,7 @@ export function CopilotPanel({
         // Contexto de descubrimiento para las meta-tools (tool_search/tool_describe): el set
         // BUSCABLE es el efectivo (ya gateado por rol) sin las meta-tools; markLoaded suma las
         // cargadas (se declararán en turnos siguientes) y refresca la vista de procedencia.
-        const eff = effectiveTools([...listTools(), ...derivedToolsRef.current, ...mcpToolsRef.current], creatableRef.current);
+        const eff = effectiveTools([...listTools(), ...derivedToolsRef.current, ...mcpToolsRef.current], creatableRef.current, grantedRef.current);
         const ctx: ToolExecutionContext = {
           ...defaultToolContext,
           discovery: {
@@ -890,6 +902,7 @@ export function CopilotPanel({
                     [...listTools(), ...derivedToolsRef.current, ...mcpToolsRef.current],
                     creatableRef.current,
                     declaredToolNames(eff, loadedToolsRef.current),
+                    grantedRef.current,
                   ),
                 );
               }
@@ -1280,7 +1293,7 @@ export function CopilotPanel({
     // Descubrimiento a escala: se declara solo el set ACOTADO (núcleo + meta + tools cargadas
     // bajo demanda), no todo el catálogo. El resto sigue accesible vía tool_search/tool_describe.
     const declared = declaredTools(
-      effectiveTools([...listTools(), ...derivedToolsRef.current, ...mcpToolsRef.current], creatableRef.current),
+      effectiveTools([...listTools(), ...derivedToolsRef.current, ...mcpToolsRef.current], creatableRef.current, grantedRef.current),
       loadedToolsRef.current,
     );
     const toolsWire = toWireToolDefinitions(declared);
