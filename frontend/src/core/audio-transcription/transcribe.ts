@@ -42,8 +42,12 @@ export async function resolveAudioTranscript(
         provider: null,
         notes: LOCAL_PRIVACY_NOTE,
       };
-    } catch {
-      // Falla local (worker/WebGPU/decodificación no disponible): caemos al servidor.
+    } catch (err) {
+      // Falla local (worker/WebGPU/decodificación no disponible): caemos al servidor. Se deja
+      // rastro en consola — sin el warn, un fallo local con el proveedor de servidor sin
+      // configurar se percibía como "la transcripción está rota" sin ninguna pista del porqué.
+      // El error del worker no contiene audio ni PHI (mensajes de inicialización/decodificación).
+      console.warn("Transcripción local falló; se intenta el proveedor del servidor.", err);
     }
   }
   return deps.runServer();

@@ -172,7 +172,13 @@ export function useContinuousDictation(
           if (!isFinal) {
             startSegment(); // reinicia para el siguiente fragmento ANTES de transcribir
           }
-          enqueueTranscription(blob);
+          // Los cortes intermedios ya pasaron el gate de voz del VAD (el segmentador sólo corta
+          // con voz suficiente). El fragmento FINAL (detener/desmontar) no: sin voz acumulada se
+          // DESCARTA. Whisper alucina texto sobre silencio puro ("Gracias por ver el vídeo") y,
+          // con el envío automático, ese texto fantasma llegaría al chat como mensaje del médico.
+          if (!isFinal || segmenter.hasPendingSpeech()) {
+            enqueueTranscription(blob);
+          }
           if (isFinal) {
             cleanup();
             setStatus("idle");
