@@ -37,6 +37,21 @@ class MessageCreate(ApiWriteSchema):
     )
 
 
+class MessageUpdate(ApiWriteSchema):
+    """Actualización de los METADATOS de presentación de un mensaje.
+
+    Sólo el ``payload`` (sobres de UI generativa / tool calls / notas): permite reflejar estado
+    que cambia DESPUÉS del alta (p. ej. una interfaz ya usada, para restaurarla contraída). El
+    contenido, rol y orden del mensaje son inmutables por esta vía.
+    """
+
+    payload: Optional[dict[str, Any]] = Field(
+        default=None,
+        title="Payload",
+        description="Payload estructurado de presentación (tool calls / metadatos).",
+    )
+
+
 class MessageRead(ApiReadSchema):
     """Representación completa de un mensaje."""
 

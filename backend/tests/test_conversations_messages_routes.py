@@ -68,6 +68,7 @@ _ALL_PERMS = (
     "conversations:reset",
     "messages:read",
     "messages:create",
+    "messages:update",
     "messages:delete",
 )
 
@@ -268,6 +269,49 @@ class ChatPersistenceRoutesTest(unittest.TestCase):
         self.assertIn(keep, ids)
         self.assertNotIn(gone, ids)
 
+    # ----- Metadatos de presentación: PATCH del payload -----
+
+    def test_update_message_payload_only_touches_payload(self) -> None:
+        conv = self._new_conversation().json()["id"]
+        created = self._append(
+            conv, role="assistant", content="Con tarjetas",
+            payload={"tools": {"version": 1, "calls": [{"callId": "c1", "uiUsed": False}]}},
+        ).json()
+
+        resp = self.client.patch(
+            f"/api/v1/messages/{created['id']}",
+            json={"payload": {"tools": {"version": 1, "calls": [{"callId": "c1", "uiUsed": True}]}}},
+        )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        body = resp.json()
+        # Sólo el payload cambia; contenido, rol y orden quedan intactos.
+        self.assertEqual(
+            body["payload"], {"tools": {"version": 1, "calls": [{"callId": "c1", "uiUsed": True}]}}
+        )
+        self.assertEqual(body["content"], "Con tarjetas")
+        self.assertEqual(body["role"], "assistant")
+        self.assertEqual(body["sequence_index"], created["sequence_index"])
+        # Auditoría de la actualización.
+        with Session(self.engine) as session:
+            row = session.get(Message, uuid.UUID(created["id"]))
+            assert row is not None
+            self.assertEqual(row.updated_by, self.actor_id)
+            self.assertIsNotNone(row.updated_at)
+
+    def test_update_deleted_or_nonexistent_message_rejected(self) -> None:
+        conv = self._new_conversation().json()["id"]
+        gone = self._append(conv, content="Se borra").json()["id"]
+        self.assertEqual(self.client.delete(f"/api/v1/messages/{gone}").status_code, 204)
+        self.assertEqual(
+            self.client.patch(f"/api/v1/messages/{gone}", json={"payload": {}}).status_code, 404
+        )
+        self.assertEqual(
+            self.client.patch(
+                f"/api/v1/messages/{uuid.uuid4()}", json={"payload": {}}
+            ).status_code,
+            404,
+        )
+
     # ----- Gestión del historial: borrar mensajes y reiniciar el hilo -----
 
     def test_delete_message_soft_deletes_and_hides_from_list(self) -> None:
@@ -381,12 +425,16 @@ class ChatPersistenceRoutesTest(unittest.TestCase):
         )
 
     def test_delete_requires_delete_permission_and_reset_requires_reset(self) -> None:
-        # Con sólo leer/crear (sin messages:delete ni conversations:reset) la gestión se rechaza.
+        # Con sólo leer/crear (sin messages:update/delete ni conversations:reset) la gestión
+        # se rechaza.
         conv = self._new_conversation().json()["id"]
         msg = self._append(conv).json()["id"]
         self._as("conversations:read", "conversations:create",
                  "messages:read", "messages:create")
         self.assertEqual(self.client.delete(f"/api/v1/messages/{msg}").status_code, 403)
+        self.assertEqual(
+            self.client.patch(f"/api/v1/messages/{msg}", json={"payload": {}}).status_code, 403
+        )
         self.assertEqual(
             self.client.post(f"/api/v1/conversations/{conv}/reset", json={}).status_code,
             403,

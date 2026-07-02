@@ -2,9 +2,9 @@
 // (Conversation + Message, MP-CTRL-0123). Sin red ni React: el cliente de red y el shell lo usan.
 //
 // Persistir el transcript NO es una escritura clínica (no requiere P1): es la memoria del hilo de
-// chat. Sólo se persiste/restaura la conversación visible (roles ``user``/``assistant``); las capas
-// de sistema (seguridad/persona/contexto/memorias) y las tool calls NO se vuelcan aquí. El orden lo
-// fija el backend con ``sequence_index`` (asignado en el servidor).
+// chat. Sólo se persiste/restaura la conversación visible (roles ``user``/``assistant``); las
+// capas de sistema (seguridad/persona/contexto/memorias) no se vuelcan aquí. El orden lo fija el
+// backend con ``sequence_index`` (asignado en el servidor).
 //
 // UI GENERATIVA PERSISTENTE: los ``UiSpec`` (formularios de plantilla, planes de tareas, acciones
 // detectadas, checklists…) SÍ se persisten, en el ``payload`` versionado del mensaje que los ancla
@@ -14,6 +14,15 @@
 // Esto NO agranda el contexto del modelo: los specs restaurados van con texto vacío (aportan cero
 // tokens al armar el turno) y su propósito es lo contrario — que el médico retome un proceso ya
 // definido sin volver a pedírselo al agente.
+//
+// TOOL CALLS PERSISTENTES (``payload.tools``): el estado FINAL de las herramientas del turno
+// (nombre, args, resultado en preview, éxito/error/rechazo, plan P1 resuelto, interfaz usada) se
+// persiste anclado al mensaje del asistente, para restaurar el hilo TAL CUAL quedó: las tarjetas
+// vuelven bajo su mensaje (``turnId`` sintético = uuid de la fila) con la misma contracción que en
+// vivo. Los specs ``ui.*`` no se duplican: la call los REFERENCIA por índice en ``payload.ui``
+// (``uiSpecIndex``) y al restaurar la interfaz vuelve DENTRO de su tarjeta (ya no como mensaje
+// ``kind: "ui"`` suelto). Tampoco entra al contexto del modelo: el cable sigue leyendo sólo
+// texto/imagen/toolNotes.
 
 import { isUiSpec, type UiSpec } from "@/core/agent/tools/ui-spec";
 
@@ -38,6 +47,92 @@ export const MAX_PLAN_NOTE_CHARS = 2_000;
 // lecturas, meta-tools, MCP, sandbox y escrituras rechazadas). Telegráficas por construcción.
 export const MAX_TOOL_NOTES_PER_MESSAGE = 30;
 export const MAX_TOOL_NOTE_CHARS = 600;
+
+// Topes del sobre de TOOL CALLS (estado FINAL de las herramientas del turno, para restaurar el
+// hilo tal cual quedó). Los textos ya vienen acotados en vivo (previews); los topes acotan lo
+// patológico. Una call que exceda el presupuesto total se DESCARTA (el resto persiste igual).
+export const MAX_TOOL_CALLS_PER_MESSAGE = 30;
+export const MAX_TOOL_CALL_TEXT_CHARS = 4_000;
+export const MAX_TOOLS_PAYLOAD_CHARS = 60_000;
+
+/** Estado FINAL de una tool call persistida (subset estructural del ``ToolCallView`` del panel).
+ *  Sólo estados TERMINALES: al cerrarse un turno no quedan calls corriendo ni esperando
+ *  aprobación (P1 es síncrona dentro del turno); nunca se restaura un "Aprobar/Rechazar" activo. */
+export type PersistedToolCallStatus = "success" | "error" | "rejected";
+
+/** Plan P1 RESUELTO de una escritura (lo que el médico vio al aprobar/rechazar): se persiste
+ *  completo para restaurar la tarjeta de la acción tal cual quedó. */
+export interface PersistedToolCallPlan {
+  actionType: string;
+  targetResource: string;
+  humanReadableSummary: string;
+  exactPayload: Record<string, unknown>;
+}
+
+/**
+ * Tool call del turno con el estado en que QUEDÓ, anclada al mensaje del asistente que cerró el
+ * turno. Se persiste en ``payload.tools`` y al restaurar re-siembra las tarjetas de herramientas
+ * bajo su mensaje (mismo render que en vivo). NO entra al contexto del modelo (el cable sólo lee
+ * texto/imagen/toolNotes); es presentación durable del hilo.
+ */
+export interface PersistedToolCall {
+  callId: string;
+  name: string;
+  kind: "read" | "write";
+  status: PersistedToolCallStatus;
+  /** Preview de los args tal como se mostró (las escrituras muestran el plan, no los args). */
+  argsText?: string;
+  /** Preview del resultado mostrado en la tarjeta (ya truncado en vivo). */
+  resultText?: string;
+  errorText?: string;
+  /** Interfaz ui.* INTERACTIVA ya usada por el médico → se restaura contraída. */
+  uiUsed?: boolean;
+  /** Índice del spec que rindió esta call dentro de ``payload.ui.specs`` (tools ui.*): la
+   *  interfaz se persiste UNA vez (sobre de UI) y aquí sólo se referencia. */
+  uiSpecIndex?: number;
+  plan?: PersistedToolCallPlan;
+  /** Spec RESUELTO al restaurar (desde ``uiSpecIndex``); nunca se serializa (derivado). */
+  uiSpec?: UiSpec;
+}
+
+function isPersistedToolCallPlan(value: unknown): value is PersistedToolCallPlan {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const plan = value as Record<string, unknown>;
+  return (
+    typeof plan.actionType === "string" &&
+    typeof plan.targetResource === "string" &&
+    typeof plan.humanReadableSummary === "string" &&
+    typeof plan.exactPayload === "object" &&
+    plan.exactPayload !== null &&
+    !Array.isArray(plan.exactPayload)
+  );
+}
+
+/** Forma en lista blanca de una tool call persistida (mismo criterio gobernado que ``isUiSpec``):
+ *  un payload viejo o manipulado degrada a "sin tarjetas", nunca rompe el sembrado. */
+export function isPersistedToolCall(value: unknown): value is PersistedToolCall {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const call = value as Record<string, unknown>;
+  return (
+    typeof call.callId === "string" &&
+    call.callId.length > 0 &&
+    typeof call.name === "string" &&
+    call.name.length > 0 &&
+    (call.kind === "read" || call.kind === "write") &&
+    (call.status === "success" || call.status === "error" || call.status === "rejected") &&
+    (call.argsText === undefined || typeof call.argsText === "string") &&
+    (call.resultText === undefined || typeof call.resultText === "string") &&
+    (call.errorText === undefined || typeof call.errorText === "string") &&
+    (call.uiUsed === undefined || typeof call.uiUsed === "boolean") &&
+    (call.uiSpecIndex === undefined ||
+      (typeof call.uiSpecIndex === "number" && Number.isInteger(call.uiSpecIndex) && call.uiSpecIndex >= 0)) &&
+    (call.plan === undefined || isPersistedToolCallPlan(call.plan))
+  );
+}
 
 /**
  * Subconjunto ESTRUCTURAL del ``ChatMessage`` del CopilotPanel que se persiste/restaura.
@@ -69,6 +164,12 @@ export interface TranscriptMessage {
    *  de los turnos siguientes como bloque adyacente COMPACTABLE (a diferencia de los planes
    *  aprobados, que son ``preserve``). */
   toolNotes?: readonly string[];
+  /** Tool calls del turno con su estado FINAL, ancladas al mensaje del asistente. Se persisten en
+   *  ``payload.tools`` y al restaurar re-siembran las tarjetas bajo el mensaje (vía ``turnId``). */
+  toolCalls?: readonly PersistedToolCall[];
+  /** Ancla de las tool calls en el hilo. En vivo es el turno del gateway; al restaurar es
+   *  SINTÉTICO (el uuid de la fila), suficiente para reagrupar mensaje ↔ tarjetas. */
+  turnId?: string;
 }
 
 /** Fila de mensaje tal como la devuelve el backend (``/api/v1/messages``). */
@@ -155,6 +256,33 @@ function toolNotesFromPayload(
 }
 
 /**
+ * Extrae, GOBERNADAMENTE, las tool calls del sobre versionado ``payload.tools``: versión conocida
+ * y sólo calls que pasen ``isPersistedToolCall``; el resto se descarta en silencio (hilos viejos
+ * sin sobre degradan a texto plano, como hasta ahora). El campo derivado ``uiSpec`` de una call
+ * serializada por error se ignora (se re-resuelve desde ``uiSpecIndex``).
+ */
+function toolCallsFromPayload(
+  payload: Record<string, unknown> | null | undefined,
+): PersistedToolCall[] {
+  const envelope = payload?.tools;
+  if (typeof envelope !== "object" || envelope === null) {
+    return [];
+  }
+  const { version, calls } = envelope as { version?: unknown; calls?: unknown };
+  if (version !== UI_PAYLOAD_VERSION || !Array.isArray(calls)) {
+    return [];
+  }
+  return calls
+    .filter(isPersistedToolCall)
+    .slice(0, MAX_TOOL_CALLS_PER_MESSAGE)
+    .map((call) => {
+      const clean = { ...call };
+      delete clean.uiSpec;
+      return clean;
+    });
+}
+
+/**
  * Notas de planes aprobados de TODO el hilo restaurado, en orden. El panel las re-siembra como
  * segmentos ``preserve`` de la compactación (paridad con la sesión en vivo, donde los planes
  * aprobados se conservan verbatim en el contexto de cada turno).
@@ -170,10 +298,15 @@ export function approvedPlanNotesOf(messages: readonly TranscriptMessage[]): str
  * mensaje sembrado ES el id del backend (uuid): así el shell puede marcarlos como ya persistidos y
  * no reenviarlos.
  *
- * Si la fila trae UI generativa (``payload.ui``), cada spec válido se MATERIALIZA como un mensaje
- * ``kind: "ui"`` propio ANTES del texto (mismo orden visual que en vivo: la UI del turno encima de
- * la respuesta). Sus ids sintéticos derivan del uuid de la fila (``<uuid>:ui:<n>``): entran al set
- * de persistidos del shell y no se reenvían. Con el texto vacío, la fila restaura sólo su UI.
+ * Si la fila trae UI generativa (``payload.ui``), cada spec válido NO REFERENCIADO por una tool
+ * call se MATERIALIZA como un mensaje ``kind: "ui"`` propio ANTES del texto (retrocompatibilidad
+ * con hilos sin sobre de tools). Sus ids sintéticos derivan del uuid de la fila
+ * (``<uuid>:ui:<n>``): entran al set de persistidos del shell y no se reenvían. Los specs
+ * referenciados (``uiSpecIndex`` del sobre ``payload.tools``) se ADJUNTAN a su call restaurada:
+ * la interfaz vuelve DENTRO de su tarjeta de herramienta, como se vio en vivo.
+ *
+ * Si la fila trae tool calls (``payload.tools``), el mensaje base lleva un ``turnId`` SINTÉTICO
+ * (el uuid de la fila) que re-ancla sus tarjetas bajo el mensaje, igual que en vivo.
  */
 export function messagesToTranscript(rows: readonly PersistedMessageRow[]): TranscriptMessage[] {
   return [...rows]
@@ -183,7 +316,24 @@ export function messagesToTranscript(rows: readonly PersistedMessageRow[]): Tran
       const restored: TranscriptMessage[] = [];
       const payload = row.payload ?? undefined;
 
-      for (const [index, spec] of uiSpecsFromPayload(payload).entries()) {
+      const specs = uiSpecsFromPayload(payload);
+      const toolCalls = toolCallsFromPayload(payload).map((call) => {
+        if (call.uiSpecIndex === undefined) {
+          return call;
+        }
+        const spec = specs[call.uiSpecIndex];
+        return spec ? { ...call, uiSpec: spec } : call;
+      });
+      const referencedSpecIndices = new Set(
+        toolCalls
+          .map((call) => call.uiSpecIndex)
+          .filter((index): index is number => index !== undefined),
+      );
+
+      for (const [index, spec] of specs.entries()) {
+        if (referencedSpecIndices.has(index)) {
+          continue;
+        }
         restored.push({
           id: `${row.id}:ui:${index}`,
           role: row.role as TranscriptRole,
@@ -195,9 +345,14 @@ export function messagesToTranscript(rows: readonly PersistedMessageRow[]): Tran
 
       const planNotes = planNotesFromPayload(payload);
       const toolNotes = toolNotesFromPayload(payload);
-      // El mensaje base se restaura con texto o, aun vacío, si porta notas (de plan o de tools):
-      // el turno que sólo usó herramientas persiste su rastro; el render suprime la burbuja vacía.
-      if (row.content.trim().length > 0 || planNotes.length > 0 || toolNotes.length > 0) {
+      // El mensaje base se restaura con texto o, aun vacío, si porta notas o tool calls: el turno
+      // que sólo usó herramientas persiste su rastro; el render suprime la burbuja vacía.
+      if (
+        row.content.trim().length > 0 ||
+        planNotes.length > 0 ||
+        toolNotes.length > 0 ||
+        toolCalls.length > 0
+      ) {
         const message: TranscriptMessage = {
           id: row.id,
           role: row.role as TranscriptRole,
@@ -208,6 +363,10 @@ export function messagesToTranscript(rows: readonly PersistedMessageRow[]): Tran
         }
         if (toolNotes.length > 0) {
           message.toolNotes = toolNotes;
+        }
+        if (toolCalls.length > 0) {
+          message.toolCalls = toolCalls;
+          message.turnId = row.id;
         }
         if (payload) {
           if (payload.is_error === true) {
@@ -226,7 +385,7 @@ export function messagesToTranscript(rows: readonly PersistedMessageRow[]): Tran
     });
 }
 
-/** ¿El mensaje lleva contenido persistible además del texto (UI generativa o notas)? */
+/** ¿El mensaje lleva contenido persistible además del texto (UI generativa, notas o tool calls)? */
 function carriesUiSpecs(message: TranscriptMessage): boolean {
   if (message.kind === "ui" && message.uiSpec) {
     return true;
@@ -235,6 +394,9 @@ function carriesUiSpecs(message: TranscriptMessage): boolean {
     return true;
   }
   if (Array.isArray(message.toolNotes) && message.toolNotes.length > 0) {
+    return true;
+  }
+  if (Array.isArray(message.toolCalls) && message.toolCalls.length > 0) {
     return true;
   }
   return Array.isArray(message.uiSpecs) && message.uiSpecs.length > 0;
@@ -260,17 +422,21 @@ export function selectUnpersisted<T extends TranscriptMessage>(
 
 /**
  * Serializa (con topes) los specs de UI de un mensaje al sobre versionado ``payload.ui``. Devuelve
- * null si el mensaje no lleva UI o si TODOS sus specs exceden los topes. El recorte es
+ * envelope null si el mensaje no lleva UI o si TODOS sus specs exceden los topes. El recorte es
  * determinista: se conservan los primeros N que quepan en el presupuesto de caracteres.
+ * ``indexMap`` traduce índice ORIGINAL (en ``uiSpecs``) → índice FINAL en el sobre: las tool calls
+ * referencian su spec por índice y el descarte de un spec intermedio los desplaza.
  */
-function toUiEnvelope(
-  message: TranscriptMessage,
-): { version: number; specs: UiSpec[] } | null {
+function toUiEnvelope(message: TranscriptMessage): {
+  envelope: { version: number; specs: UiSpec[] } | null;
+  indexMap: ReadonlyMap<number, number>;
+} {
   const source: readonly UiSpec[] =
     message.kind === "ui" && message.uiSpec ? [message.uiSpec] : (message.uiSpecs ?? []);
   const specs: UiSpec[] = [];
+  const indexMap = new Map<number, number>();
   let budget = MAX_UI_PAYLOAD_CHARS;
-  for (const spec of source.slice(0, MAX_UI_SPECS_PER_MESSAGE)) {
+  for (const [index, spec] of source.slice(0, MAX_UI_SPECS_PER_MESSAGE).entries()) {
     let size: number;
     try {
       size = JSON.stringify(spec).length;
@@ -281,15 +447,66 @@ function toUiEnvelope(
       continue;
     }
     budget -= size;
+    indexMap.set(index, specs.length);
     specs.push(spec);
   }
-  return specs.length > 0 ? { version: UI_PAYLOAD_VERSION, specs } : null;
+  return {
+    envelope: specs.length > 0 ? { version: UI_PAYLOAD_VERSION, specs } : null,
+    indexMap,
+  };
 }
 
 /**
- * Arma el cuerpo de alta de un mensaje. Guarda ``reasoning``/``isError``/``note`` y el sobre de UI
- * generativa (``payload.ui``) en el payload estructurado, para poder restaurarlos al recargar el
- * hilo. ``payload`` se omite si no hay metadatos que guardar.
+ * Serializa (con topes) las tool calls del mensaje al sobre versionado ``payload.tools``. El campo
+ * derivado ``uiSpec`` nunca se serializa; ``uiSpecIndex`` se REMAPEA al índice final del sobre de
+ * UI (si su spec fue descartado por tope, la referencia se elimina y la tarjeta restaurará sin
+ * interfaz). Recorte determinista: las primeras N calls que quepan en el presupuesto.
+ */
+function toToolsEnvelope(
+  message: TranscriptMessage,
+  uiIndexMap: ReadonlyMap<number, number>,
+): { version: number; calls: PersistedToolCall[] } | null {
+  const calls: PersistedToolCall[] = [];
+  let budget = MAX_TOOLS_PAYLOAD_CHARS;
+  for (const source of (message.toolCalls ?? []).slice(0, MAX_TOOL_CALLS_PER_MESSAGE)) {
+    const call = { ...source };
+    delete call.uiSpec; // derivado de la restauración: nunca se serializa
+    const mapped =
+      call.uiSpecIndex === undefined ? undefined : uiIndexMap.get(call.uiSpecIndex);
+    if (mapped === undefined) {
+      delete call.uiSpecIndex;
+    } else {
+      call.uiSpecIndex = mapped;
+    }
+    if (call.argsText !== undefined) {
+      call.argsText = call.argsText.slice(0, MAX_TOOL_CALL_TEXT_CHARS);
+    }
+    if (call.resultText !== undefined) {
+      call.resultText = call.resultText.slice(0, MAX_TOOL_CALL_TEXT_CHARS);
+    }
+    if (call.errorText !== undefined) {
+      call.errorText = call.errorText.slice(0, MAX_TOOL_CALL_TEXT_CHARS);
+    }
+    let size: number;
+    try {
+      size = JSON.stringify(call).length;
+    } catch {
+      continue; // Call no serializable (no debería ocurrir): se descarta, el resto persiste igual.
+    }
+    if (size > budget) {
+      continue;
+    }
+    budget -= size;
+    calls.push(call);
+  }
+  return calls.length > 0 ? { version: UI_PAYLOAD_VERSION, calls } : null;
+}
+
+/**
+ * Arma el cuerpo de alta de un mensaje. Guarda ``reasoning``/``isError``/``note`` y los sobres de
+ * UI generativa (``payload.ui``) y de tool calls (``payload.tools``) en el payload estructurado,
+ * para poder restaurarlos al recargar el hilo. ``payload`` se omite si no hay metadatos que
+ * guardar.
  */
 export function toMessagePayload(
   conversationId: string,
@@ -305,9 +522,13 @@ export function toMessagePayload(
   if (message.kind === "note") {
     meta.note = true;
   }
-  const ui = toUiEnvelope(message);
+  const { envelope: ui, indexMap } = toUiEnvelope(message);
   if (ui) {
     meta.ui = ui;
+  }
+  const tools = toToolsEnvelope(message, indexMap);
+  if (tools) {
+    meta.tools = tools;
   }
   const planNotes = (message.approvedPlanNotes ?? [])
     .filter((note) => note.trim().length > 0)

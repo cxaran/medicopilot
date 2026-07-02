@@ -54,7 +54,6 @@ import {
   toWireToolDefinitions,
   defaultToolContext,
   type ToolDefinition,
-  type ToolExecutionContext,
 } from "@/core/agent/tools/registry";
 import {
   buildToolCatalog,
@@ -62,11 +61,6 @@ import {
   effectiveTools,
   type ToolCatalogEntry,
 } from "@/core/agent/tool-catalog";
-import {
-  declaredTools,
-  declaredToolNames,
-  isMetaTool,
-} from "@/core/agent/tool-discovery";
 import { buildStartSuggestions } from "@/core/agent/start-suggestions";
 import { loadMcpTools } from "@/core/agent/mcp/mcp-tools";
 import { loadPharmacologyTools } from "@/core/agent/pharmacology/pharmacology-tools";
@@ -125,6 +119,7 @@ import type { ResourceCatalog, SessionUser } from "@/core/api/contracts";
 import { isUiSpec, type UiSpec } from "@/core/agent/tools/ui-spec";
 import { GeneratedUi } from "@/components/copilot/GeneratedUi";
 import { parseComposerPalette, type ComposerCommand } from "@/core/chat-shell/composer-commands";
+import type { PersistedToolCall } from "@/core/chat-shell/chat-persistence";
 import { useChatNavOptional } from "@/components/chat-shell/ChatNavProvider";
 import { deriveResourceTools } from "@/core/agent/tools/contract-tools";
 
@@ -177,8 +172,13 @@ export interface ChatMessage {
   // bajo la respuesta del asistente, como en OpenClaw.
   reasoning?: string;
   // Turno del gateway que produjo este mensaje del asistente: ancla sus tool calls al lugar del
-  // hilo donde ocurrieron (no se persiste; las tool calls son efímeras de la sesión).
+  // hilo donde ocurrieron. Al restaurar el hilo es SINTÉTICO (el uuid de la fila persistida).
   turnId?: string;
+  // Tool calls del turno con su estado FINAL, ancladas al mensaje que cerró el turno. En vivo el
+  // render usa el estado ``toolCalls`` del panel (por ``turnId``); este campo existe para
+  // PERSISTIRSE con el mensaje (payload.tools) y re-sembrar las tarjetas al recargar, tal cual
+  // quedaron. No entra al contexto del modelo (el cable sólo lleva texto/imagen/toolNotes).
+  toolCalls?: readonly PersistedToolCall[];
 }
 
 type ToolCallStatus = "running" | "awaiting_approval" | "success" | "error" | "rejected";
@@ -286,19 +286,17 @@ function reconnectBadge(
 export function CopilotPanel({
   activeContext: controlledContext,
   onActiveContextChange,
-  hideContextPicker = false,
   embedded = false,
   initialMessages,
   onMessagesChange,
   onMessagesRemoved,
   onTruncateFrom,
+  onMessageUpdated,
 }: Readonly<{
   // Contexto clínico activo CONTROLADO por el host (p. ej. el shell chat-first: paciente=chat).
   // Si se omite (uso independiente en /copilot), el panel lo gestiona internamente como antes.
   activeContext?: ActiveClinicalContext | null;
   onActiveContextChange?: (context: ActiveClinicalContext | null) => void;
-  // Oculta el selector interno cuando el host ya ofrece la selección de paciente (evita duplicarlo).
-  hideContextPicker?: boolean;
   // Modo EMBEBIDO (shell chat-first, fiel a MediCopilot.dc.html): chat LIMPIO sin cromo inline
   // (encabezado, banner de borrador, panel de herramientas, barra de costo, borde de tarjeta). Esas
   // garantías/herramientas/costo se mueven a un MODAL accesible desde el botón de escudo del composer.
@@ -320,6 +318,10 @@ export function CopilotPanel({
   // recargar). El reinicio del hilo COMPLETO no vive aquí: es una opción del sidebar (menú de
   // opciones del chat), que el ChatShell resuelve remontando el panel vacío.
   onTruncateFrom?: (messageId: string) => void;
+  // ESTADO DURABLE de un mensaje YA persistido que cambió DESPUÉS del append (hoy: una interfaz
+  // ui.* marcada como usada → su tarjeta debe restaurarse contraída). El host re-persiste el
+  // payload del mensaje (PATCH); sin host, el cambio es sólo de la sesión.
+  onMessageUpdated?: (message: ChatMessage) => void;
 }> = {}) {
   const [status, setStatus] = useState<ConnectionStatus>("idle");
   // Estado de la máquina de reconexión (resiliencia del WS). Se refleja en la UI; el ref es la
@@ -345,10 +347,12 @@ export function CopilotPanel({
   const chatNav = useChatNavOptional();
   const contextNotes = chatNav?.contextNotes ?? null;
   const consumedNoteIdsRef = useRef<Set<number>>(new Set());
-  // Formularios inyectados desde el expediente (botones Nuevo/Editar). ``lastFormIdRef`` marca hasta
-  // dónde ya se consumió (mismo patrón que las notas de contexto).
+  // Formularios inyectados desde el expediente (botones Nuevo/Editar). Consumo POR ID con
+  // retirada de la cola y filtro por ``target``, mismo patrón que las notas de contexto: una marca
+  // de agua local se reiniciaba al remontar el panel por conversación y re-consumía formularios
+  // ajenos que seguían en la cola compartida (reinyección cruzada entre chats).
   const chatForms = chatNav?.chatForms ?? null;
-  const lastFormIdRef = useRef(0);
+  const consumedFormIdsRef = useRef<Set<number>>(new Set());
   // Esfuerzo de razonamiento NORMALIZADO por turno (P5). Solo se ofrece/envía cuando el modelo
   // negociado soporta el control; default "medium" (se omite en modelos sin razonamiento).
   const [reasoningEffort, setReasoningEffort] = useState<NormalizedReasoningEffort>("medium");
@@ -358,7 +362,11 @@ export function CopilotPanel({
     initialMessages ? [...initialMessages] : [],
   );
   const [turn, setTurn] = useState<TurnState>(initialTurnState());
-  const [toolCalls, setToolCalls] = useState<ToolCallView[]>([]);
+  // Sembrado con las tool calls RESTAURADAS del historial (payload.tools de cada mensaje): las
+  // tarjetas vuelven bajo su mensaje (turnId sintético) con el estado en que quedaron.
+  const [toolCalls, setToolCalls] = useState<ToolCallView[]>(() =>
+    toolCallViewsFromMessages(initialMessages ?? []),
+  );
   const [input, setInput] = useState("");
   const [attachedImage, setAttachedImage] = useState<AttachedImage | null>(null);
   // Dictado continuo (envío por fragmentos): cola (ref) de fragmentos transcritos pendientes de
@@ -377,14 +385,10 @@ export function CopilotPanel({
   // Permisos de la sesión (/auth/me): gate alternativo ``requiredPermissions`` de las escrituras
   // cuyo recurso no publica formulario genérico en el catálogo (p. ej. scale_results).
   const grantedRef = useRef<Set<string>>(new Set());
-  // Descubrimiento a escala (tool_search/tool_describe): nombres de tools CARGADAS bajo demanda
-  // en este hilo. Se suman al set declarado en los turnos siguientes (el set por turno se
-  // mantiene pequeño: núcleo + meta + cargadas). Persiste durante la vida del panel.
-  const loadedToolsRef = useRef<Set<string>>(new Set());
-  // MCP (rebanada 1, descubrimiento/listado de SOLO LECTURA): tools descubiertas del servidor MCP
-  // configurado. Se surfacean por el MISMO camino (catálogo + gating + tool_search/describe). NO
-  // hay ejecución (no se registran en el ejecutor). ``mcpToolsRef`` mira el estado para los
-  // closures de los handlers del turno (deps vacías).
+  // MCP: tools descubiertas del servidor MCP configurado. Se surfacean por el MISMO camino
+  // (catálogo + gating + procedencia) y son EJECUTABLES: las de lectura corren directo y las de
+  // escritura pasan por la aprobación P1, igual que cualquier otra tool. ``mcpToolsRef`` mira el
+  // estado para los closures de los handlers del turno (deps vacías).
   const [mcpTools, setMcpTools] = useState<ToolDefinition[]>([]);
   const mcpToolsRef = useRef<ToolDefinition[]>([]);
   // Tools DERIVADAS DEL CONTRATO (F6): se generan del catálogo /resources al cargarlo, con
@@ -489,7 +493,8 @@ export function CopilotPanel({
 
   // Espejo síncrono de las tool calls para los handlers de eventos (closures con deps vacías):
   // al cerrar el turno se leen de aquí los specs ``ui.*`` a anclar en el mensaje del asistente.
-  const toolCallsRef = useRef<ToolCallView[]>([]);
+  // Arranca con el MISMO sembrado que el estado (el argumento sólo cuenta en el primer render).
+  const toolCallsRef = useRef<ToolCallView[]>(toolCalls);
 
   const upsertToolCall = (view: ToolCallView): void => {
     toolCallsRef.current = [...toolCallsRef.current, view];
@@ -508,8 +513,33 @@ export function CopilotPanel({
   // USO de interfaces generadas: al enviar/confirmar/hacer clic, la tool ui.* INTERACTIVA se marca
   // usada y su tarjeta se contrae al grupo de herramientas del turno. Las de visualización
   // (gráficas/reportes) nunca se contraen (isInlineToolCall las mantiene completas aunque se marquen).
+  // El uso también se refleja en el mensaje ancla (message.toolCalls) y se notifica al host: como
+  // ocurre DESPUÉS de que el mensaje se guardó (append-only), el host re-persiste su payload para
+  // que la interfaz vuelva CONTRAÍDA al recargar (estado durable, no sólo de la sesión).
   const markUiUsed = (callId: string): void => {
+    const call = toolCallsRef.current.find((entry) => entry.callId === callId);
+    if (!call || call.uiUsed) {
+      return;
+    }
     patchToolCall(callId, { uiUsed: true });
+    const anchor = messagesRef.current.find(
+      (message) =>
+        message.turnId === call.turnId &&
+        message.toolCalls?.some((entry) => entry.callId === callId),
+    );
+    if (!anchor?.toolCalls) {
+      return;
+    }
+    const updated: ChatMessage = {
+      ...anchor,
+      toolCalls: anchor.toolCalls.map((entry) =>
+        entry.callId === callId ? { ...entry, uiUsed: true } : entry,
+      ),
+    };
+    setMessages((prev) =>
+      prev.map((message) => (message.id === anchor.id ? updated : message)),
+    );
+    onMessageUpdated?.(updated);
   };
 
   // Mensajes "ui" (formularios inyectados desde el expediente o restaurados del historial) ya
@@ -577,16 +607,26 @@ export function CopilotPanel({
   // Consume los formularios inyectados desde el expediente (botones Nuevo/Editar) y los añade al hilo
   // como mensajes "ui" (el formulario oficial del recurso, renderizado con GeneratedUi). No dispara un
   // turno del modelo: el médico lo completa y al Guardar escribe directo (su acto de aprobación).
+  // Consumo POR ID + ``target`` + retirada de la cola (patrón de las notas de contexto): sólo los
+  // formularios de ESTE chat, una sola vez, idempotente bajo StrictMode.
   useEffect(() => {
     if (!chatForms || chatForms.length === 0) {
       return;
     }
-    const fresh = chatForms.filter((form) => form.id > lastFormIdRef.current);
+    const activePatient = activeContext?.patientId ?? null;
+    const fresh = chatForms.filter(
+      (form) =>
+        !consumedFormIdsRef.current.has(form.id) &&
+        (form.target === undefined || form.target === activePatient),
+    );
     if (fresh.length === 0) {
       return;
     }
     const timer = setTimeout(() => {
-      lastFormIdRef.current = fresh[fresh.length - 1].id;
+      const ids = fresh.map((form) => form.id);
+      for (const id of ids) {
+        consumedFormIdsRef.current.add(id);
+      }
       setMessages((prev) => [
         ...prev,
         ...fresh.map((form) => ({
@@ -597,9 +637,12 @@ export function CopilotPanel({
           text: "",
         })),
       ]);
+      // Retira de la cola compartida los formularios ya renderizados: sin esto, el siguiente chat
+      // abierto (panel remontado) los re-consumía. Los dirigidos a otro chat no se tocan.
+      chatNav?.consumeChatForms(ids);
     }, 0);
     return () => clearTimeout(timer);
-  }, [chatForms]);
+  }, [chatForms, activeContext, chatNav]);
 
   // Mantiene el ref del contexto activo en sincronía para los handlers del turno (closures).
   useEffect(() => {
@@ -657,10 +700,7 @@ export function CopilotPanel({
         const derived = deriveResourceTools(catalog, listTools());
         derivedToolsRef.current = derived;
         const tools = [...listTools(), ...derived, ...mcpTools];
-        const eff = effectiveTools(tools, creatable, granted);
-        setToolCatalog(
-          buildToolCatalog(tools, creatable, declaredToolNames(eff, loadedToolsRef.current), granted),
-        );
+        setToolCatalog(buildToolCatalog(tools, creatable, granted));
       })
       .catch(() => {
         if (!active) return;
@@ -668,10 +708,7 @@ export function CopilotPanel({
         grantedRef.current = new Set();
         derivedToolsRef.current = [];
         const tools = [...listTools(), ...mcpTools];
-        const eff = effectiveTools(tools, new Set());
-        setToolCatalog(
-          buildToolCatalog(tools, new Set(), declaredToolNames(eff, loadedToolsRef.current)),
-        );
+        setToolCatalog(buildToolCatalog(tools, new Set()));
       });
     return () => {
       active = false;
@@ -751,17 +788,27 @@ export function CopilotPanel({
         const turnToolNotes = next.turnId
           ? (turnToolNotesRef.current.get(next.turnId) ?? [])
           : [];
+        // Tool calls del turno con su estado FINAL: se anclan al mensaje para persistirse con él
+        // (payload.tools) y restaurar las tarjetas tal cual quedaron al recargar. NO entran al
+        // contexto del modelo (el cable sigue llevando sólo texto/imagen/toolNotes).
+        const turnToolCalls = next.turnId
+          ? persistedToolCallsOf(
+              toolCallsRef.current.filter((call) => call.turnId === next.turnId),
+              turnUiSpecs,
+            )
+          : [];
         if (next.turnId) {
           turnPlanNotesRef.current.delete(next.turnId);
           turnToolNotesRef.current.delete(next.turnId);
         }
-        // El mensaje ancla se crea si hay texto O contenido que conservar (specs de UI o notas de
-        // plan/herramientas); MessageBubble no muestra burbuja vacía.
+        // El mensaje ancla se crea si hay texto O contenido que conservar (specs de UI, notas de
+        // plan/herramientas o tool calls); MessageBubble no muestra burbuja vacía.
         if (
           next.assistantText.trim() ||
           turnUiSpecs.length > 0 ||
           turnPlanNotes.length > 0 ||
-          turnToolNotes.length > 0
+          turnToolNotes.length > 0 ||
+          turnToolCalls.length > 0
         ) {
           setMessages((prev) => [
             ...prev,
@@ -776,6 +823,7 @@ export function CopilotPanel({
               ...(turnUiSpecs.length > 0 ? { uiSpecs: turnUiSpecs } : {}),
               ...(turnPlanNotes.length > 0 ? { approvedPlanNotes: turnPlanNotes } : {}),
               ...(turnToolNotes.length > 0 ? { toolNotes: turnToolNotes } : {}),
+              ...(turnToolCalls.length > 0 ? { toolCalls: turnToolCalls } : {}),
             },
           ]);
         }
@@ -804,6 +852,14 @@ export function CopilotPanel({
         const failedToolNotes = next.turnId
           ? (turnToolNotesRef.current.get(next.turnId) ?? [])
           : [];
+        // También su estado final se persiste con el mensaje de fallo (sin specs de UI: los del
+        // turno fallido no se anclan, igual que hasta ahora).
+        const failedToolCalls = next.turnId
+          ? persistedToolCallsOf(
+              toolCallsRef.current.filter((call) => call.turnId === next.turnId),
+              [],
+            )
+          : [];
         if (next.turnId) {
           turnToolNotesRef.current.delete(next.turnId);
         }
@@ -817,6 +873,7 @@ export function CopilotPanel({
             // También el mensaje de fallo ancla las tool calls del turno (si las hubo).
             ...(next.turnId ? { turnId: next.turnId } : {}),
             ...(failedToolNotes.length > 0 ? { toolNotes: failedToolNotes } : {}),
+            ...(failedToolCalls.length > 0 ? { toolCalls: failedToolCalls } : {}),
           },
         ]);
         turnRef.current = initialTurnState();
@@ -876,36 +933,7 @@ export function CopilotPanel({
 
       if (tool.kind === "read") {
         upsertToolCall({ callId, turnId, name: tool.name, kind: "read", argsText, status: "running" });
-        // Contexto de descubrimiento para las meta-tools (tool_search/tool_describe): el set
-        // BUSCABLE es el efectivo (ya gateado por rol) sin las meta-tools; markLoaded suma las
-        // cargadas (se declararán en turnos siguientes) y refresca la vista de procedencia.
-        const eff = effectiveTools([...listTools(), ...derivedToolsRef.current, ...mcpToolsRef.current], creatableRef.current, grantedRef.current);
-        const ctx: ToolExecutionContext = {
-          ...defaultToolContext,
-          discovery: {
-            searchable: eff.filter((candidate) => !isMetaTool(candidate.name)),
-            markLoaded: (names) => {
-              let changed = false;
-              for (const name of names) {
-                if (!loadedToolsRef.current.has(name)) {
-                  loadedToolsRef.current.add(name);
-                  changed = true;
-                }
-              }
-              if (changed) {
-                setToolCatalog(
-                  buildToolCatalog(
-                    [...listTools(), ...derivedToolsRef.current, ...mcpToolsRef.current],
-                    creatableRef.current,
-                    declaredToolNames(eff, loadedToolsRef.current),
-                    grantedRef.current,
-                  ),
-                );
-              }
-            },
-          },
-        };
-        void executeTool(tool, validArgs, ctx).then((result) => {
+        void executeTool(tool, validArgs, defaultToolContext).then((result) => {
           patchToolCall(
             callId,
             result.status === "success"
@@ -1286,11 +1314,12 @@ export function CopilotPanel({
     // RECALL antes de que el modelo responda: las memorias se inyectan como un mensaje
     // ``system`` delimitado al frente del contexto (datos, no instrucciones; ver memory-recall).
     const recall = await recallMemoryMessage();
-    // Descubrimiento a escala: se declara solo el set ACOTADO (núcleo + meta + tools cargadas
-    // bajo demanda), no todo el catálogo. El resto sigue accesible vía tool_search/tool_describe.
-    const declared = declaredTools(
-      effectiveTools([...listTools(), ...derivedToolsRef.current, ...mcpToolsRef.current], creatableRef.current, grantedRef.current),
-      loadedToolsRef.current,
+    // Se declara al modelo el catálogo EFECTIVO COMPLETO (ya gateado por rol/permiso): el
+    // descubrimiento bajo demanda se retiró al decidir "declarar todo".
+    const declared = effectiveTools(
+      [...listTools(), ...derivedToolsRef.current, ...mcpToolsRef.current],
+      creatableRef.current,
+      grantedRef.current,
     );
     const toolsWire = toWireToolDefinitions(declared);
 
@@ -1663,7 +1692,9 @@ export function CopilotPanel({
         </Card>
       )}
 
-      {!hideContextPicker && (
+      {/* Selector de contexto interno: sólo en el modo standalone; el shell embebido controla la
+          selección de paciente desde la barra lateral (evita duplicar el selector). */}
+      {!embedded && (
         <ActiveContextPicker context={activeContext} onChange={setActiveContext} />
       )}
 
@@ -2527,7 +2558,6 @@ function ToolCatalogPanel({ entries }: Readonly<{ entries: ToolCatalogEntry[] }>
     return null;
   }
   const declared = entries.filter((entry) => entry.status === "declared");
-  const discoverable = entries.filter((entry) => entry.status === "discoverable");
   const gatedOut = entries.filter((entry) => entry.status === "gated_out");
 
   return (
@@ -2542,23 +2572,20 @@ function ToolCatalogPanel({ entries }: Readonly<{ entries: ToolCatalogEntry[] }>
           Herramientas del copiloto
         </span>
         <span className="text-xs text-[var(--tx2)]">
-          {declared.length} activas · {discoverable.length} bajo demanda · {gatedOut.length} restringidas{" "}
-          {open ? "▲" : "▼"}
+          {declared.length} activas · {gatedOut.length} restringidas {open ? "▲" : "▼"}
         </span>
       </button>
 
       {open && (
         <div className="space-y-3">
           <p className="text-xs text-[var(--tx2)]">
-            Para no inflar el contexto, cada turno se declara solo un núcleo pequeño de
-            herramientas; el modelo descubre el resto «bajo demanda» con tool_search/tool_describe.
+            Cada turno se declara al modelo el catálogo de herramientas disponible para tu rol.
             Las acciones de escritura solo se ofrecen si tu rol permite crear en el recurso, y el
             servidor revalida cada acción.
           </p>
-          {/* Agrupado por estado (activas / bajo demanda / restringidas), fiel al acordeón del
-              diseño; cada fila: acceso (LECTURA/ESCRITURA a color) + nombre monospace + estado. */}
+          {/* Agrupado por estado (activas / restringidas), fiel al acordeón del diseño; cada
+              fila: acceso (LECTURA/ESCRITURA a color) + nombre monospace + estado. */}
           <ToolCatalogGroup label="Activas" entries={declared} />
-          <ToolCatalogGroup label="Bajo demanda" entries={discoverable} />
           <ToolCatalogGroup label="Restringidas" entries={gatedOut} />
         </div>
       )}
@@ -2965,6 +2992,86 @@ function toolCallUiSpec(call: ToolCallView): UiSpec | null {
   return call.status === "success" && call.name.startsWith("ui.") && isUiSpec(call.resultContent)
     ? call.resultContent
     : null;
+}
+
+/**
+ * Congela las tool calls de un turno CERRADO en su forma persistible (``payload.tools``), para
+ * anclarlas al mensaje del asistente y restaurar el hilo tal cual quedó. Sólo estados TERMINALES
+ * (al cierre no queda nada corriendo ni esperando aprobación); las respuestas sugeridas son
+ * efímeras del hilo vivo y no se persisten. ``uiSpecIndex`` referencia el spec por su posición en
+ * ``turnUiSpecs`` (el MISMO orden que va a ``payload.ui``): la interfaz se guarda una sola vez.
+ */
+function persistedToolCallsOf(
+  calls: readonly ToolCallView[],
+  turnUiSpecs: readonly UiSpec[],
+): PersistedToolCall[] {
+  const persisted: PersistedToolCall[] = [];
+  for (const call of calls) {
+    if (call.status !== "success" && call.status !== "error" && call.status !== "rejected") {
+      continue;
+    }
+    const spec = toolCallUiSpec(call);
+    if (spec && spec.kind === "suggested_replies") {
+      continue;
+    }
+    // El spec anclado es el MISMO objeto que ``resultContent``: la búsqueda por referencia da su
+    // índice en el sobre de UI del mensaje.
+    const uiSpecIndex = spec ? turnUiSpecs.indexOf(spec) : -1;
+    persisted.push({
+      callId: call.callId,
+      name: call.name,
+      kind: call.kind,
+      status: call.status,
+      ...(call.argsText ? { argsText: call.argsText } : {}),
+      ...(call.resultText ? { resultText: call.resultText } : {}),
+      ...(call.errorText ? { errorText: call.errorText } : {}),
+      ...(call.uiUsed ? { uiUsed: true } : {}),
+      ...(uiSpecIndex >= 0 ? { uiSpecIndex } : {}),
+      ...(call.plan
+        ? {
+            plan: {
+              actionType: call.plan.actionType,
+              targetResource: call.plan.targetResource,
+              humanReadableSummary: call.plan.humanReadableSummary,
+              exactPayload: { ...call.plan.exactPayload },
+            },
+          }
+        : {}),
+    });
+  }
+  return persisted;
+}
+
+/**
+ * Re-siembra las ``ToolCallView`` desde los mensajes RESTAURADOS del historial (``payload.tools``):
+ * cada call vuelve bajo su mensaje (``turnId`` sintético) con el estado en que quedó, y las
+ * ``ui.*`` recuperan su interfaz desde el spec resuelto — misma tarjeta, misma contracción que en
+ * vivo. Un estado no terminal no puede llegar aquí (el guard de persistencia sólo admite
+ * success/error/rejected), así que nada restaurado "corre" ni pide aprobación.
+ */
+function toolCallViewsFromMessages(messages: readonly ChatMessage[]): ToolCallView[] {
+  const views: ToolCallView[] = [];
+  for (const message of messages) {
+    if (!message.turnId || !message.toolCalls) {
+      continue;
+    }
+    for (const call of message.toolCalls) {
+      views.push({
+        callId: call.callId,
+        turnId: message.turnId,
+        name: call.name,
+        kind: call.kind,
+        argsText: call.argsText ?? "",
+        status: call.status,
+        ...(call.plan ? { plan: call.plan } : {}),
+        ...(call.resultText !== undefined ? { resultText: call.resultText } : {}),
+        ...(call.uiSpec ? { resultContent: call.uiSpec } : {}),
+        ...(call.errorText !== undefined ? { errorText: call.errorText } : {}),
+        ...(call.uiUsed ? { uiUsed: true } : {}),
+      });
+    }
+  }
+  return views;
 }
 
 /**

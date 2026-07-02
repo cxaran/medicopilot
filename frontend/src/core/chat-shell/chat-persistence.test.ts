@@ -3,12 +3,14 @@ import assert from "node:assert/strict";
 
 import {
   approvedPlanNotesOf,
+  MAX_UI_PAYLOAD_CHARS,
   MAX_UI_SPECS_PER_MESSAGE,
   messagesToTranscript,
   selectUnpersisted,
   toMessagePayload,
   UI_PAYLOAD_VERSION,
   type PersistedMessageRow,
+  type PersistedToolCall,
   type TranscriptMessage,
 } from "./chat-persistence.ts";
 import type { UiSpec } from "@/core/agent/tools/ui-spec";
@@ -336,6 +338,165 @@ test("notas de herramientas: round-trip por payload.tool_notes (incluso con text
   ]);
   assert.equal(restored.length, 1);
   assert.deepEqual(restored[0].toolNotes, [TOOL_NOTE]);
+});
+
+// ----- Tool calls persistentes (payload.tools: el hilo se restaura tal cual quedó) -----
+
+const READ_CALL: PersistedToolCall = {
+  callId: "c-read",
+  name: "clinical.list_lab_results",
+  kind: "read",
+  status: "success",
+  argsText: '{"patient_id":"p1"}',
+  resultText: '[{"id":"l1"}]',
+};
+
+const WRITE_CALL: PersistedToolCall = {
+  callId: "c-write",
+  name: "clinical.create_task_draft",
+  kind: "write",
+  status: "success",
+  plan: {
+    actionType: "create",
+    targetResource: "clinical_tasks",
+    humanReadableSummary: "Crear tarea de control",
+    exactPayload: { title: "Control" },
+  },
+};
+
+const UI_CALL: PersistedToolCall = {
+  callId: "c-ui",
+  name: "ui.open_resource_form",
+  kind: "read",
+  status: "success",
+  uiUsed: true,
+  uiSpecIndex: 0,
+};
+
+test("tool calls: round-trip por payload.tools con turnId sintético y spec referenciado", () => {
+  const anchor: TranscriptMessage = {
+    id: "a3",
+    role: "assistant",
+    text: "Listo.",
+    uiSpecs: [FORM_SPEC],
+    toolCalls: [READ_CALL, WRITE_CALL, UI_CALL],
+  };
+  // Portador de tool calls: SÍ se selecciona para persistir aunque el texto fuera vacío.
+  assert.deepEqual(selectUnpersisted([{ ...anchor, text: "" }], new Set()), [
+    { ...anchor, text: "" },
+  ]);
+
+  const payload = toMessagePayload("conv-1", anchor);
+  assert.deepEqual(payload.payload?.tools, {
+    version: UI_PAYLOAD_VERSION,
+    calls: [READ_CALL, WRITE_CALL, UI_CALL],
+  });
+
+  const restored = messagesToTranscript([
+    {
+      id: "row-9",
+      conversation_id: "conv-1",
+      role: "assistant",
+      content: payload.content,
+      sequence_index: 0,
+      payload: payload.payload,
+    },
+  ]);
+  // El spec referenciado por la call ui.* NO se materializa como mensaje kind "ui" (vuelve dentro
+  // de su tarjeta); sólo queda el mensaje base, con turnId sintético (el uuid de la fila).
+  assert.equal(restored.length, 1);
+  const [message] = restored;
+  assert.equal(message.turnId, "row-9");
+  assert.equal(message.toolCalls?.length, 3);
+  const restoredUiCall = message.toolCalls?.find((call) => call.callId === "c-ui");
+  assert.deepEqual(restoredUiCall?.uiSpec, FORM_SPEC); // spec RESUELTO desde uiSpecIndex
+  assert.equal(restoredUiCall?.uiUsed, true); // la interfaz vuelve contraída (usada)
+  const restoredWrite = message.toolCalls?.find((call) => call.callId === "c-write");
+  assert.deepEqual(restoredWrite?.plan, WRITE_CALL.plan);
+});
+
+test("tool calls: los specs NO referenciados siguen materializándose como mensajes 'ui'", () => {
+  const anchor: TranscriptMessage = {
+    id: "a4",
+    role: "assistant",
+    text: "Hecho.",
+    uiSpecs: [FORM_SPEC],
+    toolCalls: [READ_CALL], // sin uiSpecIndex: el spec queda huérfano de call
+  };
+  const payload = toMessagePayload("conv-1", anchor);
+  const restored = messagesToTranscript([
+    {
+      id: "row-10",
+      conversation_id: "conv-1",
+      role: "assistant",
+      content: payload.content,
+      sequence_index: 0,
+      payload: payload.payload,
+    },
+  ]);
+  assert.deepEqual(
+    restored.map((m) => ({ id: m.id, kind: m.kind ?? null })),
+    [
+      { id: "row-10:ui:0", kind: "ui" },
+      { id: "row-10", kind: null },
+    ],
+  );
+});
+
+test("tool calls: uiSpecIndex se REMAPEA cuando un spec anterior se descarta por tope", () => {
+  // El primer spec excede el presupuesto del sobre de UI y se descarta; la call que referencia el
+  // segundo (índice original 1) debe quedar apuntando al índice final 0.
+  const hugeSpec = {
+    ...FORM_SPEC,
+    values: { comment: "x".repeat(MAX_UI_PAYLOAD_CHARS + 1) },
+  } as UiSpec;
+  const anchor: TranscriptMessage = {
+    id: "a5",
+    role: "assistant",
+    text: "",
+    uiSpecs: [hugeSpec, FORM_SPEC],
+    toolCalls: [{ ...UI_CALL, uiSpecIndex: 1 }],
+  };
+  const payload = toMessagePayload("conv-1", anchor);
+  const ui = payload.payload?.ui as { specs: unknown[] };
+  assert.equal(ui.specs.length, 1);
+  const tools = payload.payload?.tools as { calls: PersistedToolCall[] };
+  assert.equal(tools.calls[0].uiSpecIndex, 0);
+});
+
+test("tool calls: sobre inválido o calls corruptas se descartan gobernadamente", () => {
+  const restored = messagesToTranscript([
+    {
+      id: "row-11",
+      conversation_id: "conv-1",
+      role: "assistant",
+      content: "texto",
+      sequence_index: 0,
+      payload: { tools: { version: 99, calls: [READ_CALL] } },
+    },
+    {
+      id: "row-12",
+      conversation_id: "conv-1",
+      role: "assistant",
+      content: "otro",
+      sequence_index: 1,
+      payload: {
+        tools: {
+          version: UI_PAYLOAD_VERSION,
+          calls: [
+            { ...READ_CALL, status: "running" }, // no terminal: nunca se restaura "corriendo"
+            { ...READ_CALL, kind: "exec" }, // kind fuera de la lista blanca
+            "no-es-objeto",
+            null,
+          ],
+        },
+      },
+    },
+  ]);
+  assert.equal(restored.length, 2);
+  assert.equal(restored[0].toolCalls, undefined);
+  assert.equal(restored[1].toolCalls, undefined);
+  assert.equal(restored[0].turnId, undefined); // sin calls no hay ancla sintética
 });
 
 test("notas de herramientas: sobre inválido se descarta gobernadamente", () => {

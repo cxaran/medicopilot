@@ -19,6 +19,7 @@ import {
   listConversations,
   listMessages,
   resetConversation,
+  updateMessagePayload,
 } from "@/core/conversations/conversations-client";
 
 /**
@@ -195,6 +196,28 @@ export function ChatShell({
     }
   }, []);
 
+  // ESTADO DURABLE de un mensaje YA persistido (hoy: una interfaz ui.* usada tras el cierre del
+  // turno → su tarjeta debe restaurarse contraída). Se re-serializa el payload del mensaje y se
+  // PARCHEA su fila. Encolado en la cola de persistencia: si el append del mensaje aún está en
+  // vuelo, el PATCH corre después (la fila ya existe). Best-effort presentacional: si falla, el
+  // estado durable queda como estaba (la sesión en vivo no se afecta).
+  const handleMessageUpdated = useCallback((message: ChatMessage): void => {
+    const conversation = conversationIdRef.current;
+    if (!conversation) return;
+    const payload = toMessagePayload(conversation, message);
+    appendQueueRef.current = appendQueueRef.current.then(async () => {
+      const row = backendRowsRef.current.get(message.id);
+      // Sin fila: el append falló o sigue pendiente; el reintento del append (diff del transcript)
+      // ya llevará el estado actualizado del mensaje.
+      if (!row) return;
+      try {
+        await updateMessagePayload(row.id, payload.payload ?? null);
+      } catch {
+        // El backend revalida RBAC/vigencia; sin permiso o sin red no se pierde nada clínico.
+      }
+    });
+  }, []);
+
   // REINICIAR desde un mensaje (inclusive): reset en LOTE del backend desde su sequence_index.
   // También lo usan Recrear/Editar del panel: al truncar el transcript localmente, sin esto los
   // mensajes recortados reaparecerían al recargar (seguían persistidos). Si el mensaje aún no se
@@ -243,7 +266,13 @@ export function ChatShell({
           try {
             await resetConversation(conversation);
           } catch {
-            // Best-effort: el transcript local ya quedó vacío; el backend revalida RBAC.
+            // El backend rechazó el reinicio (p. ej. sin ``conversations:reset``): el transcript
+            // local ya quedó vacío, pero el historial persistido reaparecería al recargar. Un
+            // fallo aquí NO es degradación limpia; se avisa en vez de fingir éxito.
+            window.alert(
+              "No se pudo reiniciar la conversación en el servidor; el historial reaparecerá " +
+                "al recargar. Verifica que tu rol tenga el permiso 'conversations:reset'.",
+            );
           }
         });
       } else {
@@ -257,7 +286,13 @@ export function ChatShell({
               : rows.find((conversation) => conversation.patient_id === null);
             if (target) await resetConversation(target.id);
           } catch {
-            // Best-effort: sin conversación persistida no hay nada que reiniciar.
+            // Igual que en el chat activo: un rechazo del backend dejaría el historial intacto
+            // (reaparecería al abrir ese chat); se avisa en vez de fingir éxito. Si no hay
+            // conversación persistida, ``target`` es undefined y no se llega aquí.
+            window.alert(
+              "No se pudo reiniciar la conversación en el servidor. Verifica que tu rol tenga " +
+                "el permiso 'conversations:reset'.",
+            );
           }
         })();
       }
@@ -290,12 +325,12 @@ export function ChatShell({
           key={`chat-${conversationId ?? chatKey}-${resetGeneration}`}
           activeContext={activeContext}
           onActiveContextChange={setActiveContext}
-          hideContextPicker
           embedded
           initialMessages={initialMessages}
           onMessagesChange={handleMessagesChange}
           onMessagesRemoved={handleMessagesRemoved}
           onTruncateFrom={handleTruncateFrom}
+          onMessageUpdated={handleMessageUpdated}
         />
       ) : (
         <p className="m-auto text-sm text-[var(--tx2)]" role="status" aria-live="polite">

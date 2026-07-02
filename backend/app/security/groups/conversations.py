@@ -15,5 +15,9 @@ class MessagePermissions(SecurityGroup, label="Mensajes del copiloto"):
     # Mensajes de las conversaciones del copiloto. Leer el historial y agregar (append) mensajes.
     READ = ("messages:read", "Listar mensajes de una conversación")
     CREATE = ("messages:create", "Agregar mensajes a una conversación")
+    # Actualizar los METADATOS de presentación de un mensaje (``payload``: sobres de UI/tool
+    # calls), p. ej. una interfaz marcada como usada tras guardarse el mensaje. El contenido y el
+    # orden del hilo no se tocan; no es una escritura clínica.
+    UPDATE = ("messages:update", "Actualizar los metadatos de un mensaje")
     # Baja lógica de un mensaje puntual del hilo (limpieza del chat, no es un borrado clínico).
     DELETE = ("messages:delete", "Eliminar mensajes de una conversación")

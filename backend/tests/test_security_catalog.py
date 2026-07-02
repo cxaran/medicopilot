@@ -211,6 +211,7 @@ class SecurityCatalogTest(unittest.TestCase):
                 "conversations:reset",
                 "messages:read",
                 "messages:create",
+                "messages:update",
                 "messages:delete",
                 "vital_signs:read",
                 "vital_signs:create",

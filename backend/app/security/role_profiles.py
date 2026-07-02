@@ -61,7 +61,7 @@ _RESTRICTED_READ_ONLY: set[str] = {
 # sueltos y reiniciar un hilo (completo o desde un punto).
 _CHAT_PERSISTENCE: set[str] = {
     "conversations:read", "conversations:create", "conversations:reset",
-    "messages:read", "messages:create", "messages:delete",
+    "messages:read", "messages:create", "messages:update", "messages:delete",
 }
 
 # Apoyo / referencia / copiloto: sólo lectura.

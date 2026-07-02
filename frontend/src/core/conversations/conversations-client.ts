@@ -86,6 +86,22 @@ export function appendMessage(payload: MessageCreatePayload): Promise<PersistedM
   });
 }
 
+/**
+ * Actualiza el ``payload`` (metadatos de presentación: sobres de UI/tool calls/notas) de un
+ * mensaje YA persistido. Lo usa el estado durable de las herramientas (p. ej. una interfaz
+ * marcada como usada DESPUÉS de que su mensaje se guardó, para restaurarla contraída). El
+ * contenido y el orden del mensaje no se tocan.
+ */
+export function updateMessagePayload(
+  messageId: string,
+  payload: Record<string, unknown> | null,
+): Promise<void> {
+  return browserApi<void>(`${MESSAGES}/${encodeURIComponent(messageId)}`, {
+    method: "PATCH",
+    body: { payload },
+  });
+}
+
 /** Baja lógica de UN mensaje del hilo (limpieza del chat; el backend revalida RBAC). */
 export function deleteMessage(messageId: string): Promise<void> {
   return browserApi<void>(`${MESSAGES}/${encodeURIComponent(messageId)}`, {

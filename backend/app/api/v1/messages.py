@@ -1,4 +1,5 @@
-"""Mensajes de las conversaciones del copiloto: listar, agregar y eliminar bajo ``messages:*``.
+"""Mensajes de las conversaciones del copiloto: listar, agregar, actualizar metadatos y eliminar
+bajo ``messages:*``.
 
 Persiste cada turno del hilo (rol, contenido, payload). El ``sequence_index`` lo asigna el
 SERVIDOR (máximo + 1 de la conversación), no el cliente, para mantener el orden estable. La baja es
@@ -26,7 +27,12 @@ from backend.app.core.database import SessionDep
 from backend.app.models.conversation import Conversation
 from backend.app.models.message import Message
 from backend.app.resources.registry import MESSAGES
-from backend.app.schemas.message import MessageCreate, MessageListItem, MessageRead
+from backend.app.schemas.message import (
+    MessageCreate,
+    MessageListItem,
+    MessageRead,
+    MessageUpdate,
+)
 from backend.app.schemas.pagination import OffsetPage
 from backend.app.security.groups.conversations import MessagePermissions
 from backend.app.utils.utc_now import utc_now
@@ -57,6 +63,30 @@ def get_message(
     _: MessagePermissions.READ.requiere,
 ) -> MessageRead:
     return serialize(MessageRead, get_active_or_404(session, Message, item_id, _NOT_FOUND))
+
+
+@router.patch("/{item_id}", response_model=MessageRead)
+def update_message(
+    item_id: UUID,
+    payload: MessageUpdate,
+    session: SessionDep,
+    current_user: CurrentUser,
+    _: MessagePermissions.UPDATE.requiere,
+) -> MessageRead:
+    """Actualiza los METADATOS de presentación de un mensaje vigente (sólo ``payload``).
+
+    Permite reflejar estado que cambia DESPUÉS del alta —p. ej. una interfaz generada ya usada,
+    para restaurarla contraída al recargar el hilo—. El contenido, el rol y el ``sequence_index``
+    son inmutables por esta vía; no es una escritura clínica.
+    """
+    item = get_active_or_404(session, Message, item_id, _NOT_FOUND)
+    item.payload = payload.payload
+    item.updated_at = utc_now()
+    item.updated_by = current_user.id
+    session.add(item)
+    session.commit()
+    session.refresh(item)
+    return serialize(MessageRead, item)
 
 
 @router.delete("/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
