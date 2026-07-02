@@ -1,12 +1,11 @@
-// Cliente MCP MÍNIMO (Model Context Protocol) — REBANADA 1 de N: SOLO descubrimiento/listado,
-// de SOLO LECTURA. Hand-rolled (sin SDK de MCP): habla JSON-RPC 2.0 sobre el transporte
-// Streamable HTTP (un único endpoint POST que responde application/json o text/event-stream).
-// El transporte stdio queda FUERA de alcance (no aplica en el navegador).
+// Cliente MCP MÍNIMO (Model Context Protocol). Hand-rolled (sin SDK de MCP): habla JSON-RPC 2.0
+// sobre el transporte Streamable HTTP (un único endpoint POST que responde application/json o
+// text/event-stream). El transporte stdio queda FUERA de alcance (no aplica en el navegador).
 //
-// Alcance: `initialize` + `notifications/initialized` + `tools/list`. NADA de ejecución
-// (`tools/call`), escrituras remotas ni aislamiento: eso es la REBANADA 2 y, cuando llegue,
-// toda escritura MCP DEBERÁ pasar por el protocolo de aprobación P1 (igual que cualquier
-// escritura). Aquí no se ejecuta ninguna tool.
+// Alcance: descubrimiento (`initialize` + `notifications/initialized` + `tools/list`) Y
+// EJECUCIÓN (`tools/call`, ver ``callMcpTool``). Las tools MCP fluyen por el mismo camino que
+// las nativas: las de lectura corren directo y toda ESCRITURA MCP pasa por el protocolo de
+// aprobación P1 (igual que cualquier escritura; el mapeo/gating vive en mcp-tools.ts).
 //
 // Sin secretos en logs: este módulo NO escribe logs; si el endpoint requiere cabeceras
 // (p. ej. Authorization de QA), viajan sólo en la petición, nunca se registran.

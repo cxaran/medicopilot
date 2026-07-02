@@ -87,10 +87,10 @@ export function isSafeButtonUrl(url: string): boolean {
   return false;
 }
 
-// Clasificación de gobierno de un botón (MP-CTRL-0130). La resolución la calcula button-actions.ts
-// (catálogo + RBAC); parseButtonsSpec sólo valida la ESTRUCTURA y NO la fija (queda undefined hasta
-// que el seam la resuelve). "read_only" = no puede mutar (mensaje o tool de lectura); "actionable" =
-// dispara una tool de escritura resuelta que pasa por la aprobación P1; "blocked" = no se permite.
+// Clasificación de gobierno de un botón (MP-CTRL-0130). La estructura Y la resolución las calcula
+// button-actions.ts (buildButtonsModel: catálogo + RBAC). "read_only" = no puede mutar (mensaje o
+// tool de lectura); "actionable" = dispara una tool de escritura resuelta que pasa por la
+// aprobación P1; "blocked" = no se permite.
 export type ButtonGovernance = "read_only" | "actionable" | "blocked";
 
 export interface ButtonSpec {
@@ -176,7 +176,6 @@ export function isUiSpec(value: unknown): value is UiSpec {
 
 const MAX_FIELDS = 30;
 const MAX_DATA_POINTS = 60;
-const MAX_BUTTONS = 12;
 const MAX_REPLIES = 6;
 const MAX_REPLY_LENGTH = 140;
 const ALLOWED_FIELD_TYPES: FormFieldType[] = ["text", "number", "textarea", "select"];
@@ -329,61 +328,8 @@ export function parseChartSpec(input: unknown): ParseResult<ChartSpec> {
   };
 }
 
-function parseButtonAction(raw: unknown): ButtonAction | null {
-  if (!isObject(raw)) {
-    return null;
-  }
-  const type = asString(raw.type);
-  if (type === "message") {
-    const prompt = asString(raw.prompt);
-    return prompt ? { type: "message", prompt } : null;
-  }
-  if (type === "tool") {
-    const tool = asString(raw.tool);
-    if (!tool) {
-      return null;
-    }
-    return isObject(raw.args) ? { type: "tool", tool, args: raw.args } : { type: "tool", tool };
-  }
-  if (type === "link") {
-    const url = asString(raw.url);
-    return url && isSafeButtonUrl(url) ? { type: "link", url } : null;
-  }
-  return null;
-}
-
-export function parseButtonsSpec(input: unknown): ParseResult<ButtonsSpec> {
-  if (!isObject(input)) {
-    return { ok: false, error: "La especificación de botones debe ser un objeto." };
-  }
-  if (!Array.isArray(input.buttons) || input.buttons.length === 0) {
-    return { ok: false, error: "Se requiere al menos un botón en 'buttons'." };
-  }
-  if (input.buttons.length > MAX_BUTTONS) {
-    return { ok: false, error: `Demasiados botones (máximo ${MAX_BUTTONS}).` };
-  }
-
-  const buttons: ButtonSpec[] = [];
-  for (const raw of input.buttons) {
-    if (!isObject(raw)) {
-      return { ok: false, error: "Cada botón debe ser un objeto." };
-    }
-    const label = asString(raw.label);
-    if (!label) {
-      return { ok: false, error: "Cada botón requiere 'label'." };
-    }
-    const action = parseButtonAction(raw.action);
-    if (!action) {
-      return { ok: false, error: `Acción inválida en el botón '${label}'.` };
-    }
-    buttons.push({ label, action });
-  }
-
-  return {
-    ok: true,
-    spec: { kind: "buttons", ...(asString(input.title) ? { title: asString(input.title) } : {}), buttons },
-  };
-}
+// La validación de botones (estructura + gobernanza) vive en button-actions.ts
+// (``buildButtonsModel``): el parser estructural que vivía aquí quedó superado y se retiró.
 
 /**
  * Valida la spec de RESPUESTAS SUGERIDAS. Sólo texto plano corto (los chips se envían como mensaje

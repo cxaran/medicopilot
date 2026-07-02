@@ -46,7 +46,9 @@ export function estimateToolSchemaTokens(tools: readonly WireTool[]): number {
   return Math.ceil(JSON.stringify(tools).length / 4);
 }
 
-/** Texto plano de un mensaje de cable (solo partes de texto; las imágenes cuentan aparte). */
+/** Texto plano de un mensaje de cable. SOLO partes de texto: las imágenes NO entran a la
+ *  estimación de tokens (limitación conocida — un adjunto grande consume contexto real del
+ *  proveedor sin reflejarse en el presupuesto local). */
 export function messageText(message: WireMessage): string {
   return message.content
     .map((part) => (part.type === "text" ? part.text : ""))

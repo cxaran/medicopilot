@@ -5,7 +5,6 @@ import {
   buildFormSubmissionMessage,
   buttonActionToMessage,
   isUiSpec,
-  parseButtonsSpec,
   parseChartSpec,
   parseFormSpec,
   parseResourceFormSpec,
@@ -97,17 +96,6 @@ test("isSafeButtonUrl: lista blanca de contacto (WhatsApp/tel/mailto/sms), recha
   assert.equal(isSafeButtonUrl("no-es-url"), false);
 });
 
-test("parseButtonsSpec: acepta botón link seguro y rechaza inseguro", () => {
-  const ok = parseButtonsSpec({
-    buttons: [{ label: "WhatsApp", action: { type: "link", url: "https://wa.me/521555?text=Hi" } }],
-  });
-  assert.equal(ok.ok, true);
-  const bad = parseButtonsSpec({
-    buttons: [{ label: "Mal", action: { type: "link", url: "https://evil.com" } }],
-  });
-  assert.equal(bad.ok, false);
-});
-
 test("parseFormSpec: conserva 'value' para prellenar el campo", () => {
   const parsed = parseFormSpec({
     title: "Nuevo paciente",
@@ -138,23 +126,6 @@ test("parseChartSpec: acepta barras con datos numéricos", () => {
 
 test("parseChartSpec: rechaza value no numérico", () => {
   const parsed = parseChartSpec({ data: [{ label: "Ene", value: "x" }] });
-  assert.equal(parsed.ok, false);
-});
-
-test("parseButtonsSpec: valida acciones message y tool", () => {
-  const parsed = parseButtonsSpec({
-    buttons: [
-      { label: "Seguir", action: { type: "message", prompt: "Continúa" } },
-      { label: "Listar", action: { type: "tool", tool: "clinical.list_patients" } },
-    ],
-  });
-  assert.equal(parsed.ok, true);
-  if (!parsed.ok) return;
-  assert.equal(parsed.spec.buttons.length, 2);
-});
-
-test("parseButtonsSpec: rechaza acción inválida", () => {
-  const parsed = parseButtonsSpec({ buttons: [{ label: "X", action: { type: "nope" } }] });
   assert.equal(parsed.ok, false);
 });
 

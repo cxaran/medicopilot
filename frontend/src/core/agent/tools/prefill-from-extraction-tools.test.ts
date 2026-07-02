@@ -5,25 +5,21 @@ import { executeTool, resolveToolCall } from "./tool-runner.ts";
 import { getTool, listTools } from "./registry.ts";
 import { searchTools } from "../tool-discovery.ts";
 import { buildToolCatalog } from "../tool-catalog.ts";
-import {
-  buildPrefillFormModel,
-  type OpenTemplateResolved,
-} from "../open-template-form.ts";
 
 // SEAM EXTRACCIÓN->PREFILL (MP-CTRL-0118): cierra "hablar/dictar -> formulario registrado
 // prellenado -> aprobar". La tool clinical.prefill_from_extraction envía el RESULTADO de extracción
 // (campos con confianza + fragmento de origen) y recibe el MISMO plan resuelto que open_template
-// (0116), por lo que reusa buildPrefillFormModel SIN renderizador paralelo. La extracción LLM real
-// es del runtime del agente (MG-002) y queda fuera de alcance: aquí se prueba el plomería
-// determinista con un resultado de extracción hecho a mano.
+// (0116); el agente abre después el formulario oficial con ``ui.open_resource_form`` usando esos
+// valores. La extracción LLM real es del runtime del agente (MG-002) y queda fuera de alcance:
+// aquí se prueba la plomería determinista con un resultado de extracción hecho a mano.
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }
 
-// Plan que el backend devuelve (misma forma OpenTemplateResolved de 0116): phone fue de confianza
+// Plan que el backend devuelve (misma forma que el prefill de 0116): phone fue de confianza
 // media -> sugerido; full_name de alta -> prellenado; un campo ajeno cayó en dropped_fields.
-const RESOLVED: OpenTemplateResolved = {
+const RESOLVED = {
   template_id: "patients",
   resource: "patients",
   label: "Pacientes",
@@ -119,24 +115,3 @@ test("prefill_from_extraction: descubrible y no gateada en cliente", () => {
   assert.notEqual(entry?.status, "gated_out");
 });
 
-// --- Resolver REUSADO (sin renderizador paralelo): el plan de extracción alimenta el mismo
-//     buildPrefillFormModel de 0116, que produce los initialValues + marcas del renderizador. ---
-
-test("buildPrefillFormModel: el plan de extracción marca prellenado/sugerido y descarta lo ajeno", () => {
-  const model = buildPrefillFormModel(RESOLVED);
-  // full_name (alta confianza) entra prellenado; phone (media) sugerido.
-  assert.equal(model.initialValues.full_name, "Ana Ruiz");
-  assert.equal(model.initialValues.phone, "5512345678");
-  // phone NO es obligatorio -> queda 'suggested'; full_name es obligatorio -> 'confirm'.
-  assert.equal(model.marks.phone, "suggested");
-  assert.equal(model.marks.full_name, "confirm");
-  // birth_date/sex son obligatorios pero ausentes de la extracción: a-confirmar SIN valor (la
-  // ausencia no es un negativo).
-  assert.equal(model.marks.birth_date, "confirm");
-  assert.equal(model.initialValues.birth_date, undefined);
-  // Trazabilidad y descartes.
-  assert.equal(model.sourceByField.full_name, "la paciente Ana Ruiz");
-  assert.equal(model.sourceOverall, "transcripcion-123");
-  assert.deepEqual(model.droppedFields, ["campo_inventado"]);
-  assert.equal(model.initialValues.campo_inventado, undefined);
-});

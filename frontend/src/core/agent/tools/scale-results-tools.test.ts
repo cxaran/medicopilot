@@ -119,7 +119,7 @@ test("create_scale_result_draft: gated por permiso de creación en scale_results
 test("escrituras de escalas: el gate pasa por requiredPermissions (scale_results no publica forms)", () => {
   const tools = listTools();
   // Sin permisos en sesión y sin recurso creable: ambas gateadas, nombrando el permiso faltante.
-  const closed = buildToolCatalog(tools, new Set<string>(), undefined, new Set<string>());
+  const closed = buildToolCatalog(tools, new Set<string>(), new Set<string>());
   const create = closed.find((e) => e.name === "clinical.create_scale_result_draft");
   const update = closed.find((e) => e.name === "clinical.update_scale_result_draft");
   assert.equal(create?.status, "gated_out");

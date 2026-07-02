@@ -42,11 +42,6 @@ import {
 } from "./record-update";
 import { buildOpenRecord, type OpenRecordInput } from "./open-record";
 import { buildWizardPlan, type WizardInput, type WizardSpec } from "./wizard";
-import {
-  searchTools,
-  describeTools,
-  type ToolDiscoveryContext,
-} from "../tool-discovery";
 
 export type ToolKind = "read" | "write";
 
@@ -69,10 +64,6 @@ export interface ToolExecutionContext {
   api: ToolApi;
   // Runner del sandbox de JS (inyectable en tests; por defecto el Web Worker real).
   sandbox: SandboxRunner;
-  // Contexto de descubrimiento de tools a escala (tool_search / tool_describe). Lo inyecta el
-  // navegador por turno con el set BUSCABLE (efectivo, ya gateado) y el callback markLoaded.
-  // Opcional: las tools normales lo ignoran; solo las meta-tools lo usan.
-  discovery?: ToolDiscoveryContext;
 }
 
 // Metadata de aprobación de una tool de ESCRITURA: alimenta el plan canónico que el
@@ -324,63 +315,6 @@ function buildReportPath(args: Record<string, unknown>): string {
 // FastAPI valida cookie+rol+permiso+paciente en cada llamada; el gateway nunca toca el
 // expediente. Las de escritura crean BORRADORES y van siempre gated por confirmación.
 const TOOLS: ToolDefinition[] = [
-  {
-    // META-TOOL de descubrimiento a escala. No toca el expediente: opera SOLO sobre el catálogo
-    // de tools efectivo (ya gateado por rol). Devuelve nombres + descripciones relevantes a la
-    // intención; el modelo luego usa tool_describe para cargar los esquemas de las que usará.
-    name: "tool_search",
-    description:
-      "Busca herramientas DISPONIBLES por intención (palabras clave) cuando la que necesitas no " +
-      "está ya declarada. Devuelve nombres, tipo (lectura/escritura) y descripción. Luego usa " +
-      "tool_describe(names) para cargar sus esquemas y poder llamarlas. No accede al expediente.",
-    kind: "read",
-    inputSchema: {
-      type: "object",
-      properties: {
-        query: { type: "string", description: "Términos de búsqueda por intención (p. ej. 'agendar cita')." },
-        limit: { type: "integer", description: "Máximo de resultados (1-25).", minimum: 1, maximum: 25 },
-      },
-      required: ["query"],
-      additionalProperties: false,
-    },
-    execute: async (args, ctx) => {
-      const limit = typeof args.limit === "number" ? args.limit : undefined;
-      const tools = searchTools(String(args.query ?? ""), ctx.discovery?.searchable ?? [], limit);
-      return { tools };
-    },
-  },
-  {
-    // META-TOOL: carga el esquema completo de las tools nombradas (de las que devuelve
-    // tool_search) y las marca como CARGADAS para declararlas en los turnos siguientes. Las
-    // gateadas/desconocidas devuelven error por nombre (nunca se describe una restringida).
-    name: "tool_describe",
-    description:
-      "Carga el esquema completo (input_schema) de una o más herramientas por nombre, de las que " +
-      "devolvió tool_search, para poder usarlas. No accede al expediente.",
-    kind: "read",
-    // El validador local acotado no cubre arrays; se usa esquema permisivo + wireSchema rico
-    // (igual que las tools de UI). El execute valida defensivamente la forma de `names`.
-    inputSchema: PASSTHROUGH_SCHEMA,
-    wireSchema: {
-      type: "object",
-      properties: {
-        names: {
-          type: "array",
-          description: "Nombres de herramientas a cargar.",
-          items: { type: "string" },
-        },
-      },
-      required: ["names"],
-      additionalProperties: false,
-    },
-    execute: async (args, ctx) => {
-      const names = Array.isArray(args.names) ? args.names.map((value) => String(value)) : [];
-      const tools = describeTools(names, ctx.discovery?.searchable ?? []);
-      const loaded = tools.filter((entry) => !("error" in entry)).map((entry) => entry.name);
-      ctx.discovery?.markLoaded(loaded);
-      return { tools };
-    },
-  },
   {
     name: "clinical.list_patients",
     description:

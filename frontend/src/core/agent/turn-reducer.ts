@@ -8,12 +8,6 @@ export type TurnStatus =
   | "cancelled"
   | "failed";
 
-export interface PendingToolCall {
-  callId: string;
-  toolName: string;
-  arguments: unknown;
-}
-
 export interface TurnState {
   status: TurnStatus;
   turnId: string | null;
@@ -22,7 +16,6 @@ export interface TurnState {
   // Resumen de razonamiento ("pensamiento") acumulado de los eventos turn.reasoning.summary.
   // Lo emiten todos los proveedores con reasoning (Codex, Anthropic thinking, Gemini, etc.).
   reasoningText: string;
-  pendingToolCalls: PendingToolCall[];
   usage: TurnUsage | null;
   // ``details`` conserva la metadata del error del proveedor (p. ej. ``providerStatus``)
   // que el gateway adjunta en ``turn.failed``; la usa el mapeo a mensaje amistoso.
@@ -35,18 +28,11 @@ export function initialTurnState(): TurnState {
     turnId: null,
     assistantText: "",
     reasoningText: "",
-    pendingToolCalls: [],
     usage: null,
     error: null,
   };
 }
 
-/**
- * Reducer puro de los eventos de un turn. Acumula el texto del asistente: usa el
- * `snapshot` del gateway cuando viene (acumulado autoritativo, útil para resync de
- * reconexión) y cae a concatenar el `delta` si no hay snapshot. B7 NO ejecuta tools:
- * un tool_call.ready se registra como pendiente para mostrarlo (B8 lo ejecutará).
- */
 /**
  * Falla LIMPIAMENTE un turno en vuelo cuando se cae la conexión con el copiloto: evita el spinner
  * colgado. Sólo afecta a un turno activo (``running``/``waiting_for_tool``); cualquier otro estado
@@ -79,14 +65,12 @@ export function reduceTurnEvent(state: TurnState, event: ServerEvent): TurnState
       };
 
     case "turn.tool_call.ready":
+      // El despacho de la tool ocurre en el panel directamente desde el EVENTO (handleToolCall);
+      // el reducer sólo marca el estado (no acumula la lista de calls: nadie la leía).
       return {
         ...state,
         status: "waiting_for_tool",
         turnId: state.turnId ?? event.turn_id,
-        pendingToolCalls: [
-          ...state.pendingToolCalls,
-          { callId: event.call_id, toolName: event.tool_name, arguments: event.arguments },
-        ],
       };
 
     case "turn.reasoning.summary":

@@ -5,21 +5,18 @@ import { executeTool, resolveToolCall } from "./tool-runner.ts";
 import { getTool, listTools } from "./registry.ts";
 import { searchTools } from "../tool-discovery.ts";
 import { buildToolCatalog } from "../tool-catalog.ts";
-import {
-  buildPrefillFormModel,
-  type OpenTemplateResolved,
-} from "../open-template-form.ts";
 
 // UI HÍBRIDA (MP-CTRL-0116): contrato abrir-plantilla-con-prellenado. La tool open_template
 // produce una acción de APERTURA (no una escritura): valida contra el backend y devuelve el plan
-// resuelto; nada se guarda. El resolver puro mapea el plan al renderizador EXISTENTE
-// (ResourceFormFields via initialValues) marcando sugeridos y a-confirmar.
+// resuelto; nada se guarda. El agente abre después el formulario oficial con
+// ``ui.open_resource_form`` usando los valores del plan.
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }
 
-const RESOLVED: OpenTemplateResolved = {
+// Plan resuelto tal como lo devuelve el backend (POST /agent/templates/{id}/prefill).
+const RESOLVED = {
   template_id: "patients",
   resource: "patients",
   label: "Pacientes",
@@ -114,34 +111,3 @@ test("open_template: descubrible y no gateada en cliente", () => {
   assert.notEqual(entry?.status, "gated_out");
 });
 
-// --- Resolver puro: alimenta el renderizador EXISTENTE (ResourceFormFields) ---
-
-test("buildPrefillFormModel: initialValues prellenados + marcas por campo", () => {
-  const model = buildPrefillFormModel(RESOLVED);
-  // El formulario se renderiza PRELLENADO (initialValues que ResourceFormFields ya consume).
-  assert.equal(model.initialValues.full_name, "María López");
-  assert.equal(model.initialValues.sex, "female");
-  // 'sex' fue sugerido y además obligatorio -> a-confirmar tiene prioridad de resaltado.
-  assert.equal(model.marks.sex, "confirm");
-  assert.equal(model.marks.full_name, "confirm"); // obligatorio
-  // Fragmento de origen disponible para trazabilidad.
-  assert.equal(model.sourceByField.full_name, "la paciente María López");
-  assert.equal(model.sourceOverall, "nota de la conversación");
-  // Campo inventado descartado (se avisa, no se renderiza como valor).
-  assert.deepEqual(model.droppedFields, ["campo_inventado"]);
-  assert.equal(model.initialValues.campo_inventado, undefined);
-});
-
-test("buildPrefillFormModel: sugerido NO obligatorio queda marcado 'suggested'", () => {
-  const plan: OpenTemplateResolved = {
-    ...RESOLVED,
-    values: { phone: "5512345678" },
-    prefilled_fields: [],
-    suggested_fields: ["phone"],
-    fields_requiring_confirmation: [], // phone no es obligatorio
-    dropped_fields: [],
-    source_fragments: {},
-  };
-  const model = buildPrefillFormModel(plan);
-  assert.equal(model.marks.phone, "suggested");
-});

@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 
 import {
   buildButtonsModel,
-  isButtonBlocked,
   type ButtonReviewContext,
   type ButtonToolEntry,
   type ButtonsInput,
@@ -180,12 +179,6 @@ test("buildButtonsModel: lista vacía / sin label / acción inválida -> error",
     buildButtonsModel(input([{ label: "X", action: { type: "navigate", url: "http://x" } }]), CTX).ok,
     false,
   );
-});
-
-test("isButtonBlocked: helper de render", () => {
-  assert.equal(isButtonBlocked({ governance: "blocked" }), true);
-  assert.equal(isButtonBlocked({ governance: "actionable" }), false);
-  assert.equal(isButtonBlocked({ governance: "read_only" }), false);
 });
 
 // --- Tool ui.render_buttons: lectura, sin aprobación, gobierna de punta a punta ---

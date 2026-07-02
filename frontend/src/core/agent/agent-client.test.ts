@@ -108,7 +108,9 @@ test("reducer: acumula el texto del asistente desde delta+snapshot", () => {
   assert.equal(state.assistantText, "Hola mundo");
 });
 
-test("reducer: tool_call.ready queda pendiente sin ejecutar (B7)", () => {
+test("reducer: tool_call.ready marca el turno a la espera de la tool", () => {
+  // El despacho de la tool ocurre en el panel desde el EVENTO (handleToolCall); el reducer sólo
+  // refleja el estado del turno.
   let state = initialTurnState();
   state = reduceTurnEvent(state, { type: "turn.started", turn_id: "t1" });
   state = reduceTurnEvent(state, {
@@ -119,8 +121,7 @@ test("reducer: tool_call.ready queda pendiente sin ejecutar (B7)", () => {
     arguments: { q: "x" },
   });
   assert.equal(state.status, "waiting_for_tool");
-  assert.equal(state.pendingToolCalls.length, 1);
-  assert.equal(state.pendingToolCalls[0].toolName, "clinical.search");
+  assert.equal(state.turnId, "t1");
 });
 
 test("startTurn y cancelTurn envían los mensajes tipados", async (t) => {

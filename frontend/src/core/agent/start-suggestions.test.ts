@@ -52,7 +52,7 @@ test("una tool gateada (gated_out) NO habilita su sugerencia de escritura", () =
   const blocked = buildStartSuggestions([entry("clinical.create_patient_draft", "gated_out")], "global", 10, identity);
   assert.ok(!blocked.includes("Dar de alta a un paciente nuevo"));
 
-  const allowed = buildStartSuggestions([entry("clinical.create_patient_draft", "discoverable")], "global", 10, identity);
+  const allowed = buildStartSuggestions([entry("clinical.create_patient_draft")], "global", 10, identity);
   assert.ok(allowed.includes("Dar de alta a un paciente nuevo"));
 });
 

@@ -192,11 +192,6 @@ export function buildButtonsModel(input: ButtonsInput, ctx: ButtonReviewContext)
   return { ok: true, spec };
 }
 
-/** ¿El botón está bloqueado? Ayuda al renderizador a deshabilitarlo (defensa en el render). */
-export function isButtonBlocked(button: Pick<ButtonSpec, "governance">): boolean {
-  return button.governance === "blocked";
-}
-
 /** Etiquetas legibles de la clasificación (para el panel/tooltips). */
 export const GOVERNANCE_LABEL: Record<ButtonGovernance, string> = {
   read_only: "Sólo lectura",

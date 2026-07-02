@@ -2,10 +2,11 @@ import type { WireMessage } from "@/core/agent/protocol";
 
 /**
  * LAYERING de persona / system-prompt del agente (P4, paridad OpenClaw bootstrap layers,
- * clínico y provider-neutral). Dos capas COMPUESTAS, ensambladas determinísticamente en
- * cada turno en este orden FIJO:
+ * clínico y provider-neutral). Capas COMPUESTAS, ensambladas determinísticamente en cada
+ * turno en este orden FIJO (ver ``composeLeadingLayers``):
  *
- *   [SEGURIDAD CLÍNICA (fija)] -> [PERSONA (configurable)] -> [MEMORIAS (P2, no confiables)] -> [conversación]
+ *   [SEGURIDAD CLÍNICA (fija)] -> [OPERATIVA (fija)] -> [PERSONA (configurable)] ->
+ *   [CONTEXTO ACTIVO] -> [MEMORIAS (P2, no confiables)] -> [conversación]
  *
  * La capa de SEGURIDAD es propiedad del CÓDIGO: siempre va primera, siempre presente, y el
  * médico NO puede editarla ni desactivarla. La PERSONA es editable por el médico (tono,
