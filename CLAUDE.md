@@ -50,6 +50,7 @@ Setup y comandos (ejecutar desde la **raíz del repo**, con el venv activo):
   - Aplicar: `alembic -c backend/alembic.ini upgrade head`
   - Autogenerar: `alembic -c backend/alembic.ini revision --autogenerate -m "mensaje"`
 - Config por env vars (`POSTGRES_*`, `ENVIRONMENT`); ver `.env.example`. La DSN se compone en `backend/app/core/settings.py`.
+- Tareas en segundo plano: **Taskiq sobre PostgreSQL** (`backend/app/taskiq_app.py`; ver `docs/background-tasks-taskiq.md`). Worker y scheduler son servicios Docker opt-in (`docker compose --profile taskiq up taskiq-worker taskiq-scheduler`); **nunca** se levantan desde FastAPI (ni lifespan ni `BackgroundTasks`). El schedule viene apagado por defecto (`TASKIQ_SCHEDULE_ENABLED=false`); los payloads de tareas no llevan PHI (referencias por id, nunca texto clínico). La tabla del broker la crea el propio broker (sin migración Alembic).
 
 Arquitectura y convenciones de los modelos (`backend/app/models/`):
 
