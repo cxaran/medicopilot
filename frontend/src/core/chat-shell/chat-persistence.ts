@@ -34,6 +34,11 @@ export const MAX_UI_PAYLOAD_CHARS = 100_000;
 export const MAX_PLAN_NOTES_PER_MESSAGE = 20;
 export const MAX_PLAN_NOTE_CHARS = 2_000;
 
+// Topes del sobre de NOTAS DE HERRAMIENTAS (resumen determinista del uso de tools del turno:
+// lecturas, meta-tools, MCP, sandbox y escrituras rechazadas). Telegráficas por construcción.
+export const MAX_TOOL_NOTES_PER_MESSAGE = 30;
+export const MAX_TOOL_NOTE_CHARS = 600;
+
 /**
  * Subconjunto ESTRUCTURAL del ``ChatMessage`` del CopilotPanel que se persiste/restaura.
  * (El ``ChatMessage`` real tiene además ``image``, que no se persiste en esta rebanada.)
@@ -59,6 +64,11 @@ export interface TranscriptMessage {
    *  restaurar re-siembran los segmentos ``preserve`` de la compactación: así el modelo no olvida
    *  qué escribió (ni con qué ids) tras recargar la página. */
   approvedPlanNotes?: readonly string[];
+  /** Notas del USO DE HERRAMIENTAS del turno (lecturas, meta-tools, MCP, sandbox, rechazos P1),
+   *  ancladas al mensaje del asistente. Se persisten en ``payload.tool_notes`` y entran al contexto
+   *  de los turnos siguientes como bloque adyacente COMPACTABLE (a diferencia de los planes
+   *  aprobados, que son ``preserve``). */
+  toolNotes?: readonly string[];
 }
 
 /** Fila de mensaje tal como la devuelve el backend (``/api/v1/messages``). */
@@ -124,6 +134,27 @@ function planNotesFromPayload(
 }
 
 /**
+ * Extrae las notas de uso de herramientas del sobre versionado ``payload.tool_notes``. Mismo
+ * criterio gobernado que los otros sobres: versión conocida, sólo strings no vacíos y topes.
+ */
+function toolNotesFromPayload(
+  payload: Record<string, unknown> | null | undefined,
+): string[] {
+  const envelope = payload?.tool_notes;
+  if (typeof envelope !== "object" || envelope === null) {
+    return [];
+  }
+  const { version, notes } = envelope as { version?: unknown; notes?: unknown };
+  if (version !== UI_PAYLOAD_VERSION || !Array.isArray(notes)) {
+    return [];
+  }
+  return notes
+    .filter((note): note is string => typeof note === "string" && note.trim().length > 0)
+    .slice(0, MAX_TOOL_NOTES_PER_MESSAGE)
+    .map((note) => note.slice(0, MAX_TOOL_NOTE_CHARS));
+}
+
+/**
  * Notas de planes aprobados de TODO el hilo restaurado, en orden. El panel las re-siembra como
  * segmentos ``preserve`` de la compactación (paridad con la sesión en vivo, donde los planes
  * aprobados se conservan verbatim en el contexto de cada turno).
@@ -163,9 +194,10 @@ export function messagesToTranscript(rows: readonly PersistedMessageRow[]): Tran
       }
 
       const planNotes = planNotesFromPayload(payload);
-      // El mensaje base se restaura con texto o, aun vacío, si porta notas de plan (el turno
-      // que sólo aprobó una escritura persiste su rastro; el render suprime la burbuja vacía).
-      if (row.content.trim().length > 0 || planNotes.length > 0) {
+      const toolNotes = toolNotesFromPayload(payload);
+      // El mensaje base se restaura con texto o, aun vacío, si porta notas (de plan o de tools):
+      // el turno que sólo usó herramientas persiste su rastro; el render suprime la burbuja vacía.
+      if (row.content.trim().length > 0 || planNotes.length > 0 || toolNotes.length > 0) {
         const message: TranscriptMessage = {
           id: row.id,
           role: row.role as TranscriptRole,
@@ -173,6 +205,9 @@ export function messagesToTranscript(rows: readonly PersistedMessageRow[]): Tran
         };
         if (planNotes.length > 0) {
           message.approvedPlanNotes = planNotes;
+        }
+        if (toolNotes.length > 0) {
+          message.toolNotes = toolNotes;
         }
         if (payload) {
           if (payload.is_error === true) {
@@ -191,12 +226,15 @@ export function messagesToTranscript(rows: readonly PersistedMessageRow[]): Tran
     });
 }
 
-/** ¿El mensaje lleva contenido persistible además del texto (UI generativa o notas de plan)? */
+/** ¿El mensaje lleva contenido persistible además del texto (UI generativa o notas)? */
 function carriesUiSpecs(message: TranscriptMessage): boolean {
   if (message.kind === "ui" && message.uiSpec) {
     return true;
   }
   if (Array.isArray(message.approvedPlanNotes) && message.approvedPlanNotes.length > 0) {
+    return true;
+  }
+  if (Array.isArray(message.toolNotes) && message.toolNotes.length > 0) {
     return true;
   }
   return Array.isArray(message.uiSpecs) && message.uiSpecs.length > 0;
@@ -277,6 +315,13 @@ export function toMessagePayload(
     .map((note) => note.slice(0, MAX_PLAN_NOTE_CHARS));
   if (planNotes.length > 0) {
     meta.approved_plans = { version: UI_PAYLOAD_VERSION, notes: planNotes };
+  }
+  const toolNotes = (message.toolNotes ?? [])
+    .filter((note) => note.trim().length > 0)
+    .slice(0, MAX_TOOL_NOTES_PER_MESSAGE)
+    .map((note) => note.slice(0, MAX_TOOL_NOTE_CHARS));
+  if (toolNotes.length > 0) {
+    meta.tool_notes = { version: UI_PAYLOAD_VERSION, notes: toolNotes };
   }
   const payload: MessageCreatePayload = {
     conversation_id: conversationId,

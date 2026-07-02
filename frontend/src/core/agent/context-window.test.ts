@@ -6,11 +6,15 @@ import type { WireMessage, WireModelCapabilities, WireTool } from "@/core/agent/
 import {
   CONTEXT_RECAP_HEADER,
   compactContext,
+  consolidateApprovedPlans,
   contextUsage,
   effectiveContextWindow,
   estimateTokens,
   estimateToolSchemaTokens,
   extractClinicalIds,
+  MAX_CONSOLIDATED_PLAN_IDS,
+  MAX_VERBATIM_PLAN_NOTES,
+  PLAN_LEDGER_HEADER,
   usableInputTokens,
   type ContextSegment,
 } from "./context-window.ts";
@@ -166,4 +170,69 @@ test("compactContext: es PURO (no muta los segmentos de entrada; el almacén no 
   compactContext(segments, { usableInputTokens: 100, threshold: 0.4, recentReserveRatio: 0.3 });
   // Los segmentos de entrada quedan idénticos (la compactación solo transforma la salida).
   assert.deepEqual(JSON.parse(JSON.stringify(segments)), snapshot);
+});
+
+// --- consolidación de planes aprobados (tope determinista de los preserve) ---
+
+const uuidAt = (n: number): string => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+
+test("consolidateApprovedPlans: bajo el tope, cada nota va verbatim como segmento preserve", () => {
+  const notes = ["plan uno", `plan dos con ${ID_A}`];
+  const out = consolidateApprovedPlans(notes);
+  assert.equal(out.length, 2);
+  assert.deepEqual(
+    out.map((s) => ({ text: s.text, preserve: s.preserve })),
+    [
+      { text: "plan uno", preserve: true },
+      { text: `plan dos con ${ID_A}`, preserve: true },
+    ],
+  );
+});
+
+test("consolidateApprovedPlans: sobre el tope, las viejas se consolidan reteniendo sus ids", () => {
+  const notes = Array.from(
+    { length: MAX_VERBATIM_PLAN_NOTES + 5 },
+    (_, i) => `Acción ${i} creó el registro ${uuidAt(i)}.`,
+  );
+  const out = consolidateApprovedPlans(notes);
+  // 1 bloque consolidado + las últimas MAX_VERBATIM_PLAN_NOTES verbatim, todas preserve.
+  assert.equal(out.length, 1 + MAX_VERBATIM_PLAN_NOTES);
+  assert.ok(out.every((s) => s.preserve === true));
+  assert.ok(out[0].text.startsWith(PLAN_LEDGER_HEADER));
+  // Los ids de las 5 notas consolidadas sobreviven en el bloque; su texto verbatim no.
+  for (let i = 0; i < 5; i += 1) {
+    assert.ok(out[0].text.includes(uuidAt(i)));
+  }
+  assert.ok(!out[0].text.includes("Acción 0 creó"));
+  // Las recientes conservan su texto exacto.
+  assert.equal(out[1].text, notes[5]);
+  assert.equal(out[out.length - 1].text, notes[notes.length - 1]);
+});
+
+test("consolidateApprovedPlans: los ids del bloque también se acotan (conserva los recientes)", () => {
+  const older = MAX_CONSOLIDATED_PLAN_IDS + 10;
+  const notes = Array.from(
+    { length: older + MAX_VERBATIM_PLAN_NOTES },
+    (_, i) => `Acción ${i} creó el registro ${uuidAt(i)}.`,
+  );
+  const out = consolidateApprovedPlans(notes);
+  const ledger = out[0].text;
+  // Los 10 ids más viejos se omiten (con aviso); los siguientes se conservan.
+  assert.ok(!ledger.includes(uuidAt(0)));
+  assert.ok(!ledger.includes(uuidAt(9)));
+  assert.ok(ledger.includes(uuidAt(10)));
+  assert.ok(ledger.includes(uuidAt(older - 1)));
+  assert.ok(ledger.includes("10 identificador(es)"));
+});
+
+test("consolidateApprovedPlans: el costo de contexto queda ACOTADO aunque el hilo crezca", () => {
+  const notesOf = (count: number): string[] =>
+    Array.from({ length: count }, (_, i) => `Acción ${i} creó el registro ${uuidAt(i)}.`);
+  const tokensOf = (segments: readonly ContextSegment[]): number =>
+    segments.reduce((sum, s) => sum + estimateTokens(s.text), 0);
+  const at100 = tokensOf(consolidateApprovedPlans(notesOf(100)));
+  const at1000 = tokensOf(consolidateApprovedPlans(notesOf(1000)));
+  // Con 10x más aprobaciones el costo NO se multiplica: sólo varían los conteos del aviso y los
+  // dígitos de los índices (sin tope, 900 notas extra costarían miles de tokens).
+  assert.ok(at1000 - at100 < 20, `at100=${at100} at1000=${at1000}`);
 });

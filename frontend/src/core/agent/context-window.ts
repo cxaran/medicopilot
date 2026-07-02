@@ -133,6 +133,62 @@ export function extractClinicalIds(text: string): string[] {
   return ids;
 }
 
+/** Planes aprobados RECIENTES que se conservan verbatim; los más viejos se consolidan. */
+export const MAX_VERBATIM_PLAN_NOTES = 12;
+/** Tope de identificadores clínicos en el bloque consolidado (se conservan los más recientes). */
+export const MAX_CONSOLIDATED_PLAN_IDS = 40;
+
+/** Encabezado del bloque consolidado de acciones clínicas previas (claramente identificable). */
+export const PLAN_LEDGER_HEADER = "REGISTRO CONSOLIDADO DE ACCIONES CLÍNICAS PREVIAS";
+
+/**
+ * Convierte las notas de planes APROBADOS en segmentos ``preserve`` con TOPE determinista: las
+ * últimas ``MAX_VERBATIM_PLAN_NOTES`` van verbatim (una por segmento) y las más viejas se
+ * CONSOLIDAN en un solo bloque que retiene sus identificadores clínicos (deduplicados y también
+ * acotados a ``MAX_CONSOLIDATED_PLAN_IDS``, conservando los más recientes). Así el costo de
+ * contexto de las aprobaciones queda ACOTADO aunque el hilo acumule cientos: el detalle completo
+ * vive en el expediente (FastAPI es la autoridad) y en el historial persistido del chat; este
+ * módulo es PURO y sólo decide qué ve el modelo.
+ */
+export function consolidateApprovedPlans(notes: readonly string[]): ContextSegment[] {
+  const toSegment = (text: string): ContextSegment => ({
+    messages: [{ role: "system", content: [{ type: "text", text }] }],
+    text,
+    preserve: true,
+  });
+
+  if (notes.length <= MAX_VERBATIM_PLAN_NOTES) {
+    return notes.map(toSegment);
+  }
+
+  const older = notes.slice(0, notes.length - MAX_VERBATIM_PLAN_NOTES);
+  const recent = notes.slice(notes.length - MAX_VERBATIM_PLAN_NOTES);
+
+  const ids = extractClinicalIds(older.join("\n"));
+  const shownIds = ids.slice(-MAX_CONSOLIDATED_PLAN_IDS);
+  const omittedIds = ids.length - shownIds.length;
+
+  const lines = [
+    PLAN_LEDGER_HEADER,
+    `Se consolidaron ${older.length} acción(es) clínica(s) aprobada(s) y ejecutada(s) más ` +
+      "antigua(s) para no exceder el contexto. El expediente en el servidor es la autoridad: " +
+      "consúltalo si necesitas el detalle de alguna.",
+  ];
+  if (shownIds.length > 0) {
+    lines.push("Identificadores clínicos de esas acciones:");
+    for (const id of shownIds) {
+      lines.push(`- ${id}`);
+    }
+  }
+  if (omittedIds > 0) {
+    lines.push(
+      `(y ${omittedIds} identificador(es) más antiguo(s) omitido(s); búscalos en el expediente)`,
+    );
+  }
+
+  return [toSegment(lines.join("\n")), ...recent.map(toSegment)];
+}
+
 export interface CompactionOptions {
   usableInputTokens: number;
   /** Tokens fijos de overhead (esquema de tools + bloque de memorias/sistema). */

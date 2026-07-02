@@ -303,3 +303,61 @@ test("planes aprobados: sobre inválido (versión/tipos) se descarta gobernadame
   assert.equal(restored.length, 2);
   assert.deepEqual(approvedPlanNotesOf(restored), []);
 });
+
+// ----- Notas de uso de herramientas (payload.tool_notes -> bloque compactable) -----
+
+const TOOL_NOTE =
+  'Herramienta clinical.list_lab_results({"patient_id":"p1"}) → [n=2] [{"id":"l1"},{"id":"l2"}]';
+
+test("notas de herramientas: round-trip por payload.tool_notes (incluso con texto vacío)", () => {
+  const anchor: TranscriptMessage = {
+    id: "t1",
+    role: "assistant",
+    text: "",
+    toolNotes: [TOOL_NOTE],
+  };
+  // Portador de notas de herramientas con texto vacío: SÍ se selecciona para persistir.
+  assert.deepEqual(selectUnpersisted([anchor], new Set()), [anchor]);
+
+  const payload = toMessagePayload("conv-1", anchor);
+  assert.deepEqual(payload.payload, {
+    tool_notes: { version: UI_PAYLOAD_VERSION, notes: [TOOL_NOTE] },
+  });
+
+  const restored = messagesToTranscript([
+    {
+      id: "row-6",
+      conversation_id: "conv-1",
+      role: "assistant",
+      content: "",
+      sequence_index: 0,
+      payload: payload.payload,
+    },
+  ]);
+  assert.equal(restored.length, 1);
+  assert.deepEqual(restored[0].toolNotes, [TOOL_NOTE]);
+});
+
+test("notas de herramientas: sobre inválido se descarta gobernadamente", () => {
+  const restored = messagesToTranscript([
+    {
+      id: "row-7",
+      conversation_id: "conv-1",
+      role: "assistant",
+      content: "texto",
+      sequence_index: 0,
+      payload: { tool_notes: { version: 99, notes: [TOOL_NOTE] } },
+    },
+    {
+      id: "row-8",
+      conversation_id: "conv-1",
+      role: "assistant",
+      content: "otro",
+      sequence_index: 1,
+      payload: { tool_notes: { version: UI_PAYLOAD_VERSION, notes: [42, "  "] } },
+    },
+  ]);
+  assert.equal(restored.length, 2);
+  assert.equal(restored[0].toolNotes, undefined);
+  assert.equal(restored[1].toolNotes, undefined);
+});

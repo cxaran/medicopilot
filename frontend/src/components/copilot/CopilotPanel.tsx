@@ -77,6 +77,11 @@ import {
   type ClinicalActionPlan,
 } from "@/core/agent/approval-protocol";
 import {
+  buildRejectedWriteNote,
+  buildToolUsageNote,
+  toolNotesContextText,
+} from "@/core/agent/tool-notes";
+import {
   fetchRecall,
   recallIndicatorText,
 } from "@/core/agent/memory-recall";
@@ -89,6 +94,7 @@ import {
 import { ActiveContextPicker } from "@/components/copilot/ActiveContextPicker";
 import {
   compactContext,
+  consolidateApprovedPlans,
   contextUsage,
   effectiveContextWindow,
   estimateTokens,
@@ -160,6 +166,11 @@ export interface ChatMessage {
   // los specs. Se persisten (payload.approved_plans) y al recargar re-siembran los segmentos
   // ``preserve`` de la compactación: el modelo no olvida qué escribió ni con qué ids.
   approvedPlanNotes?: readonly string[];
+  // Notas del USO DE HERRAMIENTAS del turno (lecturas, meta-tools, MCP, sandbox y escrituras P1
+  // rechazadas), ancladas al mensaje del asistente. Se persisten (payload.tool_notes) y entran al
+  // contexto de los turnos siguientes como bloque adyacente COMPACTABLE (no ``preserve``): el
+  // modelo recuerda QUÉ consultó/mostró/le rechazaron, sin arrastrar resultados crudos.
+  toolNotes?: readonly string[];
   image?: AttachedImage;
   isError?: boolean;
   // Resumen de razonamiento del turno (proveedores con thinking). Se muestra colapsado
@@ -411,23 +422,27 @@ export function CopilotPanel({
   const [compaction, setCompaction] = useState<{ dropped: number; preservedIds: string[] } | null>(
     null,
   );
-  // Planes APROBADOS que se conservan en el contexto verbatim (preserve): así el modelo
-  // recuerda las acciones ya ejecutadas y sus identificadores aunque se compacte la charla.
+  // Notas de los planes APROBADOS del hilo (texto determinista con recurso/acción/id creado).
   // Se SIEMBRAN desde el historial persistido (payload.approved_plans de cada mensaje): sin
-  // esto, tras recargar el modelo olvidaba qué escribió y con qué ids.
-  const [seededPlanSegments] = useState<ContextSegment[]>(() =>
-    (initialMessages ?? [])
-      .flatMap((message) => message.approvedPlanNotes ?? [])
-      .map((note) => ({
-        messages: [{ role: "system" as const, content: [{ type: "text" as const, text: note }] }],
-        text: note,
-        preserve: true,
-      })),
+  // esto, tras recargar el modelo olvidaba qué escribió y con qué ids. Al armar cada turno,
+  // ``consolidateApprovedPlans`` las convierte en segmentos ``preserve`` con TOPE (las recientes
+  // verbatim; las viejas, un bloque consolidado de identificadores): el costo de contexto de las
+  // aprobaciones queda acotado aunque el hilo acumule cientos.
+  const [seededPlanNotes] = useState<string[]>(() =>
+    (initialMessages ?? []).flatMap((message) => message.approvedPlanNotes ?? []),
   );
-  const approvedPlansRef = useRef<ContextSegment[]>(seededPlanSegments);
+  const approvedPlanNotesRef = useRef<string[]>(seededPlanNotes);
   // Notas de plan del turno EN VUELO, para anclarlas al mensaje del asistente al cerrar (y que
   // se persistan con él). Clave = turnId.
   const turnPlanNotesRef = useRef<Map<string, string[]>>(new Map());
+  // Notas de USO DE HERRAMIENTAS del turno EN VUELO (lecturas, meta-tools, MCP, sandbox y
+  // rechazos P1): mismas mecánicas que las de plan (anclar al cerrar + persistir), pero entran al
+  // contexto como bloque COMPACTABLE adyacente al mensaje, no como segmento preserve.
+  const turnToolNotesRef = useRef<Map<string, string[]>>(new Map());
+  const noteToolUsage = (turnId: string, note: string): void => {
+    const notes = turnToolNotesRef.current.get(turnId) ?? [];
+    turnToolNotesRef.current.set(turnId, [...notes, note]);
+  };
   // Presupuesto del modelo seleccionado (ventana efectiva + input usable), para usarlo dentro
   // de los handlers del turno (closures con deps vacías).
   const budgetRef = useRef<{ window: number; usable: number }>({ window: 0, usable: 0 });
@@ -724,12 +739,23 @@ export function CopilotPanel({
         const turnPlanNotes = next.turnId
           ? (turnPlanNotesRef.current.get(next.turnId) ?? [])
           : [];
+        // Notas del USO DE HERRAMIENTAS del turno: se anclan igual (payload.tool_notes) y entran
+        // al contexto de turnos siguientes como bloque compactable adyacente al mensaje.
+        const turnToolNotes = next.turnId
+          ? (turnToolNotesRef.current.get(next.turnId) ?? [])
+          : [];
         if (next.turnId) {
           turnPlanNotesRef.current.delete(next.turnId);
+          turnToolNotesRef.current.delete(next.turnId);
         }
         // El mensaje ancla se crea si hay texto O contenido que conservar (specs de UI o notas de
-        // plan); MessageBubble no muestra burbuja vacía.
-        if (next.assistantText.trim() || turnUiSpecs.length > 0 || turnPlanNotes.length > 0) {
+        // plan/herramientas); MessageBubble no muestra burbuja vacía.
+        if (
+          next.assistantText.trim() ||
+          turnUiSpecs.length > 0 ||
+          turnPlanNotes.length > 0 ||
+          turnToolNotes.length > 0
+        ) {
           setMessages((prev) => [
             ...prev,
             {
@@ -742,6 +768,7 @@ export function CopilotPanel({
               ...(next.reasoningText.trim() ? { reasoning: next.reasoningText } : {}),
               ...(turnUiSpecs.length > 0 ? { uiSpecs: turnUiSpecs } : {}),
               ...(turnPlanNotes.length > 0 ? { approvedPlanNotes: turnPlanNotes } : {}),
+              ...(turnToolNotes.length > 0 ? { toolNotes: turnToolNotes } : {}),
             },
           ]);
         }
@@ -765,6 +792,14 @@ export function CopilotPanel({
         turnRef.current = initialTurnState();
         setTurn(turnRef.current);
       } else if (event.type === "turn.failed") {
+        // Las tools del turno fallido SÍ corrieron: sus notas se anclan al mensaje de fallo
+        // (mismo destino que sus tool calls) para no perder el rastro.
+        const failedToolNotes = next.turnId
+          ? (turnToolNotesRef.current.get(next.turnId) ?? [])
+          : [];
+        if (next.turnId) {
+          turnToolNotesRef.current.delete(next.turnId);
+        }
         setMessages((prev) => [
           ...prev,
           {
@@ -774,11 +809,17 @@ export function CopilotPanel({
             isError: true,
             // También el mensaje de fallo ancla las tool calls del turno (si las hubo).
             ...(next.turnId ? { turnId: next.turnId } : {}),
+            ...(failedToolNotes.length > 0 ? { toolNotes: failedToolNotes } : {}),
           },
         ]);
         turnRef.current = initialTurnState();
         setTurn(turnRef.current);
       } else if (event.type === "turn.cancelled") {
+        // Turno cancelado: sin mensaje ancla; las notas en vuelo del turno se descartan.
+        if (next.turnId) {
+          turnToolNotesRef.current.delete(next.turnId);
+          turnPlanNotesRef.current.delete(next.turnId);
+        }
         turnRef.current = initialTurnState();
         setTurn(turnRef.current);
       }
@@ -814,6 +855,10 @@ export function CopilotPanel({
           status: "error",
           errorText: message,
         });
+        noteToolUsage(
+          turnId,
+          buildToolUsageNote({ name: toolName, args, outcome: { status: "error", message } }),
+        );
         clientRef.current?.sendToolResult(turnId, callId, resolved.result);
         return;
       }
@@ -857,6 +902,18 @@ export function CopilotPanel({
             result.status === "success"
               ? { status: "success", resultText: previewContent(result.content), resultContent: result.content }
               : { status: "error", errorText: result.message },
+          );
+          // Nota de contexto del turno: qué se consultó/mostró (o por qué falló), en telegráfico.
+          noteToolUsage(
+            turnId,
+            buildToolUsageNote({
+              name: tool.name,
+              args: validArgs,
+              outcome:
+                result.status === "success"
+                  ? { status: "success", content: result.content }
+                  : { status: "error", message: result.message },
+            }),
           );
           clientRef.current?.sendToolResult(turnId, callId, result);
         });
@@ -1186,7 +1243,9 @@ export function CopilotPanel({
       ...(image ? { image } : {}),
     };
     const history = [...messagesRef.current, userMessage];
-    // Cada mensaje de la charla es un SEGMENTO atómico para la compactación (texto + cable).
+    // Cada mensaje de la charla es un SEGMENTO atómico para la compactación (texto + cable). Si el
+    // mensaje ancla notas de USO DE HERRAMIENTAS, entran como mensaje de sistema adyacente en el
+    // MISMO segmento (se eliden juntos al compactar); el razonamiento NO entra nunca al cable.
     const historySegments: ContextSegment[] = history.map((message) => {
       const content: WireContentPart[] = [];
       if (message.text) {
@@ -1198,7 +1257,17 @@ export function CopilotPanel({
       if (content.length === 0) {
         content.push({ type: "text", text: "" });
       }
-      return { messages: [{ role: message.role, content }], text: message.text ?? "" };
+      const notesText = toolNotesContextText(message.toolNotes ?? []);
+      const wireMessages: WireMessage[] = notesText
+        ? [
+            { role: "system", content: [{ type: "text", text: notesText }] },
+            { role: message.role, content },
+          ]
+        : [{ role: message.role, content }];
+      return {
+        messages: wireMessages,
+        text: notesText ? `${notesText}\n${message.text ?? ""}` : (message.text ?? ""),
+      };
     });
 
     setMessages(history);
@@ -1231,7 +1300,10 @@ export function CopilotPanel({
       0,
     );
     const overhead = estimateToolSchemaTokens(toolsWire) + leadingTokens;
-    const segments: ContextSegment[] = [...approvedPlansRef.current, ...historySegments];
+    const segments: ContextSegment[] = [
+      ...consolidateApprovedPlans(approvedPlanNotesRef.current),
+      ...historySegments,
+    ];
     const result = compactContext(segments, {
       usableInputTokens: budgetRef.current.usable,
       overheadTokens: overhead,
@@ -1449,10 +1521,7 @@ export function CopilotPanel({
           `Acción clínica APROBADA y ejecutada (${plan.actionType} → ${plan.targetResource}): ` +
           `${plan.humanReadableSummary}` +
           (createdId ? ` Identificador del registro creado: ${createdId}.` : "");
-        approvedPlansRef.current = [
-          ...approvedPlansRef.current,
-          { messages: [{ role: "system", content: [{ type: "text", text: note }] }], text: note, preserve: true },
-        ];
+        approvedPlanNotesRef.current = [...approvedPlanNotesRef.current, note];
         // Registra la nota en su turno: al cerrarse, se ancla al mensaje del asistente y se
         // persiste (payload.approved_plans) para resembrar los preserve al recargar.
         const turnNotes = turnPlanNotesRef.current.get(pending.turnId) ?? [];
@@ -1472,8 +1541,10 @@ export function CopilotPanel({
       return;
     }
     pendingWritesRef.current.delete(callId);
-    // Rechazo: no se escribe nada; se reanuda el turno con el resultado de rechazo.
+    // Rechazo: no se escribe nada; se reanuda el turno con el resultado de rechazo. La decisión
+    // queda como nota INFORMATIVA en el contexto (compactable): el modelo no re-propone lo mismo.
     patchToolCall(callId, { status: "rejected", errorText: outcome.result.message });
+    noteToolUsage(pending.turnId, buildRejectedWriteNote(outcome.request.plan));
     clientRef.current?.sendToolResult(pending.turnId, callId, outcome.result);
   };
 
