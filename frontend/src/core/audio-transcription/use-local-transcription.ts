@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { browserApi } from "@/core/api/browser-client";
-import { preloadModel, runAudioTranscript, runRecordingTranscript } from "./runtime";
+import { preloadModel, runAudioTranscript } from "./runtime";
 import {
   defaultWhisperModel,
   isLocalTranscriptionSupported,
@@ -22,8 +22,9 @@ export interface UseLocalTranscription {
   progress: TranscriptionProgress | null;
   outcome: TranscriptionOutcome | null;
   error: string | null;
-  /** True si el modelo se precargó en esta sesión (la siguiente corrida es instantánea). */
-  preloaded: boolean;
+  /** Modelos precargados EN ESTA SESIÓN (su siguiente corrida es instantánea). Por-modelo:
+   *  precargar 'base' no marca 'tiny' como listo. */
+  preloadedModels: ReadonlySet<WhisperModel>;
   /** Soporte de navegador-local (worker + Web Audio). */
   localSupported: boolean;
   /** WebGPU disponible (informativo; si no, se usa WASM). */
@@ -34,11 +35,6 @@ export interface UseLocalTranscription {
     documentId: string,
     options?: { model?: WhisperModel; forceServer?: boolean },
   ) => Promise<TranscriptionOutcome | null>;
-  /** Transcribe una grabación en vivo (Blob del micrófono) LOCALMENTE; sin respaldo de servidor. */
-  transcribeBlob: (
-    blob: Blob,
-    options?: { model?: WhisperModel },
-  ) => Promise<TranscriptionOutcome | null>;
   preload: (model?: WhisperModel) => Promise<void>;
   reset: () => void;
 }
@@ -48,7 +44,7 @@ export function useLocalTranscription(): UseLocalTranscription {
   const [progress, setProgress] = useState<TranscriptionProgress | null>(null);
   const [outcome, setOutcome] = useState<TranscriptionOutcome | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [preloaded, setPreloaded] = useState(false);
+  const [preloadedModels, setPreloadedModels] = useState<ReadonlySet<WhisperModel>>(new Set());
   const runningRef = useRef(false);
 
   // Detección de soporte tras el montaje: en SSR no hay window/Worker, así que calcularla
@@ -94,32 +90,6 @@ export function useLocalTranscription(): UseLocalTranscription {
     [],
   );
 
-  const transcribeBlob = useCallback(async (blob: Blob, options?: { model?: WhisperModel }) => {
-    if (runningRef.current) {
-      return null;
-    }
-    runningRef.current = true;
-    setStatus("running");
-    setProgress(null);
-    setError(null);
-    setOutcome(null);
-    try {
-      const result = await runRecordingTranscript(blob, {
-        model: options?.model ?? defaultWhisperModel(),
-        onProgress: setProgress,
-      });
-      setOutcome(result);
-      setStatus("done");
-      return result;
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Error al transcribir el audio.");
-      setStatus("error");
-      return null;
-    } finally {
-      runningRef.current = false;
-    }
-  }, []);
-
   const preload = useCallback(async (model?: WhisperModel) => {
     if (runningRef.current) {
       return;
@@ -129,9 +99,10 @@ export function useLocalTranscription(): UseLocalTranscription {
     setProgress(null);
     setError(null);
     try {
-      const ok = await preloadModel(model ?? defaultWhisperModel(), setProgress);
+      const effective = model ?? defaultWhisperModel();
+      const ok = await preloadModel(effective, setProgress);
       if (ok) {
-        setPreloaded(true);
+        setPreloadedModels((prev) => new Set(prev).add(effective));
       }
       setStatus("idle");
     } catch (err) {
@@ -154,12 +125,11 @@ export function useLocalTranscription(): UseLocalTranscription {
     progress,
     outcome,
     error,
-    preloaded,
+    preloadedModels,
     localSupported,
     webgpu,
     localEnabled: localTranscriptionEnabled(),
     transcribe,
-    transcribeBlob,
     preload,
     reset,
   };

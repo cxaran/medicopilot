@@ -6,6 +6,14 @@
 // CONFIDENCIALIDAD: la única petición de red es DESCARGAR el audio del propio backend (mismo
 // origen). El audio se procesa en memoria; no se envía a ningún tercero. Los pesos del modelo se
 // descargan del CDN de Hugging Face (código público, sin PHI) y se cachean en IndexedDB.
+//
+// WORKER SINGLETON: el worker se crea una vez y se REUTILIZA entre llamadas, con ids de petición
+// para correlacionar respuestas. Antes se creaba (y terminaba) un worker por transcripción, lo
+// que hacía inalcanzable el caché de pipelines: cada fragmento del dictado continuo re-pagaba
+// spawn + pesos + sesión ONNX (segundos por fragmento) y "Precargar modelo" sólo calentaba la
+// caché HTTP. Trade-off documentado: cancelar (AbortSignal) ahora DESCARTA el resultado sin matar
+// el worker (soft-abort) — el cómputo en vuelo termina en segundo plano, pero la sesión del
+// modelo sobrevive para la siguiente transcripción, que es el punto.
 
 import type { TranscriptionProgress, WhisperModel } from "./types";
 
@@ -59,80 +67,114 @@ function createWorker(): Worker {
   return new Worker(new URL("./transcriber.worker.ts", import.meta.url), { type: "module" });
 }
 
+interface PendingRequest {
+  resolve: (value: { kind: "text"; text: string } | { kind: "ready" }) => void;
+  reject: (error: Error) => void;
+  onProgress?: (progress: TranscriptionProgress) => void;
+}
+
+let sharedWorker: Worker | null = null;
+let nextRequestId = 1;
+const pending = new Map<number, PendingRequest>();
+
+/** Worker compartido de larga vida. Si el worker MISMO falla (no una petición: eso viaja como
+ *  mensaje ``error`` con id), se rechazan todas las pendientes y se destruye para recrearlo en la
+ *  siguiente llamada. */
+function ensureWorker(): Worker {
+  if (sharedWorker) {
+    return sharedWorker;
+  }
+  const worker = createWorker();
+  worker.onmessage = (event: MessageEvent) => {
+    const message = event.data;
+    const entry = typeof message?.id === "number" ? pending.get(message.id) : undefined;
+    if (!entry) {
+      return; // Petición cancelada (soft-abort) o mensaje desconocido: se descarta.
+    }
+    if (message.type === "progress") {
+      entry.onProgress?.({ stage: message.stage, progress: message.progress, file: message.file });
+    } else if (message.type === "result") {
+      pending.delete(message.id);
+      entry.resolve({ kind: "text", text: typeof message.text === "string" ? message.text : "" });
+    } else if (message.type === "ready") {
+      pending.delete(message.id);
+      entry.resolve({ kind: "ready" });
+    } else if (message.type === "error") {
+      pending.delete(message.id);
+      entry.reject(new Error(message.message || "Error del transcriptor local."));
+    }
+  };
+  worker.onerror = (event) => {
+    const error = new Error(event.message || "Error del worker.");
+    for (const entry of pending.values()) {
+      entry.reject(error);
+    }
+    pending.clear();
+    worker.terminate();
+    if (sharedWorker === worker) {
+      sharedWorker = null;
+    }
+  };
+  sharedWorker = worker;
+  return worker;
+}
+
+/** Envía una petición al worker compartido y espera SU respuesta (por id). El abort es SUAVE:
+ *  la promesa rechaza y el resultado se descarta al llegar, sin matar la sesión del modelo. */
+function requestFromWorker(
+  message: Record<string, unknown>,
+  transfer: Transferable[],
+  options: { onProgress?: (progress: TranscriptionProgress) => void; signal?: AbortSignal },
+  abortMessage: string,
+): Promise<{ kind: "text"; text: string } | { kind: "ready" }> {
+  const worker = ensureWorker();
+  const id = nextRequestId++;
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      pending.delete(id);
+      reject(new Error(abortMessage));
+    };
+    options.signal?.addEventListener("abort", onAbort, { once: true });
+    pending.set(id, {
+      resolve: (value) => {
+        options.signal?.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      reject: (error) => {
+        options.signal?.removeEventListener("abort", onAbort);
+        reject(error);
+      },
+      onProgress: options.onProgress,
+    });
+    worker.postMessage({ ...message, id }, transfer);
+  });
+}
+
 /** Transcribe el audio del documento localmente. Resuelve con el texto o LANZA si algo falla
  *  (worker no soportado, audio no decodificable, error del modelo) para que el caller caiga al
  *  proveedor del servidor. */
 export async function transcribeLocally(options: LocalTranscribeOptions): Promise<string> {
   const audio = await decodeAudioToMono16k(options.audioUrl, options.signal);
-
-  const worker = createWorker();
-  try {
-    return await new Promise<string>((resolve, reject) => {
-      const onAbort = () => {
-        worker.terminate();
-        reject(new Error("Transcripción cancelada."));
-      };
-      options.signal?.addEventListener("abort", onAbort, { once: true });
-
-      worker.onmessage = (event: MessageEvent) => {
-        const message = event.data;
-        if (message?.type === "progress") {
-          options.onProgress?.({
-            stage: message.stage,
-            progress: message.progress,
-            file: message.file,
-          });
-        } else if (message?.type === "result") {
-          resolve(typeof message.text === "string" ? message.text : "");
-        } else if (message?.type === "error") {
-          reject(new Error(message.message || "Error del transcriptor local."));
-        }
-      };
-      worker.onerror = (event) => reject(new Error(event.message || "Error del worker."));
-
-      worker.postMessage(
-        { type: "transcribe", audio, model: options.model, language: options.language },
-        [audio.buffer],
-      );
-    });
-  } finally {
-    worker.terminate();
-  }
+  const outcome = await requestFromWorker(
+    { type: "transcribe", audio, model: options.model, language: options.language },
+    [audio.buffer],
+    { onProgress: options.onProgress, signal: options.signal },
+    "Transcripción cancelada.",
+  );
+  return outcome.kind === "text" ? outcome.text : "";
 }
 
-/** Precarga (descarga + cachea en IndexedDB) los pesos del modelo, sin transcribir. La siguiente
- *  transcripción arranca al instante desde la caché. Resuelve cuando el modelo está listo. */
+/** Precarga los pesos del modelo (IndexedDB) Y deja la sesión viva en el worker compartido: la
+ *  siguiente transcripción arranca al instante de verdad. Resuelve cuando el modelo está listo. */
 export async function preloadModelLocally(options: {
   model: WhisperModel;
   onProgress?: (progress: TranscriptionProgress) => void;
   signal?: AbortSignal;
 }): Promise<void> {
-  const worker = createWorker();
-  try {
-    await new Promise<void>((resolve, reject) => {
-      const onAbort = () => {
-        worker.terminate();
-        reject(new Error("Precarga cancelada."));
-      };
-      options.signal?.addEventListener("abort", onAbort, { once: true });
-      worker.onmessage = (event: MessageEvent) => {
-        const message = event.data;
-        if (message?.type === "progress") {
-          options.onProgress?.({
-            stage: message.stage,
-            progress: message.progress,
-            file: message.file,
-          });
-        } else if (message?.type === "ready") {
-          resolve();
-        } else if (message?.type === "error") {
-          reject(new Error(message.message || "Error al precargar el modelo."));
-        }
-      };
-      worker.onerror = (event) => reject(new Error(event.message || "Error del worker."));
-      worker.postMessage({ type: "preload", model: options.model });
-    });
-  } finally {
-    worker.terminate();
-  }
+  await requestFromWorker(
+    { type: "preload", model: options.model },
+    [],
+    { onProgress: options.onProgress, signal: options.signal },
+    "Precarga cancelada.",
+  );
 }

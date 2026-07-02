@@ -1,6 +1,6 @@
 // Captura de audio del micrófono para dictado / grabación de consulta en el copiloto. Este módulo
 // es PURO (selección de contenedor, formato de duración, detección de soporte): NO toca
-// MediaRecorder de forma estatal — esa captura vive en el hook use-audio-recorder.ts. El audio
+// MediaRecorder de forma estatal — esa captura vive en use-continuous-dictation.ts. El audio
 // grabado se transcribe LOCALMENTE (Whisper en el dispositivo) y NUNCA se sube a ningún servidor.
 
 export type RecorderStatus = "idle" | "recording" | "stopped";

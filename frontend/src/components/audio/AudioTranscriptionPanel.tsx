@@ -45,10 +45,12 @@ export function AudioTranscriptionPanel({
   const accel = accelerationNote(t.localSupported, t.webgpu);
   const pct = progressPercent(t.progress);
 
+  // Cada corrida COMPLETADA refleja su propio resultado (aunque venga vacío): sin esto, un
+  // borrador de una corrida anterior reaparecía en el textarea tras una re-corrida sin texto.
   async function start(forceServer: boolean) {
     const result = await t.transcribe(clinicalDocumentId, { model, forceServer });
-    if (result?.transcript) {
-      setDraft(result.transcript);
+    if (result) {
+      setDraft(result.transcript ?? "");
     }
   }
 
@@ -92,11 +94,13 @@ export function AudioTranscriptionPanel({
           <button
             type="button"
             className="rounded border px-3 py-1 text-sm disabled:opacity-50"
-            disabled={busy || t.preloaded}
+            // Por-modelo: precargar 'base' no marca 'tiny' como listo (antes un booleano global
+            // bloqueaba precargar el segundo modelo).
+            disabled={busy || t.preloadedModels.has(model)}
             onClick={() => void t.preload(model)}
             title="Descarga y cachea el modelo para que la transcripción sea instantánea."
           >
-            {t.preloaded
+            {t.preloadedModels.has(model)
               ? "Modelo precargado ✓"
               : t.status === "preloading"
                 ? "Precargando…"
