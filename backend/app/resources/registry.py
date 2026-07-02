@@ -18,6 +18,7 @@ from backend.app.models.appointment import Appointment
 from backend.app.models.clinical_code import ClinicalCode
 from backend.app.models.clinical_document import ClinicalDocument
 from backend.app.models.audit_event import AuditEvent
+from backend.app.models.backup import BackupRun, BackupSettings
 from backend.app.models.clinical_event import ClinicalEvent
 from backend.app.models.clinical_note import ClinicalNote
 from backend.app.models.clinical_task import ClinicalTask
@@ -145,6 +146,11 @@ from backend.app.schemas.patient_history_item import (
     PatientHistoryItemUpdate,
 )
 from backend.app.schemas.audit_event import AuditEventListItem
+from backend.app.schemas.backup import (
+    BackupRunListItem,
+    BackupSettingsListItem,
+    BackupSettingsUpdate,
+)
 from backend.app.schemas.conversation import (
     ConversationCreate,
     ConversationListItem,
@@ -212,6 +218,7 @@ from backend.app.security.groups.patient_clinical_items import (
     PatientClinicalItemPermissions,
 )
 from backend.app.security.groups.audit_events import AuditEventPermissions
+from backend.app.security.groups.backups import BackupPermissions
 from backend.app.security.groups.patient_history_items import (
     PatientHistoryItemPermissions,
 )
@@ -441,6 +448,34 @@ MESSAGES = ResourceQuery(
         sort_fields=("sequence_index", "created_at"),
         in_fields=("id",),
         default_sort="sequence_index",
+    ),
+)
+
+BACKUP_SETTINGS = ResourceQuery(
+    name="BackupSettingsQuery",
+    model=BackupSettings,
+    schema=BackupSettingsListItem,
+    options=QueryOptions(
+        # Singleton: la lista devuelve UNA fila; sin filtros ni búsqueda (no hay nada
+        # que filtrar). El orden es irrelevante pero el contrato exige un default.
+        sort_fields=("created_at",),
+        in_fields=("id",),
+        default_sort="created_at",
+    ),
+)
+
+BACKUP_RUNS = ResourceQuery(
+    name="BackupRunQuery",
+    model=BackupRun,
+    schema=BackupRunListItem,
+    options=QueryOptions(
+        # Historial operativo: filtro por estado (enum no nativo, igualdad) y rango de
+        # calendario sobre created_at. Sin búsqueda libre (metadata, no texto).
+        filter_fields=("status", "trigger_kind"),
+        field_operators={"created_at": _CREATED_AT_OPERATORS},
+        sort_fields=("created_at", "finished_at", "file_size_bytes"),
+        in_fields=("id",),
+        default_sort="-created_at",
     ),
 )
 
@@ -1327,6 +1362,74 @@ RESOURCE_REGISTRY: tuple[ResourceDefinition, ...] = (
         create_schema=MessageCreate,
         create_permission=MessagePermissions.CREATE,
         detail_url_template="/api/v1/messages/{id}",
+    ),
+    ResourceDefinition(
+        name="backup_settings",
+        label="Configuración de respaldos",
+        api_path="/api/v1/backup-settings",
+        view=ResourceView.TABLE,
+        read_permission=BackupPermissions.READ,
+        list_query=BACKUP_SETTINGS,
+        list_schema=BackupSettingsListItem,
+        # Singleton editable: sin create ni delete; el update usa el PATCH del detail.
+        update_schema=BackupSettingsUpdate,
+        update_permission=BackupPermissions.CONFIGURE,
+        detail_url_template="/api/v1/backup-settings/{id}",
+        actions=(
+            ActionDef(
+                name="connect_drive",
+                label="Conectar Google Drive",
+                method=HttpMethod.POST,
+                url_template="/api/v1/backup-settings/{id}/connect-drive",
+                scope=ActionScope.ITEM,
+                danger=False,
+                permission=BackupPermissions.CONFIGURE,
+            ),
+            ActionDef(
+                name="disconnect_drive",
+                label="Desconectar Google Drive",
+                method=HttpMethod.POST,
+                url_template="/api/v1/backup-settings/{id}/disconnect-drive",
+                scope=ActionScope.ITEM,
+                danger=True,
+                permission=BackupPermissions.CONFIGURE,
+                confirmation=ConfirmationDef(
+                    title="Desconectar Google Drive",
+                    message=(
+                        "Se olvidará la conexión y los respaldos quedarán deshabilitados. "
+                        "Los archivos ya subidos y el historial se conservan."
+                    ),
+                    confirm_label="Desconectar",
+                    destructive=True,
+                ),
+            ),
+            ActionDef(
+                name="run_now",
+                label="Respaldar ahora",
+                method=HttpMethod.POST,
+                url_template="/api/v1/backup-settings/{id}/run-now",
+                scope=ActionScope.ITEM,
+                danger=False,
+                permission=BackupPermissions.CONFIGURE,
+                confirmation=ConfirmationDef(
+                    title="Respaldo manual",
+                    message="Se encolará un respaldo cifrado hacia Google Drive.",
+                    confirm_label="Respaldar",
+                    destructive=False,
+                ),
+            ),
+        ),
+    ),
+    ResourceDefinition(
+        name="backup_runs",
+        label="Historial de respaldos",
+        api_path="/api/v1/backup-runs",
+        view=ResourceView.TABLE,
+        # SÓLO LECTURA: el historial lo escribe el worker; sin create/update/delete.
+        read_permission=BackupPermissions.READ,
+        list_query=BACKUP_RUNS,
+        list_schema=BackupRunListItem,
+        detail_url_template="/api/v1/backup-runs/{id}",
     ),
     ResourceDefinition(
         name="audit_events",

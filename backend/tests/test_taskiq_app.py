@@ -1,7 +1,7 @@
 """Tests del módulo Taskiq (backend/app/taskiq_app.py).
 
-Unitarios: conversión de DSN, schedule estático apagado/encendido e importación
-aislada (el módulo no arrastra FastAPI ni abre conexiones al importarse).
+Unitarios: conversión de DSN e importación aislada (el módulo no arrastra la
+aplicación FastAPI ni abre conexiones al importarse; la única tarea es backups.tick).
 Integración (requiere TEST_POSTGRES_URL apuntando a una base *_test): ciclo
 startup/shutdown de un broker temporal con canal y tabla únicos. Sin worker
 subprocess, sin ejecutar tareas reales y sin tocar la base de desarrollo.
@@ -42,7 +42,7 @@ DEV_ENV = {
 
 os.environ.update(DEV_ENV)
 
-from backend.app.taskiq_app import build_schedule, taskiq_dsn  # noqa: E402
+from backend.app.taskiq_app import taskiq_dsn  # noqa: E402
 
 
 _TEST_PG_URL = os.environ.get("TEST_POSTGRES_URL", "")
@@ -82,34 +82,6 @@ class TaskiqDsnTest(unittest.TestCase):
         )
 
 
-class BuildScheduleTest(unittest.TestCase):
-    def test_disabled_schedule_is_empty(self) -> None:
-        self.assertEqual(
-            build_schedule(
-                enabled=False,
-                cron="0 2 * * *",
-                timezone="America/Monterrey",
-            ),
-            [],
-        )
-
-    def test_enabled_schedule_has_exact_shape(self) -> None:
-        self.assertEqual(
-            build_schedule(
-                enabled=True,
-                cron="0 2 * * *",
-                timezone="America/Monterrey",
-            ),
-            [
-                {
-                    "cron": "0 2 * * *",
-                    "cron_offset": "America/Monterrey",
-                    "schedule_id": "system.noop.cron",
-                },
-            ],
-        )
-
-
 class IsolatedImportTest(unittest.TestCase):
     def test_module_exposes_broker_scheduler_and_task_without_side_effects(self) -> None:
         # El import de arriba ya ocurrió con un POSTGRES_SERVER inexistente en local:
@@ -119,12 +91,31 @@ class IsolatedImportTest(unittest.TestCase):
         module = sys.modules["backend.app.taskiq_app"]
         self.assertTrue(hasattr(module, "broker"))
         self.assertTrue(hasattr(module, "scheduler"))
-        self.assertTrue(hasattr(module, "system_noop"))
-        # Aislado de la APLICACIÓN web: importar el módulo Taskiq no arrastra
-        # backend.app.main ni sus rutas. (La LIBRERÍA fastapi sí aparece como
-        # dependencia transitiva de los settings compartidos, vía fastapi_mail.)
-        self.assertNotIn("backend.app.main", sys.modules)
-        self.assertNotIn("backend.app.api", sys.modules)
+        # La única tarea real (backups.tick) queda registrada vía jobs/tasks/backups.
+        from backend.app.jobs.tasks.backups import backups_tick
+
+        self.assertEqual(backups_tick.task_name, "backups.tick")
+
+    def test_import_does_not_pull_the_fastapi_application(self) -> None:
+        # En un PROCESO limpio (otros archivos de test importan app.main en esta misma
+        # sesión de pytest): importar el módulo Taskiq no arrastra la aplicación web.
+        import subprocess
+
+        code = (
+            "import sys; import backend.app.taskiq_app; "
+            "assert 'backend.app.main' not in sys.modules, 'main importado'; "
+            "assert 'backend.app.api' not in sys.modules, 'api importada'; "
+            "print('aislado')"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True,
+            text=True,
+            env={**os.environ, **DEV_ENV},
+            timeout=120,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("aislado", result.stdout)
 
 
 @unittest.skipUnless(

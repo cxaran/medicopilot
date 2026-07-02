@@ -206,14 +206,6 @@ class Settings(BaseSettings):
             return secret
         return SecretStr("agent-gateway-ticket:" + self.secret_key.get_secret_value())
 
-    # Tareas en segundo plano con Taskiq sobre PostgreSQL (worker/scheduler en procesos
-    # PROPIOS, ver backend/app/taskiq_app.py y el profile "taskiq" del compose; nunca se
-    # levantan desde FastAPI). El schedule por cron viene APAGADO por defecto: la API y el
-    # worker arrancan sin ejecutar nada programado hasta habilitarlo explícitamente.
-    taskiq_schedule_enabled: bool = False
-    taskiq_cron: str = "0 2 * * *"
-    taskiq_timezone: str = "America/Monterrey"
-
     # Respaldos cifrados hacia Google Drive (una sola cuenta, scope drive.file). El
     # horario/retención EDITABLES viven en la tabla backup_settings (no aquí); estos
     # settings son el interruptor global y los secretos de despliegue. Apagado por

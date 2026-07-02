@@ -1,5 +1,6 @@
 from backend.app.security.groups.appointments import AppointmentPermissions
 from backend.app.security.groups.audit_events import AuditEventPermissions
+from backend.app.security.groups.backups import BackupPermissions
 from backend.app.security.groups.clinical_codes import ClinicalCodePermissions
 from backend.app.security.groups.clinical_documents import ClinicalDocumentPermissions
 from backend.app.security.groups.clinical_events import ClinicalEventPermissions
@@ -85,6 +86,7 @@ SECURITY_GROUPS: list[type[SecurityGroup]] = [
     MedicationReconciliationPermissions,
     FollowUpPermissions,
     AuditEventPermissions,
+    BackupPermissions,
     PermissionPermissions,
 ]
 

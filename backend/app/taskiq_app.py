@@ -1,22 +1,20 @@
-"""Módulo Taskiq del backend: broker PostgreSQL, tarea inocua y scheduler estático.
+"""Módulo Taskiq del backend: broker PostgreSQL, tareas y scheduler estático.
 
-Base MÍNIMA de tareas en segundo plano. El worker y el scheduler corren en procesos
-PROPIOS (servicios Docker con profile "taskiq"); FastAPI NO los levanta ni conoce este
-módulo. La cola vive en PostgreSQL (canal/tabla dedicados del broker), sin Redis ni
-Celery, y reutiliza el ``postgres_dsn`` existente (el broker usa psycopg v3; el resto
-del backend sigue en psycopg2).
+El worker y el scheduler corren en procesos PROPIOS (servicios Docker con profile
+"taskiq"); FastAPI sólo inicia el broker en su lifespan para PUBLICAR tareas (nunca
+levanta worker ni scheduler). La cola vive en PostgreSQL (canal/tabla dedicados del
+broker), sin Redis ni Celery, y reutiliza el ``postgres_dsn`` existente (el broker usa
+psycopg v3; el resto del backend sigue en psycopg2).
 
-Única tarea registrada: ``system.noop`` — no toca base de datos, archivos, red ni
-módulos clínicos; sólo deja un log. Su schedule por cron viene APAGADO por defecto
-(``TASKIQ_SCHEDULE_ENABLED=false``): worker y scheduler arrancan sin ejecutar nada
-programado hasta habilitarlo explícitamente por ambiente.
+Única tarea registrada: ``backups.tick`` (ver ``backend/app/jobs/tasks/backups.py``) —
+un cron FIJO por minuto en UTC que sólo consulta trabajo vencido en PostgreSQL. El
+horario REAL de los respaldos vive en la tabla ``backup_settings``, no aquí: cambiar
+la hora, la zona o la retención no requiere reiniciar el scheduler.
 
 Ejecución (ver compose, profile "taskiq"):
     taskiq worker backend.app.taskiq_app:broker --workers 1 --max-async-tasks 1
     taskiq scheduler backend.app.taskiq_app:scheduler --skip-first-run
 """
-
-import logging
 
 from sqlalchemy.engine import make_url
 from taskiq import TaskiqScheduler
@@ -24,8 +22,6 @@ from taskiq.schedule_sources import LabelScheduleSource
 from taskiq_pg.psycopg import PsycopgBroker
 
 from backend.app.core.settings import settings
-
-logger = logging.getLogger(__name__)
 
 
 def taskiq_dsn(postgres_dsn: str) -> str:
@@ -42,53 +38,15 @@ def taskiq_dsn(postgres_dsn: str) -> str:
     )
 
 
-def build_schedule(
-    *,
-    enabled: bool,
-    cron: str,
-    timezone: str,
-) -> list[dict[str, str]]:
-    """Schedule ESTÁTICO por label de la tarea. Apagado -> lista vacía (el scheduler
-    arranca pero no programa nada). La zona horaria es IANA explícita por schedule
-    (``cron_offset``); nunca la hora local implícita del proceso."""
-    if not enabled:
-        return []
-
-    return [
-        {
-            "cron": cron,
-            "cron_offset": timezone,
-            "schedule_id": "system.noop.cron",
-        },
-    ]
-
-
 # Broker único sobre PostgreSQL, con canal y tabla EXPLÍCITOS y propios (no toca tablas
 # clínicas ni de la app). Sin result backend ni serializer custom. El ciclo de vida
-# (startup/shutdown) lo maneja el CLI de taskiq en el proceso del worker/scheduler;
-# importar este módulo NO abre conexiones.
+# (startup/shutdown) lo maneja el CLI de taskiq en el worker/scheduler y el lifespan de
+# FastAPI en la API (para publicar); importar este módulo NO abre conexiones.
 broker = PsycopgBroker(
     dsn=taskiq_dsn(str(settings.postgres_dsn)),
     channel_name="medicopilot_taskiq",
     table_name="medicopilot_taskiq_messages",
 )
-
-
-@broker.task(
-    task_name="system.noop",
-    schedule=build_schedule(
-        enabled=settings.taskiq_schedule_enabled,
-        cron=settings.taskiq_cron,
-        timezone=settings.taskiq_timezone,
-    ),
-)
-async def system_noop() -> None:
-    """Tarea inocua para verificar el ciclo completo (encolar -> worker -> log).
-
-    Sin parámetros, sin base de datos, sin archivos, sin red, sin módulos clínicos y
-    sin información sensible en el log.
-    """
-    logger.info("Taskiq task executed", extra={"task_name": "system.noop"})
 
 
 # Scheduler estático: lee los schedules declarados como LABELS de las tareas de este
@@ -97,3 +55,8 @@ scheduler = TaskiqScheduler(
     broker=broker,
     sources=[LabelScheduleSource(broker)],
 )
+
+
+# Registro EXPLÍCITO de tareas (imports al final: las tareas importan ``broker`` de
+# este módulo, ya definido en este punto). El scheduler ve sus labels vía el broker.
+from backend.app.jobs.tasks import backups as _backups_tasks  # noqa: E402,F401
