@@ -12,7 +12,9 @@ from pydantic import BaseModel, Field
 T = TypeVar("T")
 
 DEFAULT_LIMIT = 20
-MAX_LIMIT = 100
+# 500: techo global por request (alineado con QueryOptions.max_limit); habilita la
+# descarga por chunks del export del frontend con pocos round-trips.
+MAX_LIMIT = 500
 
 
 class OffsetPagination(BaseModel):

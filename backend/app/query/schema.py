@@ -3,7 +3,7 @@ from typing import Any, ClassVar
 from pydantic import BaseModel, ConfigDict, Field
 
 # Reexportados desde la capa de schemas (fuente única de los contratos de página).
-from backend.app.schemas.pagination import OffsetPage, OffsetPagination
+from backend.app.schemas.pagination import MAX_LIMIT, OffsetPage, OffsetPagination
 
 __all__ = [
     "QuerySchema",
@@ -32,6 +32,6 @@ class OffsetQuerySchema(QuerySchema):
     __query_primary_keys__: ClassVar[tuple[Any, ...]] = ()
     __query_max_sort_terms__: ClassVar[int] = 3
 
-    limit: int = Field(default=20, ge=1, le=100)
+    limit: int = Field(default=20, ge=1, le=MAX_LIMIT)
     offset: int = Field(default=0, ge=0)
     sort: str = Field(min_length=1, max_length=200)
