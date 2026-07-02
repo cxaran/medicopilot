@@ -37,3 +37,10 @@ passlib[bcrypt]==1.7.4
 # OCR ni SDKs de nube: solo lee la capa de texto del PDF para que el AGENTE interprete los
 # analitos. Los PDFs escaneados (sin capa de texto) quedan para fase 2 (OCR).
 pypdf==6.14.2
+
+# Cola de tareas en segundo plano sobre PostgreSQL (sin Redis/Celery): worker y scheduler
+# viven en procesos PROPIOS (servicios Docker con profile "taskiq"), nunca dentro de
+# FastAPI. El broker usa psycopg (v3) sólo para su canal/tabla de mensajes; el resto del
+# backend sigue en psycopg2.
+taskiq==0.12.4
+taskiq-postgres[psycopg]==0.8.0
