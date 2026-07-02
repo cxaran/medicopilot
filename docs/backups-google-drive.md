@@ -3,10 +3,15 @@
 ## Qué hace
 
 Respaldo **diario configurable** de la base de datos PostgreSQL del consultorio,
-**cifrado en el dispositivo** antes de salir, subido a **una** cuenta de Google Drive
-del administrador, con retención diaria/mensual/anual y rotación que nunca borra
-copias protegidas. Apagado por defecto (`BACKUPS_ENABLED=false` y el singleton se
-siembra con `enabled=false`).
+subido a **una** cuenta de Google Drive del administrador, con retención
+diaria/mensual/anual y rotación que nunca borra copias protegidas. Apagado por
+defecto (`BACKUPS_ENABLED=false` y el singleton se siembra con `enabled=false`).
+
+El **cifrado del archivo es OPCIONAL** (decisión del dueño del producto): sin
+recipient de age configurado —el estado por defecto— el respaldo sube **sin cifrar**
+(`.tar`); si se configura la clave pública, se cifra antes de salir (`.tar.age`).
+Advertencia consciente: sin cifrar, cualquiera con acceso a la cuenta de Drive puede
+leer la base clínica completa.
 
 ## Arquitectura en una vista
 
@@ -34,17 +39,19 @@ Taskiq scheduler ── cada minuto (cron FIJO, UTC) ──► backups.tick
 
 | Qué | Con qué | Dónde vive la clave |
 | --- | --- | --- |
-| El **archivo** del respaldo | binario `age`, clave PÚBLICA (`age_recipient`) | La identidad privada la conserva el administrador **fuera del sistema** (jamás se acepta ni se guarda) |
-| El **refresh token** de Google en reposo | Fernet (`BACKUP_TOKEN_ENCRYPTION_KEY`) | Sólo en el `.env` del despliegue; nunca en PostgreSQL |
+| El **archivo** del respaldo (OPCIONAL) | binario `age`, clave PÚBLICA (`age_recipient`) | La identidad privada la conserva el administrador **fuera del sistema** (jamás se acepta ni se guarda). Sin recipient: el archivo sube sin cifrar |
+| El **refresh token** de Google en reposo (siempre) | Fernet (`BACKUP_TOKEN_ENCRYPTION_KEY`) | Sólo en el `.env` del despliegue; nunca en PostgreSQL |
 
 El recipient se valida invocando `age` con entrada vacía. El archivo final es
-`{prefix}-{timestampUTC}-{run8}.tar.age` (sin plantillas libres) y contiene
+`{prefix}-{timestampUTC}-{run8}.tar.age` (o `….tar` sin cifrar; sin plantillas
+libres) y contiene
 `database.dump` (pg_dump formato custom, restaurable con `pg_restore`) y
 `manifest.json` (versión de formato, run id, fecha, sha del dump — **sin** datos
 clínicos, usuarios, tokens ni rutas).
 
-**Restauración (manual, fuera de la UI en esta fase):** descargar el `.tar.age`,
-`age --decrypt -i <identidad-privada>`, extraer el tar y `pg_restore` del dump.
+**Restauración (manual, fuera de la UI en esta fase):** descargar el archivo; si es
+`.tar.age`, `age --decrypt -i <identidad-privada>` primero; extraer el tar y
+`pg_restore` del dump.
 
 ## Google Drive
 
@@ -93,8 +100,9 @@ rol** protege. Desconectar Drive nunca borra archivos remotos.
 Recursos declarativos (UI genérica existente, sin pantallas a medida):
 
 - **`backup_settings`** (singleton editable con `backups:configure`): hora diaria,
-  zona IANA, prefijo, retenciones, recipient de age, interruptor `enabled` (sólo se
-  puede activar con Drive activo + carpeta + recipient + claves del despliegue).
+  zona IANA, prefijo, retenciones, recipient de age (opcional), interruptor
+  `enabled` (sólo se puede activar con Drive activo + carpeta + claves del
+  despliegue; el recipient NO es requisito).
   Acciones: **Conectar Google Drive** (devuelve `authorization_url`; el frontend
   redirige), **Desconectar** (apaga y olvida token/carpeta; conserva historial y
   archivos) y **Respaldar ahora** (encola manual y despierta el tick).
@@ -119,7 +127,8 @@ GOOGLE_DRIVE_REDIRECT_URI=       # …/api/v1/backups/google-drive/callback
 BACKUP_TOKEN_ENCRYPTION_KEY=     # Fernet: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
 
-La imagen backend incluye `postgresql-client-16` (pg_dump/pg_restore) y `age`;
+La imagen backend incluye `postgresql-client` (v17 de Debian trixie; sirve contra
+el Postgres 16: pg_dump debe ser >= al servidor) y `age`;
 API, worker y scheduler usan la **misma imagen** (profile `taskiq` del compose).
 
 ## Puesta en marcha
@@ -127,8 +136,9 @@ API, worker y scheduler usan la **misma imagen** (profile `taskiq` del compose).
 1. Configurar el `.env` (bloque de arriba) y `BACKUPS_ENABLED=true`.
 2. Aplicar la migración (`docker compose --profile migrate run --rm migrate`).
 3. Levantar worker y scheduler: `docker compose --profile taskiq up -d taskiq-worker taskiq-scheduler`.
-4. En la UI (`/resources/backup_settings`): pegar el **recipient público de age**,
-   Conectar Google Drive (consent), ajustar hora/retención y activar.
+4. En la UI (`/resources/backup_settings`): Conectar Google Drive (consent), ajustar
+   hora/retención y activar. Opcional: pegar un **recipient público de age** si se
+   quiere el respaldo cifrado.
 5. Probar con **Respaldar ahora** y revisar `/resources/backup_runs`.
 
 ## Fuera de alcance de esta fase

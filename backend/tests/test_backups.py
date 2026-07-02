@@ -196,8 +196,16 @@ class FilenameTest(unittest.TestCase):
 
     def test_filename_shape(self) -> None:
         run_id = uuid.UUID("91d4b3e2-0000-0000-0000-000000000000")
-        name = build_backup_filename("medicopilot", datetime(2026, 7, 2, 8, 0), run_id)
-        self.assertEqual(name, "medicopilot-20260702T080000Z-91d4b3e2.tar.age")
+        encrypted = build_backup_filename(
+            "medicopilot", datetime(2026, 7, 2, 8, 0), run_id, encrypted=True
+        )
+        self.assertEqual(encrypted, "medicopilot-20260702T080000Z-91d4b3e2.tar.age")
+        # Cifrado OPCIONAL: sin recipient el archivo sube sin cifrar y la extensión
+        # lo dice honestamente.
+        plain = build_backup_filename(
+            "medicopilot", datetime(2026, 7, 2, 8, 0), run_id, encrypted=False
+        )
+        self.assertEqual(plain, "medicopilot-20260702T080000Z-91d4b3e2.tar")
 
 
 @unittest.skipUnless(

@@ -81,8 +81,11 @@ class BackupSettingsUpdate(ApiPatchSchema):
         default=None,
         min_length=1,
         max_length=4096,
-        title="Recipient de age (clave pública)",
-        description="Clave PÚBLICA age1… con la que se cifra el respaldo; la privada nunca se sube.",
+        title="Recipient de age (clave pública, opcional)",
+        description=(
+            "OPCIONAL. Sin recipient el respaldo sube SIN cifrar (.tar); con la clave "
+            "PÚBLICA age1… se cifra antes de subir (la privada nunca se sube)."
+        ),
         json_schema_extra={"ui": {"form": True, "widget": "textarea"}},
     )
 

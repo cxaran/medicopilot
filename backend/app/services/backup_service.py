@@ -8,7 +8,11 @@ funcional: el horario editable está en ``backup_settings`` (timezone IANA +
 
 Flujo de un respaldo:
     pg_dump -Fc  →  pg_restore --list (verificación)  →  manifest.json  →  .tar
-    →  age (recipient público)  →  .tar.age  →  Google Drive (subida resumible)
+    →  [age con recipient público, OPCIONAL]  →  Google Drive (subida resumible)
+
+El cifrado del archivo es OPCIONAL (decisión del dueño del producto): sin
+``age_recipient`` configurado el respaldo sube SIN cifrar (extensión .tar); con
+recipient, se cifra con age (.tar.age).
 
 Clasificación de errores: ``BackupTemporaryError`` reintenta con backoff (5 min,
 30 min; máximo BACKUP_MAX_ATTEMPTS); ``DriveReauthError`` DETIENE los reintentos
@@ -143,11 +147,15 @@ def calculate_next_run_at(now_utc: datetime, timezone: str, daily_time: time) ->
     return candidate.astimezone(dt_timezone.utc).replace(tzinfo=None)
 
 
-def build_backup_filename(prefix: str, now_utc: datetime, run_id: uuid.UUID) -> str:
-    """Nombre final fijo: ``{prefix}-{timestampUTC}-{run corto}.tar.age`` (sin
-    plantillas libres)."""
+def build_backup_filename(
+    prefix: str, now_utc: datetime, run_id: uuid.UUID, *, encrypted: bool
+) -> str:
+    """Nombre final fijo (sin plantillas libres): ``{prefix}-{timestampUTC}-{run
+    corto}.tar.age`` cifrado, o ``….tar`` sin cifrar — la extensión dice honestamente
+    qué contiene."""
     stamp = now_utc.strftime("%Y%m%dT%H%M%SZ")
-    return f"{prefix}-{stamp}-{run_id.hex[:8]}.tar.age"
+    suffix = ".tar.age" if encrypted else ".tar"
+    return f"{prefix}-{stamp}-{run_id.hex[:8]}{suffix}"
 
 
 def compute_retention_roles(*, month_taken: bool, year_taken: bool) -> list[str]:
@@ -213,14 +221,13 @@ def next_retry_delay_minutes(attempt_count: int, max_attempts: int) -> Optional[
 
 def missing_configuration(settings_row: BackupSettings) -> list[str]:
     """Requisitos faltantes para poder ACTIVAR/ejecutar respaldos (nombres estables
-    para la API y la UI)."""
+    para la API y la UI). El cifrado del archivo es OPCIONAL por decisión del dueño
+    del producto: sin ``age_recipient`` el respaldo sube SIN cifrar."""
     missing: list[str] = []
     if settings_row.drive_status != BackupDriveStatus.ACTIVE:
         missing.append("drive_connection")
     if not settings_row.drive_folder_id:
         missing.append("drive_folder_id")
-    if not settings_row.age_recipient:
-        missing.append("age_recipient")
     if settings.backup_token_encryption_key is None:
         missing.append("backup_token_encryption_key")
     if not settings.google_drive_client_id or settings.google_drive_client_secret is None:
@@ -574,8 +581,9 @@ class BackupService:
                     "configuration_incomplete",
                     f"Configuración incompleta: {', '.join(sorted(missing))}.",
                 )
-            assert config.age_recipient is not None  # garantizado por missing_configuration
             assert config.drive_folder_id is not None
+            # Cifrado OPCIONAL (decisión del dueño del producto): con recipient se
+            # cifra con age; sin recipient el respaldo sube SIN cifrar (.tar).
             recipient = config.age_recipient
             folder_id = config.drive_folder_id
             token_ciphertext = config.drive_refresh_token_ciphertext
@@ -599,7 +607,7 @@ class BackupService:
         )
 
         now = utc_now()
-        file_name = build_backup_filename(prefix, now, run_id)
+        file_name = build_backup_filename(prefix, now, run_id, encrypted=recipient is not None)
 
         # Reconciliación idempotente: si un intento anterior SÍ subió el archivo pero
         # la respuesta se perdió, no se duplica la carga.
@@ -652,10 +660,13 @@ class BackupService:
                 archive.add(dump_path, arcname="database.dump")
                 archive.add(manifest_path, arcname="manifest.json")
 
-            encrypted_path = workdir / file_name
-            encrypt_file_with_age(tar_path, encrypted_path, recipient)
-            ciphertext_sha256 = sha256_of_file(encrypted_path)
-            file_size = encrypted_path.stat().st_size
+            if recipient is not None:
+                upload_path = workdir / file_name
+                encrypt_file_with_age(tar_path, upload_path, recipient)
+            else:
+                upload_path = tar_path
+            ciphertext_sha256 = sha256_of_file(upload_path)
+            file_size = upload_path.stat().st_size
 
             # El checksum se persiste ANTES de subir: si la subida se corta tras
             # completarse en Google, el siguiente intento reconcilia por run_id+sha.
@@ -665,13 +676,15 @@ class BackupService:
                 run.ciphertext_sha256 = ciphertext_sha256
                 run.file_name = file_name
                 run.file_size_bytes = file_size
-                run.encryption_fingerprint = age_recipient_fingerprint(recipient)
+                run.encryption_fingerprint = (
+                    age_recipient_fingerprint(recipient) if recipient is not None else None
+                )
                 session.add(run)
                 session.commit()
 
             drive_file_id = drive.upload_backup(
                 folder_id=folder_id,
-                file_path=encrypted_path,
+                file_path=upload_path,
                 file_name=file_name,
                 run_id=str(run_id),
                 sha256=ciphertext_sha256,
@@ -765,7 +778,7 @@ class BackupService:
         ciphertext_sha256: str,
         drive_file_id: str,
         drive_folder_id: str,
-        recipient: str,
+        recipient: Optional[str],
         timezone_name: str,
         retention: tuple[int, int, int],
         drive: GoogleDriveBackupService,
@@ -790,7 +803,9 @@ class BackupService:
             run.ciphertext_sha256 = ciphertext_sha256
             run.drive_file_id = drive_file_id
             run.drive_folder_id = drive_folder_id
-            run.encryption_fingerprint = age_recipient_fingerprint(recipient)
+            run.encryption_fingerprint = (
+                age_recipient_fingerprint(recipient) if recipient is not None else None
+            )
             run.retention_roles = roles
             run.error_code = None
             run.error_summary = None
