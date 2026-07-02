@@ -1,17 +1,41 @@
 import { requireSession } from "@/core/auth/session";
-import { getDriveBackupFiles } from "@/core/backups/drive-files-data";
+import {
+  getBackupSettingsData,
+  getDriveBackupFiles,
+} from "@/core/backups/drive-files-data";
 import { BackupDriveFilesView } from "@/components/backups/BackupDriveFilesView";
+import { BackupSettingsPanel } from "@/components/backups/BackupSettingsPanel";
 
-// Ruta dedicada de RESPALDOS EN DRIVE (fase inicial del explorador): lista los
-// archivos reales de la carpeta de respaldos de la cuenta conectada (nombre, tipo,
-// fecha, tamaño) con descarga directa. Server component: una lectura del data layer
-// y render sin JS de cliente. Sólo lectura; degrada con avisos claros si Drive no
-// está conectado, requiere reconexión o el rol no tiene backups:read.
+// Página de RESPALDOS: configuración completa (panel a medida; ya no se depende de
+// la tabla genérica /resources/backup_settings) + archivos reales de la carpeta de
+// Drive con descarga y exploración. El callback OAuth regresa aquí (?drive=…).
 
 export const dynamic = "force-dynamic";
 
-export default async function BackupsPage() {
+type PageProps = {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+};
+
+export default async function BackupsPage({ searchParams }: PageProps) {
   await requireSession();
-  const result = await getDriveBackupFiles();
-  return <BackupDriveFilesView result={result} />;
+  const params = await searchParams;
+  const driveParam = typeof params.drive === "string" ? params.drive : null;
+  const [settings, result] = await Promise.all([
+    getBackupSettingsData(),
+    getDriveBackupFiles(),
+  ]);
+  return (
+    <BackupDriveFilesView
+      result={result}
+      settingsPanel={
+        settings ? (
+          <BackupSettingsPanel
+            key={settings.id + String(driveParam)}
+            initial={settings}
+            driveParam={driveParam}
+          />
+        ) : undefined
+      }
+    />
+  );
 }

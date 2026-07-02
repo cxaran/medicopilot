@@ -32,7 +32,9 @@ class BackupSettingsUpdate(ApiPatchSchema):
         default=None,
         title="Habilitado",
         description="Respaldo diario habilitado (requiere Drive conectado y cifrado configurado).",
-        json_schema_extra={"ui": {"form": True, "widget": "checkbox"}},
+        # "switch": el widget booleano del contrato (WidgetType no tiene "checkbox";
+        # un valor fuera del enum tira TODO el catálogo /resources con 500).
+        json_schema_extra={"ui": {"form": True, "widget": "switch"}},
     )
     timezone: Optional[str] = Field(
         default=None,

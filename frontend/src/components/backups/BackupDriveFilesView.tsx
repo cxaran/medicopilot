@@ -27,17 +27,6 @@ function Notice({
   );
 }
 
-function SettingsLink({ label }: Readonly<{ label: string }>) {
-  return (
-    <Link
-      href="/resources/backup_settings"
-      className="rounded-[8px] bg-[var(--accent)] px-3 py-2 text-xs font-semibold text-[var(--on-accent)] transition hover:opacity-90"
-    >
-      {label}
-    </Link>
-  );
-}
-
 function KindBadge({ kind }: Readonly<{ kind: "restore" | "explorer" }>) {
   const tone =
     kind === "restore"
@@ -50,7 +39,10 @@ function KindBadge({ kind }: Readonly<{ kind: "restore" | "explorer" }>) {
   );
 }
 
-export function BackupDriveFilesView({ result }: Readonly<{ result: DriveFilesResult }>) {
+export function BackupDriveFilesView({
+  result,
+  settingsPanel,
+}: Readonly<{ result: DriveFilesResult; settingsPanel?: React.ReactNode }>) {
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 px-6 py-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -59,34 +51,30 @@ export function BackupDriveFilesView({ result }: Readonly<{ result: DriveFilesRe
             Respaldos en Google Drive
           </h1>
           <p className="text-sm text-[var(--tx2)]">
-            Archivos guardados en la carpeta de respaldos de la cuenta conectada. Los
-            respaldos se restauran con pg_restore; los archivos de exploración podrán
-            abrirse desde aquí en una fase futura.
+            Configura el respaldo diario y consulta los archivos guardados en la
+            carpeta de la cuenta de Google Drive conectada.
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Link
-            href="/backups"
-            className="rounded-[8px] border border-[var(--border2)] bg-[var(--panel2)] px-3 py-2 text-xs font-semibold text-[var(--tx)] transition hover:opacity-90"
-          >
-            Actualizar
-          </Link>
-          <SettingsLink label="Configuración" />
-        </div>
+        <Link
+          href="/backups"
+          className="rounded-[8px] border border-[var(--border2)] bg-[var(--panel2)] px-3 py-2 text-xs font-semibold text-[var(--tx)] transition hover:opacity-90"
+        >
+          Actualizar
+        </Link>
       </div>
+
+      {settingsPanel}
 
       {result.status === "not_connected" && (
         <Notice
           title="Google Drive no está conectado"
-          text="Conecta la cuenta de Google Drive desde la configuración de respaldos para ver los archivos guardados."
-          action={<SettingsLink label="Ir a configuración" />}
+          text="Conecta la cuenta con el botón «Conectar Google Drive» de la configuración de arriba para ver los archivos guardados."
         />
       )}
       {result.status === "needs_reauth" && (
         <Notice
           title="Google Drive requiere reconexión"
-          text="La cuenta de Google Drive dejó de aceptar la credencial guardada. Reconéctala desde la configuración de respaldos."
-          action={<SettingsLink label="Reconectar" />}
+          text="La cuenta dejó de aceptar la credencial guardada. Usa «Reconectar Google Drive» en la configuración de arriba."
         />
       )}
       {result.status === "error" && (
@@ -96,8 +84,7 @@ export function BackupDriveFilesView({ result }: Readonly<{ result: DriveFilesRe
       {result.status === "ok" && result.files.length === 0 && (
         <Notice
           title="Aún no hay respaldos"
-          text="La carpeta de respaldos está vacía. Usa «Respaldar ahora» en la configuración o espera a la siguiente ventana programada."
-          action={<SettingsLink label="Ir a configuración" />}
+          text="La carpeta está vacía. Usa «Respaldar ahora» arriba o espera a la siguiente ventana programada."
         />
       )}
 

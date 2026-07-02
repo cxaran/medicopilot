@@ -59,7 +59,7 @@ _SETTINGS_NOT_FOUND = "Configuración de respaldos no encontrada"
 _RUN_NOT_FOUND = "Ejecución de respaldo no encontrada"
 
 # Pantalla del frontend a la que vuelve el callback OAuth (resultado NO sensible).
-_FRONTEND_BACKUPS_PATH = "/resources/backup_settings"
+_FRONTEND_BACKUPS_PATH = "/backups"
 
 
 async def _send_settings_email(email_to: str, row) -> None:  # type: ignore[no-untyped-def]
