@@ -140,12 +140,15 @@ export function PatientRecordPanel({
           <button
             type="button"
             onClick={() =>
-              pushChatForm({
-                kind: "resource_form",
-                resource: "patients",
-                mode: "update",
-                resource_id: patientId,
-              })
+              pushChatForm(
+                {
+                  kind: "resource_form",
+                  resource: "patients",
+                  mode: "update",
+                  resource_id: patientId,
+                },
+                patientId,
+              )
             }
             title="Editar datos del paciente (abre el formulario en el chat)"
             className="flex shrink-0 items-center gap-1.5 rounded-[11px] border border-[var(--border)] bg-[var(--panel)] px-3 py-2 text-[12.5px] font-medium text-[var(--tx2)] shadow-[var(--soft)] transition hover:text-[var(--accent-tx)]"

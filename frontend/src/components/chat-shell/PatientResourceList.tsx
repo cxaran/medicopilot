@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
+import { ResourcePagination } from "@/components/resources/ResourcePagination";
 import { ResourceTable } from "@/components/resources/ResourceTable";
 import { useChatNav } from "@/components/chat-shell/ChatNavProvider";
 import type { ResourceCapability } from "@/core/api/contracts";
@@ -59,6 +60,16 @@ export function PatientResourceList({
   // guardar desde ese formulario y re-dispara esta carga para reflejar el registro nuevo/editado.
   const { pushChatForm, recordVersion } = useChatNav();
 
+  // Paginación sencilla en memoria (flechas). El offset se reinicia al cambiar de
+  // paciente/recurso con un ajuste de estado EN RENDER (patrón sancionado por React;
+  // la regla lint prohíbe setState dentro de efectos).
+  const scopeKey = `${resourceName}|${patientId}`;
+  const [pageState, setPageState] = useState({ key: scopeKey, offset: 0 });
+  const offset = pageState.key === scopeKey ? pageState.offset : 0;
+  if (pageState.key !== scopeKey) {
+    setPageState({ key: scopeKey, offset: 0 });
+  }
+
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -77,7 +88,11 @@ export function PatientResourceList({
           return;
         }
         const query = parseListQuery(
-          { [scopeParam]: patientId, limit: String(PREVIEW_LIMIT) },
+          {
+            [scopeParam]: patientId,
+            limit: String(PREVIEW_LIMIT),
+            offset: String(offset),
+          },
           capability.list,
           controls,
         );
@@ -91,7 +106,7 @@ export function PatientResourceList({
     return () => {
       cancelled = true;
     };
-  }, [resourceName, patientId, recordVersion]);
+  }, [resourceName, patientId, recordVersion, offset]);
 
   const moduleHref = `/resources/${encodeURIComponent(resourceName)}`;
 
@@ -133,15 +148,21 @@ export function PatientResourceList({
   // Abre el formulario del recurso EN EL CHAT del agente: crear (prellenado con el paciente activo) o
   // editar (con el id de la fila). El chat lo renderiza y al Guardar escribe directo + refresca.
   const openCreateForm = (): void => {
-    pushChatForm({
-      kind: "resource_form",
-      resource: resourceName,
-      mode: "create",
-      values: { patient_id: patientId },
-    });
+    pushChatForm(
+      {
+        kind: "resource_form",
+        resource: resourceName,
+        mode: "create",
+        values: { patient_id: patientId },
+      },
+      patientId,
+    );
   };
   const openEditForm = (id: string): void => {
-    pushChatForm({ kind: "resource_form", resource: resourceName, mode: "update", resource_id: id });
+    pushChatForm(
+      { kind: "resource_form", resource: resourceName, mode: "update", resource_id: id },
+      patientId,
+    );
   };
 
   return (
@@ -169,7 +190,8 @@ export function PatientResourceList({
       </div>
 
       {/* ResourceTable genérico REUSADO: columnas/orden/acciones del contrato. El orden y el detalle
-          enlazan a la ruta /resources (servidor) preservando el scope del paciente. */}
+          enlazan a la ruta /resources (servidor) preservando el scope del paciente. Modo compacto:
+          el card de este panel pone el marco; la tabla no duplica chrome ni densidad. */}
       <ResourceTable
         label=""
         list={capability.list!}
@@ -182,8 +204,20 @@ export function PatientResourceList({
         itemReference={capability.item_reference ?? null}
         editEnabled={editEnabled}
         detailEnabled={detailEnabled}
+        compact
+        onCreateInline={capability.forms?.create ? openCreateForm : undefined}
         onEditInline={editEnabled ? (id) => openEditForm(id) : undefined}
       />
+
+      {/* Paginación sencilla (solo flechas): no roba espacio en el resumen del paciente. */}
+      <div className="mt-2">
+        <ResourcePagination
+          variant="compact"
+          pagination={page.pagination}
+          onPrev={() => setPageState({ key: scopeKey, offset: Math.max(0, offset - PREVIEW_LIMIT) })}
+          onNext={() => setPageState({ key: scopeKey, offset: offset + PREVIEW_LIMIT })}
+        />
+      </div>
     </div>
   );
 }

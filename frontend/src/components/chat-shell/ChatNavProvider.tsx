@@ -25,8 +25,14 @@ export type ContextNote = { id: number; text: string; target?: string | null };
  * Solicitud de FORMULARIO en el chat: la emiten los botones "Nuevo"/"Editar" del expediente para
  * abrir el formulario OFICIAL del recurso DENTRO del chat del agente (mismo ``resource_form`` que usa
  * ``ui.open_resource_form``), en vez de inline en el panel. El chat la consume y la renderiza.
+ *
+ * ``target`` dirige el formulario al hilo correcto, con la MISMA semántica que ``ContextNote``:
+ * ``undefined`` = lo consume el chat activo; ``string`` = sólo el chat de ese paciente; ``null`` =
+ * sólo el chat global. El consumo es POR ID con retirada de la cola (``consumeChatForms``): sin
+ * drenado, un formulario ya renderizado se reinyectaba en el SIGUIENTE chat abierto (el panel se
+ * remonta por conversación y su marca de agua volvía a cero).
  */
-export type ChatFormRequest = { id: number; spec: ResourceFormSpec };
+export type ChatFormRequest = { id: number; spec: ResourceFormSpec; target?: string | null };
 
 /**
  * Solicitud de REINICIO de un chat (menú de opciones del sidebar): vaciar el hilo del paciente
@@ -54,10 +60,14 @@ type ChatNavValue = {
   /** Retira de la cola las notas ya añadidas a un hilo (consumo por id, no por marca de agua:
    *  las notas dirigidas a OTRO chat permanecen en cola hasta que su chat se abra). */
   consumeContextNotes: (ids: readonly number[]) => void;
-  /** Cola de formularios a abrir en el chat (las consume el chat activo). */
+  /** Cola de formularios a abrir en el chat (cada chat consume los suyos por ``target``). */
   chatForms: readonly ChatFormRequest[];
-  /** Abre el formulario oficial de un recurso DENTRO del chat del agente. */
-  pushChatForm: (spec: ResourceFormSpec) => void;
+  /** Abre el formulario oficial de un recurso DENTRO del chat del agente. ``target`` dirige el
+   *  formulario (paciente | null=global | undefined=chat activo). */
+  pushChatForm: (spec: ResourceFormSpec, target?: string | null) => void;
+  /** Retira de la cola los formularios ya renderizados en un hilo (consumo por id; los dirigidos
+   *  a OTRO chat permanecen en cola hasta que su chat se abra). */
+  consumeChatForms: (ids: readonly number[]) => void;
   /** Contador que se incrementa al guardar un recurso; las listas del expediente lo observan para
    *  refrescarse (p. ej. tras crear/editar desde el formulario del chat). */
   recordVersion: number;
@@ -100,10 +110,16 @@ export function ChatNavProvider({ children }: Readonly<{ children: React.ReactNo
 
   const [chatForms, setChatForms] = useState<readonly ChatFormRequest[]>([]);
   const formIdRef = useRef(0);
-  const pushChatForm = useCallback((spec: ResourceFormSpec) => {
+  const pushChatForm = useCallback((spec: ResourceFormSpec, target?: string | null) => {
     formIdRef.current += 1;
-    const request: ChatFormRequest = { id: formIdRef.current, spec };
+    const request: ChatFormRequest = { id: formIdRef.current, spec, target };
     setChatForms((prev) => [...prev, request].slice(-MAX_NOTES));
+  }, []);
+
+  const consumeChatForms = useCallback((ids: readonly number[]) => {
+    if (ids.length === 0) return;
+    const consumed = new Set(ids);
+    setChatForms((prev) => prev.filter((form) => !consumed.has(form.id)));
   }, []);
 
   const [recordVersion, setRecordVersion] = useState(0);
@@ -137,6 +153,7 @@ export function ChatNavProvider({ children }: Readonly<{ children: React.ReactNo
       consumeContextNotes,
       chatForms,
       pushChatForm,
+      consumeChatForms,
       recordVersion,
       bumpRecordVersion,
       chatResets,
@@ -151,6 +168,7 @@ export function ChatNavProvider({ children }: Readonly<{ children: React.ReactNo
       consumeContextNotes,
       chatForms,
       pushChatForm,
+      consumeChatForms,
       recordVersion,
       bumpRecordVersion,
       chatResets,
