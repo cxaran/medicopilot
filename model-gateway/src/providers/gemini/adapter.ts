@@ -37,6 +37,9 @@ import type {
  * clínicas): los `functionCall` se mapean a nuestro protocolo de tool-call y, al reanudar,
  * nuestros resultados vuelven como `functionResponse`. Gemini correla por NOMBRE de función (no
  * hay call id en el cable), así que el nombre pendiente se guarda en el estado de continuación.
+ * Las functionCalls PARALELAS se drenan una a una en resumeTurn (el navegador ejecuta de a una)
+ * y solo al tener TODOS los resultados se reanuda al proveedor con los functionResponse juntos,
+ * en el orden del cable, dentro de un mismo content `user`.
  * Streaming acumulado a snapshot; capacidades HONESTAS (lo desconocido es null/unknown, jamás un
  * stub en el camino real). Aislamiento por usuario: el lease es transitorio.
  */
@@ -122,6 +125,13 @@ interface GeminiModelRow {
 
 // --- Estado de continuación. -------------------------------------------------------
 
+interface GeminiPendingFunctionCall {
+  // Nombre DE CABLE (saneado) tal como lo emitió el proveedor; la reversión al original
+  // ocurre al emitir el tool_call.ready (toolNameMap).
+  name: string;
+  args: Record<string, unknown>;
+}
+
 interface GeminiContinuationState {
   protocol: "gemini_generate_content";
   systemInstruction: { parts: GeminiTextPart[] } | null;
@@ -129,8 +139,16 @@ interface GeminiContinuationState {
   tools: GeminiTool[];
   options: GenerationOptions;
   // Gemini correla la respuesta de función por NOMBRE DE CABLE (saneado); se guarda el de la
-  // llamada pendiente tal como lo emitió el proveedor.
+  // llamada DESPACHADA al navegador (la que espera resultado en el próximo resume).
   pendingToolName: string;
+  // functionCalls PARALELAS del mismo turno `model` aún sin despachar al navegador. El gateway
+  // relay-a una a la vez; se drenan en la reanudación ANTES de volver al proveedor (Gemini
+  // exige un functionResponse por CADA functionCall del turno model, todos juntos en el mismo
+  // content `user`).
+  pendingCalls?: GeminiPendingFunctionCall[];
+  // functionResponse ya construidos (en el ORDEN del cable) a la espera de que se drenen las
+  // pendientes; al no quedar ninguna se reanuda al proveedor con todos juntos.
+  collectedResponses?: GeminiFunctionResponsePart[];
   // Mapa nombre-saneado -> nombre-original de tool (kernel/tool-names.ts). Gemini exige
   // nombres de función sin el punto de nuestros namespaces; el cable lleva el saneado y la
   // tool call emitida al navegador se revierte al original.
@@ -203,9 +221,46 @@ export class GeminiProviderAdapter implements ProviderAdapter {
 
     // Los resultados de tool vuelven como un content `user` con parts functionResponse,
     // correlacionados por NOMBRE de función (Gemini no usa call id en el cable).
+    // LIMITACIÓN de la correlación por nombre: si el modelo pide DOS calls de la MISMA función
+    // en paralelo, el nombre es ambiguo; se resuelve por ORDEN (FIFO): el resultado de cada
+    // resume se atribuye a la llamada despachada en ese momento (pendingToolName) y las
+    // respuestas se acumulan en el orden del cable (que es el orden de despacho).
+    const collected: GeminiFunctionResponsePart[] = [
+      ...(state.collectedResponses ?? []),
+      ...input.toolResults.map((result) => toFunctionResponsePart(result, state.pendingToolName))
+    ];
+
+    const pending = state.pendingCalls ?? [];
+    const nextCall = pending[0];
+    if (nextCall) {
+      // Quedan functionCalls paralelas sin resultado: se despacha la SIGUIENTE al navegador
+      // SIN llamar al proveedor (Gemini espera todos los functionResponse juntos en el mismo
+      // turno user; volver antes dejaría el cable inválido).
+      const continuationState: GeminiContinuationState = {
+        ...state,
+        pendingToolName: nextCall.name,
+        pendingCalls: pending.slice(1),
+        collectedResponses: collected
+      };
+      yield {
+        type: "tool_call.ready",
+        continuationState,
+        call: {
+          // callId interno (Gemini no lo provee): correlación nuestra; el cable usa el nombre.
+          callId: createId("call"),
+          // El navegador ejecuta por el nombre ORIGINAL (con punto); el cable lleva el saneado.
+          name: state.toolNameMap?.[nextCall.name] ?? nextCall.name,
+          arguments: nextCall.args
+        }
+      };
+      return;
+    }
+
+    // Todos los functionCalls del turno model tienen respuesta: un solo content `user` con los
+    // functionResponse en el ORDEN del cable.
     const responseContent: GeminiContent = {
       role: "user",
-      parts: input.toolResults.map((result) => toFunctionResponsePart(result, state.pendingToolName))
+      parts: collected
     };
     yield* this.runGenerate({
       model: input.model,
@@ -327,13 +382,18 @@ export class GeminiProviderAdapter implements ProviderAdapter {
 
     const first = toolCalls[0];
     if (first) {
-      // Content `model` verbatim para la continuación: solo el functionCall que reenviamos (uno
-      // a la vez, como ejecuta el navegador). El texto previo se conserva si lo hubo.
+      // Content `model` VERBATIM para la continuación: TODOS los functionCalls del turno
+      // (Gemini exige un functionResponse por cada uno en el siguiente turno user). El texto
+      // previo se conserva si lo hubo. El navegador ejecuta una tool a la vez: se emite la
+      // PRIMERA y las RESTANTES quedan pendientes en el estado de continuación; resumeTurn
+      // las drena una a una antes de volver al proveedor.
       const continuationParts: GeminiPart[] = [];
       if (assistantText.length > 0) {
         continuationParts.push({ text: assistantText });
       }
-      continuationParts.push({ functionCall: { name: first.name, args: first.args } });
+      for (const call of toolCalls) {
+        continuationParts.push({ functionCall: { name: call.name, args: call.args } });
+      }
       const continuationState: GeminiContinuationState = {
         protocol: "gemini_generate_content",
         systemInstruction: params.systemInstruction,
@@ -343,6 +403,8 @@ export class GeminiProviderAdapter implements ProviderAdapter {
         // El pendiente conserva el nombre DE CABLE (saneado) que emitió el proveedor: el
         // functionResponse del resume debe correlacionar con ese nombre exacto.
         pendingToolName: first.name,
+        pendingCalls: toolCalls.slice(1).map((call) => ({ name: call.name, args: call.args })),
+        collectedResponses: [],
         toolNameMap: params.toolNameMap
       };
       // El navegador ejecuta por el nombre ORIGINAL (con punto); Gemini vio/emitió el saneado.

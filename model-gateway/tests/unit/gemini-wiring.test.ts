@@ -552,6 +552,143 @@ describe("Gemini: saneo de nombres de tool en el cable y reversión al emitir", 
   });
 });
 
+describe("Gemini: functionCalls PARALELAS se drenan una a una antes de reanudar", () => {
+  // El navegador ejecuta UNA tool a la vez; Gemini exige un functionResponse por CADA
+  // functionCall del turno model, todos juntos en el mismo content user. El adaptador despacha
+  // la primera, guarda las restantes en la continuación y las drena en cada resume SIN llamar al
+  // proveedor; sólo con todos los resultados reanuda. Correlación por ORDEN (FIFO): el cable de
+  // Gemini no tiene call ids.
+  async function collect(iterable: AsyncIterable<unknown>): Promise<unknown[]> {
+    const out: unknown[] = [];
+    for await (const ev of iterable) {
+      out.push(ev);
+    }
+    return out;
+  }
+  function fetchQueue(responses: Response[]) {
+    const calls: { url: string; init: RequestInit }[] = [];
+    const queue = [...responses];
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(input), init: init ?? {} });
+      return queue.shift() ?? sseResponse(textTurnChunks("ok"));
+    }) as unknown as typeof fetch;
+    return { calls, fetchImpl };
+  }
+  function parallelCallChunks(names: string[]): Array<Record<string, unknown>> {
+    return [
+      {
+        candidates: [
+          {
+            content: {
+              role: "model",
+              parts: names.map((name) => ({ functionCall: { name, args: {} } }))
+            },
+            finishReason: "STOP"
+          }
+        ],
+        usageMetadata: { promptTokenCount: 12, candidatesTokenCount: 3 }
+      }
+    ];
+  }
+  type ReadyEvent = {
+    type: string;
+    call: { callId: string; name: string };
+    continuationState?: unknown;
+  };
+  function findReady(events: unknown[]): ReadyEvent | undefined {
+    return events.find(
+      (e): e is ReadyEvent => (e as { type?: string }).type === "tool_call.ready"
+    );
+  }
+  const credential = { leaseId: "l1", secret: "k", expiresAt: new Date(Date.now() + 60_000) };
+  const messages = [{ role: "user" as const, content: [{ type: "text" as const, text: "Hola" }] }];
+  const parallelTools: ModelToolDefinition[] = [
+    toolDef,
+    { name: "ui.render_buttons", description: "Botones", inputSchema: { type: "object" }, strict: false }
+  ];
+
+  it("despacha la 2ª call en el primer resume SIN llamar al proveedor y reanuda con ambos functionResponse en orden", async () => {
+    const { calls, fetchImpl } = fetchQueue([
+      sseResponse(parallelCallChunks(["clinical_list_patients", "ui_render_buttons"])),
+      sseResponse(textTurnChunks("Listo"))
+    ]);
+    const adapter = new GeminiProviderAdapter({ baseUrl: BASE_URL, fetchImpl });
+    const model = createGeminiModel({ baseUrl: BASE_URL, modelId: MODEL_ID });
+
+    const startEvents = await collect(
+      adapter.startTurn({
+        turnId: "t1",
+        model,
+        credential,
+        messages,
+        tools: parallelTools,
+        options: { maxOutputTokens: 100 },
+        signal: new AbortController().signal
+      })
+    );
+    const firstReady = findReady(startEvents);
+    if (!firstReady) {
+      throw new Error("esperado tool_call.ready de la primera call");
+    }
+    // La primera se emite REVERTIDA al nombre original; la segunda aún no.
+    expect(firstReady.call.name).toBe("clinical.list_patients");
+    expect(calls).toHaveLength(1);
+
+    // Primer resume: registra el resultado y despacha la SEGUNDA sin pegar al proveedor.
+    const firstResumeEvents = await collect(
+      adapter.resumeTurn({
+        turnId: "t1",
+        model,
+        credential,
+        toolResults: [
+          { callId: firstReady.call.callId, result: { status: "success", content: { a: 1 } } }
+        ],
+        continuationState: firstReady.continuationState ?? null,
+        signal: new AbortController().signal
+      })
+    );
+    const secondReady = findReady(firstResumeEvents);
+    if (!secondReady) {
+      throw new Error("esperado tool_call.ready de la segunda call drenada");
+    }
+    expect(secondReady.call.name).toBe("ui.render_buttons");
+    expect(calls).toHaveLength(1); // sin llamada nueva al proveedor
+
+    // Segundo resume: todos los resultados -> reanuda al proveedor con ambos functionResponse.
+    await collect(
+      adapter.resumeTurn({
+        turnId: "t1",
+        model,
+        credential,
+        toolResults: [
+          { callId: secondReady.call.callId, result: { status: "success", content: { b: 2 } } }
+        ],
+        continuationState: secondReady.continuationState ?? null,
+        signal: new AbortController().signal
+      })
+    );
+    expect(calls).toHaveLength(2);
+    const resumeBody = JSON.parse(String(calls[1]?.init.body ?? "{}")) as {
+      contents: Array<{ role: string; parts: Array<Record<string, unknown>> }>;
+    };
+    // El content model reenvía AMBOS functionCall verbatim (nombres de cable, saneados).
+    const modelContent = resumeBody.contents.find((c) => c.role === "model");
+    const sentCalls = (modelContent?.parts ?? [])
+      .filter((p) => "functionCall" in p)
+      .map((p) => (p.functionCall as { name: string }).name);
+    expect(sentCalls).toEqual(["clinical_list_patients", "ui_render_buttons"]);
+    // El último content user lleva los DOS functionResponse en el orden del cable.
+    const last = resumeBody.contents[resumeBody.contents.length - 1];
+    expect(last?.role).toBe("user");
+    const responses = (last?.parts ?? []).map(
+      (p) => p.functionResponse as { name: string; response: unknown }
+    );
+    expect(responses.map((r) => r.name)).toEqual(["clinical_list_patients", "ui_render_buttons"]);
+    expect(responses[0]?.response).toEqual({ a: 1 });
+    expect(responses[1]?.response).toEqual({ b: 2 });
+  });
+});
+
 describe("Gemini: discovery y resolución de capacidades", () => {
   it("discoverModels filtra a generateContent y mapea límites de tokens reales", async () => {
     const fetchImpl = (async () =>
