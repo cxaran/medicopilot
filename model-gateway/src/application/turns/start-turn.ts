@@ -141,7 +141,7 @@ export class StartTurn {
         options: negotiated.generation,
         signal: abortController.signal
       })) {
-        await this.handleProviderEvent(turn.id, event, sink, accumulator);
+        await this.handleProviderEvent(turn.id, event, sink, accumulator, authorization);
       }
     } catch (error) {
       const gatewayError = toGatewayError(error);
@@ -178,7 +178,8 @@ export class StartTurn {
     turnId: string,
     event: ProviderEvent,
     sink: TurnEventSink,
-    accumulator: { text: string }
+    accumulator: { text: string },
+    authorization: TurnAuthorization
   ): Promise<void> {
     if (event.type === "text.delta") {
       accumulator.text += event.delta;
@@ -206,7 +207,7 @@ export class StartTurn {
       return;
     }
 
-    await this.completeTurn(turnId, event.usage, sink);
+    await this.completeTurn(turnId, event.usage, sink, authorization);
   }
 
   private scheduleToolResultTimeout(turnId: string, sink: TurnEventSink): void {
@@ -230,9 +231,26 @@ export class StartTurn {
     timeout.unref();
   }
 
-  private async completeTurn(turnId: string, usage: TurnUsage, sink: TurnEventSink): Promise<void> {
+  private async completeTurn(
+    turnId: string,
+    usage: TurnUsage,
+    sink: TurnEventSink,
+    authorization: TurnAuthorization
+  ): Promise<void> {
     await this.dependencies.turnStore.setUsage(turnId, usage);
     await this.dependencies.turnStore.transition(turnId, "completed");
+
+    // Reporte de uso al control-plane, NO FATAL: un fallo de reporte no debe romper un turno
+    // que ya completó (el usage queda igualmente en el turn store).
+    try {
+      await this.dependencies.controlPlane.reportTurnUsage({ turnId, authorization, usage });
+    } catch (error) {
+      this.dependencies.telemetry.warn("turn usage report failed", {
+        turnId,
+        code: toGatewayError(error).code
+      });
+    }
+
     await sink.emit({
       type: "turn.completed",
       turn_id: turnId,

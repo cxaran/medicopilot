@@ -22,17 +22,6 @@ export function isNormalizedReasoningEffort(value: unknown): value is Normalized
 }
 
 /**
- * PRECEDENCIA: el esfuerzo explícito del turno gana sobre el default del modelo. Si el turno
- * no especifica nada, se usa el default del modelo (si lo hay); si tampoco, ``undefined``.
- */
-export function resolveReasoningEffort(
-  perTurn: NormalizedReasoningEffort | undefined,
-  modelDefault: NormalizedReasoningEffort | undefined
-): NormalizedReasoningEffort | undefined {
-  return perTurn ?? modelDefault;
-}
-
-/**
  * Decide el nivel a HONRAR: ``null`` (omitir) si no hay nivel, si es ``off`` o si el modelo/
  * política no soportan el control. En cualquier otro caso, el nivel normalizado.
  */
@@ -64,7 +53,6 @@ export function nativeReasoningEffort(
     case "openai_codex":
     case "opencode_zen":
     case "opencode_go":
-    case "openai_responses":
     case "openai_chat_completions":
     // Runtime local OpenAI-compatible (Ollama/vLLM): si un modelo local soporta reasoning,
     // usa el parámetro estilo OpenAI (reasoning_effort). Por defecto el local no lo reporta.

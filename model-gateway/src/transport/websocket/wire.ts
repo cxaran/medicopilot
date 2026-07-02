@@ -108,6 +108,8 @@ function isProtocolAvailable(protocol: ProviderProtocol, settings: GatewaySettin
   if (protocol === "opencode_zen") {
     return Boolean(settings.opencodeBaseUrl);
   }
-  // El fake siempre está disponible; el resto se considera disponible si está registrado.
+  // El resto de protocolos solo se registra cuando su config existe (bootstrap/container:
+  // cada proveedor real es opt-in con base URL, y el fake se registra en modo dev o con
+  // GATEWAY_FAKE_ENABLED), así que registrado => disponible.
   return true;
 }

@@ -1,64 +1,69 @@
 # Model Gateway
 
-MG-001 establishes a provider-neutral inference runtime kernel for MedicoPilot.
+A provider-neutral inference runtime for MedicoPilot (MG-002).
 
-This service is not an agent. It does not keep clinical memory, execute clinical tools, plan actions, or query patient data. It validates a browser gateway session, resolves a fake provider profile for local tests, negotiates model capabilities, validates context budget, normalizes WebSocket events, and relays tool calls back to the browser.
+This service is not an agent. It does not keep clinical memory, execute clinical tools, plan actions, or query patient data. It validates a browser gateway session, authorizes the turn against the backend, leases the user's provider credential for the duration of the turn, negotiates model capabilities, validates the context budget, normalizes WebSocket events, and relays tool calls back to the browser (the browser executes every tool; the gateway never does).
 
-## MG-001 Boundaries
+## Current boundaries
 
-- Browser sessions are in-memory and development-only.
-- Browser-session creation accepts a real connection-ticket JWT issued by FastAPI (MG-002, see below); `GATEWAY_DEV_TICKET` remains as a development-only fallback, not FastAPI introspection.
-- No real provider credentials are accepted or stored.
-- No Redis, FastAPI internal API, OpenCode Zen, OpenCode Go, OpenAI, Anthropic, or clinical tool execution is included.
-- Active turns do not survive a process restart.
+- Browser sessions and active turns are in-memory; they do not survive a process restart.
+- Provider credentials are **never stored** in the gateway: they arrive decrypted per turn via the backend lease bridge (see below) and live only for the duration of the turn.
+- Rate limiting is a no-op adapter; there is no Redis or other external state.
+- The `fake` provider is opt-in (`GATEWAY_FAKE_ENABLED=true`). It is also auto-registered when no backend is configured, because the fake control-plane used in that dev mode can only authorize the `fake` provider.
 
-## Connection ticket (MG-002)
+## Provider adapters
+
+The registry wires real adapters, each behind opt-in settings (base URL + enable flag; see `.env.example`):
+
+- **opencode Zen / opencode Go** (`providers/opencode/`) — OpenAI-compatible wire, provider ids `opencode_zen` / `opencode_go`. Poor `/models` metadata is filled from a curated map (provider data always wins).
+- **OpenAI** (`providers/openai/`) — two auth shapes under one adapter: `openai` (API key, `chat_completions` against api.openai.com) and `openai_codex` (ChatGPT subscription via OAuth, Codex `/responses` app-server wire). Both can be enabled at once; the lease bridge resolves the right credential type for each.
+- **OpenRouter** (`providers/openrouter/`) — OpenAI-compatible wire with rich `/models` discovery (real capability metadata and pricing).
+- **Anthropic** (`providers/anthropic/`) — Messages API (a distinct wire family: top-level `system`, typed content blocks, extended thinking by token budget).
+- **Google Gemini** (`providers/gemini/`) — Generative Language API (`streamGenerateContent`, `systemInstruction`, function calling correlated by name).
+- **Local / on-prem** (`providers/local/`) — Ollama / vLLM through their OpenAI-compatible endpoints; usually no API key (an empty lease is valid), and PHI never leaves the clinic.
+- **Fake** (`providers/fake/`) — synthetic dev/test provider, opt-in as described above.
+
+OpenAI-compatible adapters share the wire core in `providers/openai-compat/chat.ts` (request build, SSE streaming, tool-call relay, parallel tool-call draining). Tool names are sanitized for strict wires (`^[a-zA-Z0-9_-]{1,64}$`, canonical helper in `kernel/tool-names.ts`) and reverted to the original namespaced name (`clinical.*`, `ui.*`) when the tool call is emitted to the browser.
+
+## Connection ticket
 
 `POST {prefix}/v1/browser-sessions` resolves the request `ticket` in this order:
 
 1. **FastAPI JWT (primary path).** If `GATEWAY_AGENT_TICKET_SECRET` is set, the ticket is verified as the HS256 JWT issued by FastAPI's `POST /api/v1/agent/connection-ticket` (the secret must match the backend's `AGENT_GATEWAY_TICKET_SECRET`). Verification checks the signature, `aud=agent-gateway` and expiry, then propagates the identity (`sub` -> `userId`, `sid` -> `sessionRef`) onto the browser session.
 2. **Dev ticket (fallback, non-production only).** Outside `NODE_ENV=production`, a body ticket equal to `GATEWAY_DEV_TICKET` still creates a development session.
 
-An invalid signature, wrong audience, or expired ticket yields `401 INVALID_TICKET`. The ticket and the shared secret are never logged. The propagated `userId` is not yet used to authorize any clinical action — FastAPI remains the clinical authority via the browser cookie.
+An invalid signature, wrong audience, or expired ticket yields `401 INVALID_TICKET`. The ticket and the shared secret are never logged. In addition, when a backend is configured, each turn re-validates the doctor's backend session cookie against `/api/v1/auth/me` before running — FastAPI remains the clinical authority.
 
-## Credential lease bridge (MG-002, B4)
+## Credential lease bridge (B4)
 
-FastAPI owns AI provider credentials, encrypted at rest. The gateway does **not** store them: it leases a decrypted secret short-lived, only for the duration of a turn.
+FastAPI owns AI provider credentials, encrypted at rest per user. The gateway does **not** store them: it leases a decrypted secret short-lived, only for the duration of a turn.
 
-- When both `GATEWAY_BACKEND_INTERNAL_URL` and `GATEWAY_BACKEND_INTERNAL_SECRET` are set, the container wires `HttpControlPlaneClient`. Its `leaseCredential` does a server-to-server `POST {GATEWAY_BACKEND_INTERNAL_URL}/api/v1/internal/agent/credential-lease` with header `X-Internal-Auth: {GATEWAY_BACKEND_INTERNAL_SECRET}` (must match the backend's `AGENT_GATEWAY_INTERNAL_SECRET`) and body `{ user_id, provider }`. The `user_id` comes from the browser-session identity propagated by the connection ticket; the `provider` from the turn authorization.
-- The backend returns `{ lease_id, secret, expires_at, default_model? }` where `secret` is the decrypted API key (short TTL via `AGENT_GATEWAY_LEASE_TTL_SECONDS`). The client maps it to a `ProviderCredentialLease` and never logs the secret. Errors expose only the HTTP status (`404` no active credential, `401` bad internal auth), never the response body or the internal secret.
-- When the backend config is absent, the fake control-plane (`fake-secret`) is used so dev and tests keep working.
+- When both `GATEWAY_BACKEND_INTERNAL_URL` and `GATEWAY_BACKEND_INTERNAL_SECRET` are set, the container wires `HttpControlPlaneClient`. Its `leaseCredential` does a server-to-server `POST {GATEWAY_BACKEND_INTERNAL_URL}/api/v1/internal/agent/credential-lease` with header `X-Internal-Auth: {GATEWAY_BACKEND_INTERNAL_SECRET}` (must match the backend's `AGENT_GATEWAY_INTERNAL_SECRET`) and body `{ user_id, provider, credential_type? }`. The `user_id` comes from the browser-session identity propagated by the connection ticket; the provider from the turn authorization (`openai` vs `openai_codex` map to the same backend provider with different credential types).
+- The backend returns `{ lease_id, secret, expires_at, account_id?, default_model? }` where `secret` is the decrypted API key or refreshed OAuth access token (short TTL via `AGENT_GATEWAY_LEASE_TTL_SECONDS`). The client maps it to a `ProviderCredentialLease` and never logs the secret. Errors expose only the HTTP status, never the response body or the internal secret.
+- When the backend config is absent, the fake control-plane (`fake-secret`) is used so dev and tests keep working — together with the auto-registered fake provider.
 - The backend endpoint is internal-only (server-to-server secret, not cookie auth); deployments must keep it off the public network.
+- Turn usage reporting (`reportTurnUsage`) is wired from the turn use cases (non-fatal on error), but the backend does not expose a usage endpoint yet, so the HTTP client is a documented no-op for now.
 
-MG-002 is still in progress: `authorizeTurn` resolves the real `userId` from the session but the provider/model/capability negotiation remains scaffolded for a later slice.
+## Capability negotiation and discovery
 
-## Real provider: opencode (MG-002, B5)
+Capability negotiation is implemented (`application/capabilities/`): the model's capabilities come from live provider discovery (`/models` with the user's leased credential, falling back to the curated catalog), and the negotiator gates tools, structured output, reasoning effort, and image input per model and per policy. The context budgeter bounds the estimated input against the smallest of the model's native context window, the profile limit, and the gateway global cap. `effective_context_tokens` exists in the wire shape as a seam for account-level caps but is currently always `null` (no adapter populates it yet).
 
-The first real provider adapter is `OpencodeProviderAdapter` (`providers/opencode/`), targeting opencode zen, which is OpenAI-compatible (`/chat/completions` + `/models`, `Authorization: Bearer <key>`).
+## WebSocket protocol (B6)
 
-- It uses the **leased** credential from B4 (`ProviderTurnInput.credential`) for the `Authorization` header on every call; the secret is never logged (the adapter does no logging).
-- `verifyCredential` does a light `GET /models` (200 → valid, 401/403 → invalid). `discoverModels` maps `/models` rows to `ModelDescriptor[]`, enriching capabilities from row metadata with safe defaults. `startTurn` POSTs `/chat/completions` with `stream=true` and translates the SSE stream into provider events (`text.delta`, `reasoning.summary`, `tool_call.ready` with a continuation state, `completed` with usage). `resumeTurn` appends the tool results to the stored history and re-issues the streamed completion.
-- The base URL (`GATEWAY_OPENCODE_BASE_URL`) and default model (`GATEWAY_OPENCODE_DEFAULT_MODEL`) are configurable; their defaults are **provisional** and will be confirmed in B13 against the real key. No credentials are configured here — they arrive via the B4 lease.
-- The model catalog now combines the fake model (dev) with a curated opencode model, and the provider registry exposes both protocols.
-
-Capability schema enrichment (B5, OpenClaw pattern): `ModelCapabilities` now separates the native `contextWindowTokens` from an effective `effectiveContextTokens` cap (the context budgeter uses the smaller), and adds a `compat` block of fine wire-shape flags (`supportsTools`, `supportsReasoningEffort`, `thinkingFormat`, `supportsStrictMode`, `supportsUsageInStreaming`, `supportsEagerToolInputStreaming`) consumed by provider adapters. The granular capability checks remain authoritative in the negotiator. All HTTP for opencode is mocked in tests; the real end-to-end with a live key lands in B13.
-
-## WebSocket protocol (MG-002, B6)
-
-Over the same authenticated WebSocket as the turn flow, the gateway exposes catalog RPCs and control verbs (OpenClaw pattern: catalog over the same WS, no separate REST). The turn flow (`turn.start` / `turn.tool_result` → `turn.started` / `turn.text.delta` / `turn.tool_call.ready` / `turn.completed` / `turn.failed`) is unchanged and additive.
+Over the same authenticated WebSocket as the turn flow, the gateway exposes catalog RPCs and control verbs (catalog over the same WS, no separate REST). The turn flow is `turn.start` / `turn.tool_result` → `turn.started` / `turn.text.delta` / `turn.reasoning.summary` / `turn.tool_call.ready` / `turn.completed` / `turn.failed`.
 
 Client → gateway:
 
-- `models.list` `{ request_id, view?: "default" }` — read-only. Replies `models.list.result` `{ request_id, view, models }`, where each model is the catalog descriptor in wire shape (snake_case) with the enriched B5 capabilities (native `context_window_tokens` vs `effective_context_tokens`, `compat` flags, modality arrays). Includes both the opencode and fake models. No credentials are exposed.
-- `provider.status` `{ request_id }` — read-only. Replies `provider.status.result` `{ request_id, providers }` listing the provider protocols registered gateway-side (`opencode_zen`, `fake`) with `available` reflecting gateway config (e.g. opencode base URL set). It does **not** read user credentials — the frontend queries those against FastAPI `/users/me/ai-providers`.
-- `agent.cancel_turn` `{ request_id, turn_id? }` — cancels an in-flight turn of the current browser session (transitions to `cancelled` via the state machine, clears pending tool calls). If `turn_id` is omitted, cancels the session's active turn(s). Emits `turn.cancelled` `{ turn_id }` per cancelled turn and replies `agent.cancel_turn.result` `{ request_id, cancelled_turn_ids }`. On failure (e.g. no active turn → `NO_ACTIVE_TURN`, foreign/unknown turn → `TURN_NOT_FOUND`, already terminal → `TURN_NOT_CANCELLABLE`) replies `rpc.error` `{ request_id, code, message }`.
+- `models.list` `{ request_id, view?: "default" }` — read-only. Replies `models.list.result` `{ request_id, view, models }`, where each model is the catalog descriptor in wire shape (snake_case) with the enriched capabilities (native `context_window_tokens` vs `effective_context_tokens`, `compat` flags, modality arrays, pricing when known). No credentials are exposed.
+- `provider.status` `{ request_id }` — read-only. Replies `provider.status.result` `{ request_id, providers }` listing the provider protocols registered gateway-side with `available` reflecting gateway config. It does **not** read user credentials — the frontend queries those against FastAPI `/users/me/ai-providers`.
+- `agent.cancel_turn` `{ request_id, turn_id? }` — cancels an in-flight turn of the current browser session (transitions to `cancelled` via the state machine, clears pending tool calls). If `turn_id` is omitted, cancels the session's active turn(s). Emits `turn.cancelled` `{ turn_id }` per cancelled turn and replies `agent.cancel_turn.result` `{ request_id, cancelled_turn_ids }`. On failure replies `rpc.error` `{ request_id, code, message }`.
 
-Streaming snapshot (OpenClaw resync pattern): `turn.text.delta` now also carries a `snapshot` field — the accumulated assistant text for the current streaming segment — so a reconnecting client can resync without replaying every delta. This is additive (existing consumers can ignore it). The snapshot resets per streaming segment; a full cross-segment snapshot that survives a tool round-trip is deferred (it would require persisting accumulated text in the turn store).
+Streaming snapshot: `turn.text.delta` also carries a `snapshot` field — the accumulated assistant text for the current streaming segment — so a reconnecting client can resync without replaying every delta. The snapshot resets per streaming segment.
 
 ## Routing
 
 - The canonical public prefix is configured by `GATEWAY_PUBLIC_PATH_PREFIX`, defaulting to `/model-gateway`.
-- `GATEWAY_ENABLE_ROOT_PATH_ALIAS=true` enables a temporary MG-001 alias for `/v1/*` to support direct local/container tests.
+- `GATEWAY_ENABLE_ROOT_PATH_ALIAS=true` enables a temporary alias for `/v1/*` to support direct local/container tests.
 - Production routing should use the canonical prefixed path only.
 
 ## Observability
@@ -75,4 +80,4 @@ Streaming snapshot (OpenClaw resync pattern): `turn.text.delta` now also carries
 
 ## Logging
 
-Application logs must not include prompts, tool results, cookies, authorization headers, API keys, or full tool arguments.
+Application logs must not include prompts, tool results, cookies, authorization headers, API keys, or full tool arguments (`kernel/redact.ts`).

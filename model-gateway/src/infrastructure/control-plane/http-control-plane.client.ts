@@ -181,6 +181,9 @@ export class HttpControlPlaneClient implements ControlPlanePort {
   }
 
   async reportTurnUsage(): Promise<void> {
+    // El backend aún no expone un endpoint interno de reporte de uso; cuando exista, aquí va
+    // el POST real. La llamada YA está cableada desde StartTurn/ResumeTurnAfterTool (no fatal),
+    // así que implementar este método basta para activar el reporte.
     return;
   }
 }

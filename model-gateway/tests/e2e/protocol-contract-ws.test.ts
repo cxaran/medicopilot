@@ -20,9 +20,6 @@ const frameTypes = (frames: Frame[]): string[] => frames.map((frame) => frame.ty
 function failingProviderAdapter(providerStatus: number, providerError: string): ProviderAdapter {
   return {
     protocol: "fake",
-    async verifyCredential() {
-      return { valid: true };
-    },
     async discoverModels() {
       return [createFakeModel()];
     },
@@ -45,9 +42,6 @@ function failingProviderAdapter(providerStatus: number, providerError: string): 
 function disconnectingProviderAdapter(): ProviderAdapter {
   return {
     protocol: "fake",
-    async verifyCredential() {
-      return { valid: true };
-    },
     async discoverModels() {
       return [createFakeModel()];
     },

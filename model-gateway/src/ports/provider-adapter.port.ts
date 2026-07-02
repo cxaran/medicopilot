@@ -13,21 +13,6 @@ export interface ProviderCredentialLease {
   accountId?: string;
 }
 
-export interface CredentialVerification {
-  valid: boolean;
-  reason?: string;
-}
-
-export interface TokenEstimationInput {
-  messages: CanonicalMessage[];
-  tools: ModelToolDefinition[];
-}
-
-export interface TokenEstimate {
-  inputTokens: number;
-  confidence: "exact" | "estimated";
-}
-
 export interface ProviderTurnInput {
   turnId: string;
   model: ModelDescriptor;
@@ -55,9 +40,7 @@ export type ProviderEvent =
 
 export interface ProviderAdapter {
   readonly protocol: ProviderProtocol;
-  verifyCredential(credential: ProviderCredentialLease): Promise<CredentialVerification>;
   discoverModels(credential: ProviderCredentialLease): Promise<ModelDescriptor[]>;
-  estimateTokens?(input: TokenEstimationInput): Promise<TokenEstimate>;
   startTurn(input: ProviderTurnInput): AsyncIterable<ProviderEvent>;
   resumeTurn(input: ProviderResumeInput): AsyncIterable<ProviderEvent>;
 }

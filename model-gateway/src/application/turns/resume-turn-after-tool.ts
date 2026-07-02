@@ -81,6 +81,20 @@ export class ResumeTurnAfterTool {
         } else {
           await this.dependencies.turnStore.setUsage(turn.id, event.usage);
           await this.dependencies.turnStore.transition(turn.id, "completed");
+          // Reporte de uso al control-plane, NO FATAL: un fallo de reporte no debe romper un
+          // turno que ya completó (el usage queda igualmente en el turn store).
+          try {
+            await this.dependencies.controlPlane.reportTurnUsage({
+              turnId: turn.id,
+              authorization,
+              usage: event.usage
+            });
+          } catch (reportError) {
+            this.dependencies.telemetry.warn("turn usage report failed", {
+              turnId: turn.id,
+              code: toGatewayError(reportError).code
+            });
+          }
           await sink.emit({
             type: "turn.completed",
             turn_id: turn.id,

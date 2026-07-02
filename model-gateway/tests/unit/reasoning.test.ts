@@ -2,8 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   honorReasoningEffort,
   isNormalizedReasoningEffort,
-  nativeReasoningEffort,
-  resolveReasoningEffort
+  nativeReasoningEffort
 } from "../../src/domain/reasoning.js";
 import type { ProviderProtocol } from "../../src/domain/model.js";
 
@@ -15,20 +14,6 @@ describe("reasoning: escala normalizada", () => {
     expect(isNormalizedReasoningEffort("xhigh")).toBe(false);
     expect(isNormalizedReasoningEffort("minimal")).toBe(false);
     expect(isNormalizedReasoningEffort(undefined)).toBe(false);
-  });
-});
-
-describe("reasoning: precedencia per-turn > default del modelo", () => {
-  it("el effort explícito del turno gana sobre el default", () => {
-    expect(resolveReasoningEffort("high", "low")).toBe("high");
-  });
-
-  it("usa el default del modelo cuando el turno no especifica", () => {
-    expect(resolveReasoningEffort(undefined, "medium")).toBe("medium");
-  });
-
-  it("queda indefinido cuando no hay turno ni default", () => {
-    expect(resolveReasoningEffort(undefined, undefined)).toBeUndefined();
   });
 });
 
@@ -55,7 +40,6 @@ describe("reasoning: nativeReasoningEffort (mapeo por proveedor)", () => {
     "openai",
     "opencode_zen",
     "opencode_go",
-    "openai_responses",
     "openai_chat_completions"
   ];
 

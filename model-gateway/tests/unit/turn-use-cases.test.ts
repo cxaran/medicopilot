@@ -166,6 +166,71 @@ describe("StartTurn", () => {
   });
 });
 
+describe("createContainer: proveedor fake en modo dev sin backend", () => {
+  it("sin backend configurado registra el fake aunque GATEWAY_FAKE_ENABLED esté apagado", async () => {
+    // Invariante: el control-plane fake solo autoriza el proveedor "fake"; sin registrarlo,
+    // turn.start fallaría con PROVIDER_PROTOCOL_NOT_REGISTERED en la config dev por defecto.
+    const { startTurn, container } = setup({ fakeEnabled: false });
+    expect(container.providerRegistry.protocols()).toContain("fake");
+
+    const sink = createSink();
+    await startTurn.execute(browserSession(), startRequest(), sink);
+    expect(types(sink.events)).toContain("turn.completed");
+  });
+
+  it("con backend real configurado y sin el flag, el fake NO se registra", () => {
+    const { container } = setup({
+      fakeEnabled: false,
+      backendInternalUrl: "http://backend.test",
+      backendInternalSecret: "secret"
+    });
+    expect(container.providerRegistry.protocols()).not.toContain("fake");
+  });
+});
+
+describe("StartTurn: reporte de uso al control-plane (no fatal)", () => {
+  it("el turno completa aunque reportTurnUsage lance", async () => {
+    const { container, telemetry } = setup();
+    const reported: unknown[] = [];
+    const failingControlPlane = {
+      authorizeTurn: (input: { browserSessionId: string; profileId: string }) =>
+        container.controlPlane.authorizeTurn(input),
+      leaseCredential: (input: Parameters<typeof container.controlPlane.leaseCredential>[0]) =>
+        container.controlPlane.leaseCredential(input),
+      leaseCredentialForProvider: (
+        input: Parameters<typeof container.controlPlane.leaseCredentialForProvider>[0]
+      ) => container.controlPlane.leaseCredentialForProvider(input),
+      releaseCredentialLease: (leaseId: string) => container.controlPlane.releaseCredentialLease(leaseId),
+      async reportTurnUsage(input: unknown): Promise<void> {
+        reported.push(input);
+        throw new Error("usage endpoint down");
+      }
+    };
+    const startTurn = new StartTurn({
+      controlPlane: failingControlPlane,
+      modelCatalog: container.modelCatalog,
+      modelDiscovery: container.modelDiscovery,
+      providerRegistry: container.providerRegistry,
+      turnStore: container.turnStore,
+      limiter: container.limiter,
+      telemetry,
+      settings: baseSettings
+    });
+
+    const sink = createSink();
+    await startTurn.execute(browserSession(), startRequest(), sink);
+
+    // Se intentó reportar, el fallo NO rompió el turno y no se emitió turn.failed.
+    expect(reported).toHaveLength(1);
+    expect(types(sink.events)).toContain("turn.completed");
+    expect(types(sink.events)).not.toContain("turn.failed");
+
+    const started = sink.events.find((event) => event.type === "turn.started");
+    const turnId = started && "turn_id" in started ? started.turn_id : "";
+    expect((await container.turnStore.get(turnId))?.status).toBe("completed");
+  });
+});
+
 describe("ResumeTurnAfterTool", () => {
   it("reanuda un turno en waiting_for_tool hasta completarlo", async () => {
     const { startTurn, resume, container } = setup();

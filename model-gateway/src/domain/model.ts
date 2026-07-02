@@ -2,7 +2,6 @@ export type ProviderId = string;
 export type ModelId = string;
 
 export type ProviderProtocol =
-  | "openai_responses"
   | "openai_chat_completions"
   | "anthropic_messages"
   | "gemini_generate_content"
@@ -79,7 +78,8 @@ export interface ModelCapabilities {
   // Ventana de contexto NATIVA del modelo (lo que anuncia el proveedor).
   contextWindowTokens: number | null;
   // Cap EFECTIVO en runtime (más bajo que el nativo si la cuenta/plan lo limita); se
-  // mantiene separado del nativo para que el context budgeter pueda usar el menor.
+  // mantiene separado del nativo para que el context budgeter pueda usar el menor. Seam B5:
+  // HOY ningún adaptador lo puebla (siempre null), así que aún no acota nada en la práctica.
   effectiveContextTokens: number | null;
   maxOutputTokens: number | null;
   // Flags finos de compatibilidad consumidos por los adaptadores de proveedor.
@@ -121,7 +121,6 @@ export interface ModelDescriptor {
   route: ModelRoute;
   capabilities: ModelCapabilities;
   source: "curated" | "discovered" | "manual";
-  metadataRevision: string | null;
   deprecatedAt: string | null;
   // Precios por token si se conocen (P7). Opcional: la mayoría de proveedores no los publican.
   pricing?: ModelPricing | null;
@@ -180,7 +179,6 @@ export function createFakeModel(overrides: Partial<ModelDescriptor> = {}): Model
       }
     },
     source: "manual",
-    metadataRevision: "test",
     deprecatedAt: null
   };
 
