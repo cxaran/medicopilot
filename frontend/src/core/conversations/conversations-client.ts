@@ -25,10 +25,15 @@ export interface ConversationRow {
 
 interface OffsetPage<T> {
   items: T[];
+  pagination?: { has_next?: boolean };
 }
 
 const CONVERSATIONS = "/api/v1/conversations";
 const MESSAGES = "/api/v1/messages";
+
+// Tamaño de página al recorrer el hilo completo (MAX_LIMIT del backend). El endpoint pagina con
+// límite por defecto de 20: sin recorrerlo, un chat largo perdería su cola al recargar.
+const MESSAGES_PAGE_LIMIT = 100;
 
 /** Lista conversaciones vigentes; si se da ``patientId`` filtra por ese paciente (chat del paciente). */
 export async function listConversations(patientId?: string | null): Promise<ConversationRow[]> {
@@ -50,13 +55,27 @@ export function createConversation(
   });
 }
 
-/** Lista los mensajes vigentes de una conversación (orden por ``sequence_index`` del servidor). */
+/**
+ * Lista TODOS los mensajes vigentes de una conversación (orden por ``sequence_index`` del
+ * servidor). Recorre las páginas del endpoint (offset/limit) hasta agotar el hilo: el sembrado del
+ * chat necesita el historial completo, porque el navegador reconstruye el contexto del modelo en
+ * cada turno (la compactación por presupuesto ocurre después, en el CopilotPanel).
+ */
 export async function listMessages(conversationId: string): Promise<PersistedMessageRow[]> {
-  const page = await browserApi<OffsetPage<PersistedMessageRow>>(
-    `${MESSAGES}?conversation_id=${encodeURIComponent(conversationId)}`,
-    { method: "GET" },
-  );
-  return page.items;
+  const rows: PersistedMessageRow[] = [];
+  let offset = 0;
+  for (;;) {
+    const page = await browserApi<OffsetPage<PersistedMessageRow>>(
+      `${MESSAGES}?conversation_id=${encodeURIComponent(conversationId)}` +
+        `&limit=${MESSAGES_PAGE_LIMIT}&offset=${offset}`,
+      { method: "GET" },
+    );
+    rows.push(...page.items);
+    if (!page.pagination?.has_next || page.items.length === 0) {
+      return rows;
+    }
+    offset += page.items.length;
+  }
 }
 
 /** Agrega (append) un mensaje a una conversación; el ``sequence_index`` lo asigna el servidor. */
@@ -65,6 +84,31 @@ export function appendMessage(payload: MessageCreatePayload): Promise<PersistedM
     method: "POST",
     body: payload as unknown as Record<string, unknown>,
   });
+}
+
+/** Baja lógica de UN mensaje del hilo (limpieza del chat; el backend revalida RBAC). */
+export function deleteMessage(messageId: string): Promise<void> {
+  return browserApi<void>(`${MESSAGES}/${encodeURIComponent(messageId)}`, {
+    method: "DELETE",
+  });
+}
+
+/**
+ * Reinicia el hilo con baja lógica en LOTE de sus mensajes vigentes. Sin ``fromSequenceIndex``
+ * vacía la conversación completa; con él, elimina desde ese punto (inclusive) hasta el final. La
+ * conversación en sí no se elimina (el chat sigue abierto, vacío o recortado).
+ */
+export function resetConversation(
+  conversationId: string,
+  fromSequenceIndex?: number,
+): Promise<{ deleted_count: number }> {
+  return browserApi<{ deleted_count: number }>(
+    `${CONVERSATIONS}/${encodeURIComponent(conversationId)}/reset`,
+    {
+      method: "POST",
+      body: { from_sequence_index: fromSequenceIndex ?? null },
+    },
+  );
 }
 
 /**

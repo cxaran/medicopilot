@@ -1,8 +1,10 @@
 "use client";
 
-import { useSyncExternalStore } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 
 export const THEME_STORAGE_KEY = "mp-theme";
+// Un año. La cookie deja al servidor fijar ``data-theme`` en SSR (no-flash sin script cliente).
+const THEME_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
 
 type Theme = "light" | "dark";
 
@@ -31,6 +33,8 @@ function setTheme(next: Theme): void {
   } catch {
     // Si localStorage no esta disponible, el cambio aplica solo para esta sesion.
   }
+  // Cookie: la lee el layout del servidor para fijar ``data-theme`` en SSR (no-flash).
+  document.cookie = `${THEME_STORAGE_KEY}=${next}; path=/; max-age=${THEME_COOKIE_MAX_AGE}; samesite=lax`;
   listeners.forEach((listener) => listener());
 }
 
@@ -52,12 +56,27 @@ function SunIcon() {
 }
 
 /**
- * Alterna el tema (data-theme en <html>) entre light y dark y persiste la
- * eleccion en localStorage. La preferencia se aplica antes del paint mediante el
- * script inline del root layout (sin parpadeo); aqui se refleja el icono.
+ * Alterna el tema (data-theme en <html>) entre light y dark y persiste la elección en cookie +
+ * localStorage. El no-parpadeo lo da el SERVIDOR: el root layout lee la cookie ``mp-theme`` y fija
+ * ``data-theme`` en SSR (sin script cliente, que React 19 rechaza). Aquí sólo se refleja el icono y
+ * se migra a los usuarios previos que sólo tenían localStorage.
  */
 export function ThemeToggle() {
   const theme = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+
+  // Migración/sincronización: si hay una preferencia en localStorage distinta del ``data-theme`` que
+  // el servidor fijó desde la cookie (usuarios previos sin cookie), se aplica y se escribe la cookie
+  // para que las cargas siguientes ya salgan correctas desde SSR.
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(THEME_STORAGE_KEY);
+      if ((stored === "dark" || stored === "light") && stored !== getSnapshot()) {
+        setTheme(stored);
+      }
+    } catch {
+      // localStorage no disponible: sin migración.
+    }
+  }, []);
 
   return (
     <button

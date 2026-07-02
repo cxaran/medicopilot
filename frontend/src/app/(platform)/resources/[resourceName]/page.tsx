@@ -1,10 +1,12 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 
+import { BackLink } from "@/components/layout/BackLink";
 import { GroupedCatalog } from "@/components/resources/GroupedCatalog";
 import { ResourceListControls } from "@/components/resources/ResourceListControls";
 import { ResourcePagination } from "@/components/resources/ResourcePagination";
 import { ResourceTable } from "@/components/resources/ResourceTable";
+import { PatientChatButton } from "@/components/resources/PatientChatButton";
 import { requireSession } from "@/core/auth/session";
 import { getResourceCapability } from "@/core/resources/capabilities-client";
 import {
@@ -21,6 +23,18 @@ type PageProps = {
   params: Promise<{ resourceName: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 };
+
+// Etiqueta visible del paciente para el chip de contexto activo, tomada de la propia fila (el médico
+// ya la ve en la tabla). Cae a un texto neutro si no hay un campo de nombre.
+function patientRowLabel(row: Record<string, unknown>): string {
+  for (const key of ["full_name", "name", "nombre"]) {
+    const value = row[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return "Paciente";
+}
 
 export default async function ResourcePage({ params, searchParams }: PageProps) {
   await requireSession();
@@ -39,6 +53,7 @@ export default async function ResourcePage({ params, searchParams }: PageProps) 
     }
     return (
       <div className="space-y-4">
+        <BackLink href="/resources" label="Recursos" />
         <h1 className="text-xl font-semibold text-slate-900">{capability.label}</h1>
         <GroupedCatalog label={capability.label} catalog={catalog} />
       </div>
@@ -75,6 +90,7 @@ export default async function ResourcePage({ params, searchParams }: PageProps) 
 
   return (
     <div className="space-y-4">
+      <BackLink href="/resources" label="Recursos" />
       {capability.forms?.create ? (
         <div className="flex justify-end">
           <Link
@@ -109,6 +125,12 @@ export default async function ResourcePage({ params, searchParams }: PageProps) 
           capability.item_reference && capability.detail && capability.forms?.update,
         )}
         detailEnabled={Boolean(capability.item_reference && capability.detail)}
+        // Acción ESPECIAL sólo en pacientes: ir al chat del agente para esa persona.
+        renderRowLead={
+          resourceName === "patients"
+            ? (id, row) => <PatientChatButton patientId={id} label={patientRowLabel(row)} />
+            : undefined
+        }
       />
       <ResourcePagination prevHref={prevHref} nextHref={nextHref} pagination={pagination} />
     </div>

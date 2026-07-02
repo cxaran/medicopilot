@@ -132,23 +132,31 @@ export function describeTools(
 }
 
 /**
- * Nombres del set DECLARADO al modelo este turno: núcleo + meta + tools cargadas, intersectado
- * con las efectivas (una tool gateada nunca se declara aunque se hubiera "cargado").
+ * Las tools de UI generativa (``ui.*``) se declaran SIEMPRE al modelo, no solo bajo demanda.
+ * Son acciones de INTERFAZ de uso frecuente (mostrar formularios, gráficas, botones, paneles de
+ * revisión); si el agente tuviera que descubrirlas con tool_search/tool_describe antes de poder
+ * renderizar, el camino común se rompería (no llegaría a invocarlas en el turno). Son de lectura
+ * (no gateadas) y baratas de exponer. El long tail clínico sigue siendo descubrible.
+ */
+export function isUiTool(name: string): boolean {
+  return name.startsWith("ui.");
+}
+
+/**
+ * Nombres del set DECLARADO al modelo este turno. "Declarar todo": se declara el catálogo
+ * EFECTIVO COMPLETO (ya gateado por rol/permiso), sin descubrimiento — el camino común no necesita
+ * tool_search/tool_describe. Se excluyen las meta-tools de descubrimiento (ya no hacen falta) y las
+ * tools gateadas (que nunca están en ``effective``). ``loaded`` se ignora (compat de firma: el
+ * descubrimiento queda inactivo mientras se declara todo).
  */
 export function declaredToolNames(
   effective: readonly ToolDefinition[],
-  loaded: Iterable<string>,
+  _loaded: Iterable<string>,
 ): Set<string> {
-  const effectiveNames = new Set(effective.map((tool) => tool.name));
   const declared = new Set<string>();
-  for (const name of CORE_TOOL_NAMES) {
-    if (effectiveNames.has(name)) {
-      declared.add(name);
-    }
-  }
-  for (const name of loaded) {
-    if (effectiveNames.has(name)) {
-      declared.add(name);
+  for (const tool of effective) {
+    if (!isMetaTool(tool.name)) {
+      declared.add(tool.name);
     }
   }
   return declared;

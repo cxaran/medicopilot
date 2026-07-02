@@ -4,8 +4,10 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { ResourceActionConfirmDialog } from "@/components/resources/ResourceActionConfirmDialog";
+import { useChatNavOptional } from "@/components/chat-shell/ChatNavProvider";
 import { ApiRequestError } from "@/core/api/api-error";
 import type { ResourceActionCapability } from "@/core/api/contracts";
+import { rowActionNote } from "@/core/chat-shell/action-notes";
 import {
   actionErrorMessage,
   actionInputFields,
@@ -64,6 +66,8 @@ export function ResourceRowActions({
   item: Record<string, unknown>;
 }>) {
   const router = useRouter();
+  // Notas de contexto al chat del paciente (opcional: fuera del shell no hay provider y se omite).
+  const chatNav = useChatNavOptional();
   const [activeAction, setActiveAction] = useState<ResourceActionCapability | null>(null);
   const [pending, setPending] = useState(false);
   const [dialogError, setDialogError] = useState<string | null>(null);
@@ -79,6 +83,12 @@ export function ResourceRowActions({
     setPending(true);
     try {
       await executeAction(action, placeholder, id, payload);
+      // Acción ejecutada: deja su nota compacta en el chat del paciente (memoria del hilo, sin
+      // turno del modelo). Best-effort: si no hay provider o la fila no liga paciente, se omite.
+      const note = rowActionNote(action.label, placeholder, id, item);
+      if (note) {
+        chatNav?.pushContextNote(note.text, note.target);
+      }
       setPending(false);
       onDone();
       router.refresh();

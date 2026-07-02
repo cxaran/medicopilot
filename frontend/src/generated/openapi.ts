@@ -2591,8 +2591,9 @@ export interface components {
          * AppointmentCreate
          * @description Alta de una cita; siempre nace en ``pending``.
          *
-         *     El estado, ``rescheduled_from_id``, la auditoría y el soft-delete los gobierna el
-         *     servidor; no se aceptan.
+         *     Sólo ``scheduled_date`` es obligatoria entre los campos de agenda: la cita se
+         *     programa por fecha y la hora puede omitirse. El estado, ``rescheduled_from_id``, la
+         *     auditoría y el soft-delete los gobierna el servidor; no se aceptan.
          */
         AppointmentCreate: {
             /**
@@ -2613,7 +2614,7 @@ export interface components {
             scheduled_date: string;
             /**
              * Hora (opcional)
-             * Format: time
+             * @description Hora concreta de la cita; omítela si el paciente acude dentro del horario de consulta.
              */
             scheduled_time?: string | null;
             /** Duración (min) */
@@ -2648,10 +2649,7 @@ export interface components {
              * Format: date
              */
             scheduled_date: string;
-            /**
-             * Hora
-             * Format: time
-             */
+            /** Hora */
             scheduled_time?: string | null;
             /** Duración (min) */
             duration_minutes?: number | null;
@@ -2712,10 +2710,7 @@ export interface components {
              * Format: date
              */
             scheduled_date: string;
-            /**
-             * Scheduled Time
-             * Format: time
-             */
+            /** Scheduled Time */
             scheduled_time?: string | null;
             /** Duration Minutes */
             duration_minutes?: number | null;
@@ -2740,19 +2735,17 @@ export interface components {
          *
          *     El paciente se conserva (no se acepta ``patient_id``). ``doctor_id``,
          *     ``scheduled_date``, ``scheduled_time``, ``duration_minutes``, ``reason`` e
-         *     ``internal_notes`` se heredan de la cita original cuando no se envían (semántica de PATCH).
+         *     ``internal_notes`` se heredan de la cita original cuando no se envían (semántica de
+         *     PATCH).
          */
         AppointmentReschedule: {
             /** Médico */
             doctor_id?: string | null;
-            /**
-             * Fecha
-             * Format: date
-             */
+            /** Fecha */
             scheduled_date?: string | null;
             /**
              * Hora (opcional)
-             * Format: time
+             * @description Hora concreta de la cita; omítela si el paciente acude dentro del horario de consulta.
              */
             scheduled_time?: string | null;
             /** Duración (min) */
@@ -2778,14 +2771,11 @@ export interface components {
         AppointmentUpdate: {
             /** Médico */
             doctor_id?: string | null;
-            /**
-             * Fecha
-             * Format: date
-             */
+            /** Fecha */
             scheduled_date?: string | null;
             /**
              * Hora (opcional)
-             * Format: time
+             * @description Hora concreta de la cita; omítela si el paciente acude dentro del horario de consulta.
              */
             scheduled_time?: string | null;
             /** Duración (min) */
@@ -5458,7 +5448,6 @@ export interface components {
             scheduled_date: string;
             /**
              * Scheduled Time
-             * Format: time
              * @description Hora de la cita, si se había fijado una concreta.
              */
             scheduled_time?: string | null;
@@ -9007,12 +8996,10 @@ export interface operations {
                 patient_id?: string | null;
                 doctor_id?: string | null;
                 status?: components["schemas"]["AppointmentStatus"] | null;
+                scheduled_date?: string | null;
+                scheduled_date_gte?: string | null;
+                scheduled_date_lte?: string | null;
                 id_in?: string[] | null;
-                scheduled_date_on?: string | null;
-                scheduled_date_before?: string | null;
-                scheduled_date_after?: string | null;
-                scheduled_date_from?: string | null;
-                scheduled_date_to?: string | null;
                 q?: string | null;
             };
             header?: never;

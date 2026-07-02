@@ -76,15 +76,20 @@ export function reduceReconnect(
   event: ReconnectEvent,
   config: ReconnectConfig = DEFAULT_RECONNECT_CONFIG,
 ): ReconnectState {
+  // ``connect_start`` arranca SIEMPRE un ciclo nuevo, incluso desde ``disposed``. Un remonte
+  // legítimo del panel (p. ej. el doble montaje de React StrictMode en dev, o reabrir el chat)
+  // reusa el mismo estado persistido por ref; si ``disposed`` lo absorbiera, el segundo montaje
+  // nunca pasaría a ``connecting`` y el cliente jamás llamaría a connect() (canal "Inactivo"
+  // permanente). Es seguro: ``connect_start`` solo restablece el canal, nunca reenvía un turno.
+  if (event.type === "connect_start") {
+    return { phase: "connecting", attempts: 0, nextDelayMs: null };
+  }
   if (state.phase === "disposed") {
     return state;
   }
   switch (event.type) {
     case "dispose":
       return { phase: "disposed", attempts: 0, nextDelayMs: null };
-
-    case "connect_start":
-      return { phase: "connecting", attempts: 0, nextDelayMs: null };
 
     case "connected":
       // Éxito: reinicia el contador de intentos y el backoff.

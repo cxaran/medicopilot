@@ -73,8 +73,16 @@ export function useContinuousDictation(
   const stoppingRef = useRef(false);
   const transcribeChainRef = useRef<Promise<void>>(Promise.resolve());
 
-  const supported =
-    isRecordingSupported() && isLocalTranscriptionSupported() && localTranscriptionEnabled();
+  // Detección de soporte tras el montaje: en SSR no hay navigator/MediaRecorder, así que
+  // calcularla durante el render haría que el HTML del servidor (sin botón de micrófono) no
+  // coincida con el del cliente (hydration mismatch). El primer render del cliente arranca
+  // igual que el servidor y el botón aparece en cuanto se monta.
+  const [supported, setSupported] = useState(false);
+  useEffect(() => {
+    setSupported(
+      isRecordingSupported() && isLocalTranscriptionSupported() && localTranscriptionEnabled(),
+    );
+  }, []);
 
   const cleanup = useCallback(() => {
     if (tickRef.current) {

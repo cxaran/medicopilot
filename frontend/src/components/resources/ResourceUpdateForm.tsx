@@ -5,8 +5,10 @@ import { useRouter } from "next/navigation";
 
 import { Button } from "@/components/ui/Button";
 import { ResourceFormFields } from "@/components/resources/ResourceFormFields";
+import { useChatNavOptional } from "@/components/chat-shell/ChatNavProvider";
 import { ApiRequestError } from "@/core/api/api-error";
 import type { ResourceFormCapability } from "@/core/api/contracts";
+import { resourceWriteNote } from "@/core/chat-shell/action-notes";
 import { buildUpdatePayload } from "@/core/resources/resource-form";
 import { updateResource } from "@/core/resources/resource-mutation-client";
 
@@ -64,6 +66,8 @@ export function ResourceUpdateForm({
   initialValues: Record<string, unknown>;
 }>) {
   const router = useRouter();
+  // Nota de contexto al chat del paciente tras guardar (opcional: sin provider se omite).
+  const chatNav = useChatNavOptional();
   const [pending, setPending] = useState(false);
   const [generalError, setGeneralError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
@@ -80,7 +84,17 @@ export function ResourceUpdateForm({
 
     try {
       const formData = new FormData(event.currentTarget);
-      await updateResource(mutationUrl, update.method, buildUpdatePayload(update.fields, formData));
+      const updated = await updateResource(
+        mutationUrl,
+        update.method,
+        buildUpdatePayload(update.fields, formData),
+      );
+      // Guardado: deja su nota compacta en el chat del paciente (memoria del hilo, sin turno del
+      // modelo). ``initialValues`` respalda el destinatario si la respuesta no proyecta paciente.
+      const note = resourceWriteNote("update", resourceName, resourceLabel, updated, initialValues);
+      if (note) {
+        chatNav?.pushContextNote(note.text, note.target);
+      }
       router.replace(listPath);
     } catch (error) {
       if (error instanceof ApiRequestError) {

@@ -73,19 +73,22 @@ test("una tool de ESCRITURA descubierta sigue siendo de escritura con metadata d
   assert.ok(declared.includes("clinical.create_prescription_draft"));
 });
 
-test("el núcleo de lecturas (+meta) se declara SIEMPRE, sin búsqueda; el set queda acotado", () => {
+test("declarar todo: se declara el catálogo efectivo COMPLETO, sin las meta-tools de descubrimiento", () => {
   const eff = effectiveTools(listTools(), new Set());
   const declared = declaredTools(eff, []).map((t) => t.name);
 
-  // Todo el núcleo presente.
-  for (const name of CORE_TOOL_NAMES) {
-    assert.ok(declared.includes(name), `el núcleo debe declarar ${name}`);
+  // Las meta-tools de descubrimiento NO se declaran (con todo declarado ya no hacen falta).
+  assert.ok(!declared.includes("tool_search"));
+  assert.ok(!declared.includes("tool_describe"));
+  // Todo lo demás efectivo SÍ se declara directamente (sin descubrimiento).
+  for (const tool of eff) {
+    if (tool.name === "tool_search" || tool.name === "tool_describe") continue;
+    assert.ok(declared.includes(tool.name), `debería declararse: ${tool.name}`);
   }
-  // Acotado: exactamente el núcleo (intersección con efectivas) cuando nada está cargado.
-  assert.equal(declared.length, CORE_TOOL_NAMES.length);
-  // Tools fuera del núcleo NO se declaran por defecto (descubribles bajo demanda).
-  assert.ok(!declared.includes("clinical.list_prescriptions"));
-  assert.ok(!declared.includes("pubmed.search"));
+  // Lecturas clínicas, pubmed y ui.* quedan declaradas (antes eran solo descubribles).
+  assert.ok(declared.includes("clinical.list_prescriptions"));
+  assert.ok(declared.includes("pubmed.search"));
+  assert.ok(declared.some((n) => n.startsWith("ui.")));
 });
 
 test("declaredToolNames nunca declara una tool cargada que esté gateada", () => {

@@ -33,9 +33,22 @@ test("safetyLayerMessage: rol system y contenido fijo con el invariante del prod
   assert.ok(t.startsWith(SAFETY_LAYER_HEADER));
   assert.match(t, /BORRADOR/);
   assert.match(t, /NUNCA diagnostica, receta ni guarda/i);
-  assert.match(t, /aprobación explícita del médico/i);
+  // La escritura la confirma el médico vía la PLATAFORMA (transparente); el modelo no la narra.
+  assert.match(t, /el médico revise y confirme/i);
+  assert.match(t, /No afirmes que 'no puedes'/i);
   assert.match(t, /NO CONFIABLES/);
   assert.match(t, /no puede ser anulada/i);
+});
+
+test("operationalLayerMessage: guía de uso de herramientas (rol system)", async () => {
+  const { operationalLayerMessage, OPERATIONAL_LAYER_HEADER } = await import("./persona.ts");
+  const m = operationalLayerMessage();
+  assert.equal(m.role, "system");
+  const t = text(m);
+  assert.ok(t.startsWith(OPERATIONAL_LAYER_HEADER));
+  assert.match(t, /ui\.\*/);
+  assert.match(t, /TODAS tus herramientas/i);
+  assert.match(t, /no repitas llamadas equivalentes/i);
 });
 
 // --- persona configurable ---
@@ -61,23 +74,25 @@ test("personaLayerMessage: null si vacía; lista campos si hay contenido", () =>
 
 // --- composición: orden fijo [SEGURIDAD] -> [PERSONA] -> [MEMORIAS] -> [conversación] ---
 
-test("composeLeadingLayers: orden seguridad -> persona -> memorias", () => {
+test("composeLeadingLayers: orden seguridad -> operativa -> persona -> memorias", () => {
   const persona: PersonaFields = { tone: "breve" };
   const layers = composeLeadingLayers(persona, memoryBlock);
-  assert.equal(layers.length, 3);
+  assert.equal(layers.length, 4);
   assert.ok(text(layers[0]!).startsWith(SAFETY_LAYER_HEADER));
-  assert.match(text(layers[1]!), /PERSONA DEL COPILOTO/);
-  assert.match(text(layers[2]!), /MEMORIAS DEL MÉDICO/);
+  assert.match(text(layers[1]!), /GUÍA OPERATIVA DE HERRAMIENTAS/);
+  assert.match(text(layers[2]!), /PERSONA DEL COPILOTO/);
+  assert.match(text(layers[3]!), /MEMORIAS DEL MÉDICO/);
   // La conversación iría después (responsabilidad del llamador).
   const outgoing = [...layers, ...conversation];
   assert.equal(outgoing[outgoing.length - 1]?.role, "user");
 });
 
-test("composeLeadingLayers: la SEGURIDAD siempre es la primera y siempre está", () => {
-  // Sin persona ni memorias.
+test("composeLeadingLayers: la SEGURIDAD siempre es la primera; la operativa va siempre tras ella", () => {
+  // Sin persona ni memorias: seguridad + operativa.
   const onlySafety = composeLeadingLayers(null, null);
-  assert.equal(onlySafety.length, 1);
+  assert.equal(onlySafety.length, 2);
   assert.ok(text(onlySafety[0]!).startsWith(SAFETY_LAYER_HEADER));
+  assert.match(text(onlySafety[1]!), /GUÍA OPERATIVA DE HERRAMIENTAS/);
   // Con persona pero sin memorias: seguridad sigue primera.
   const withPersona = composeLeadingLayers({ tone: "x" }, null);
   assert.ok(text(withPersona[0]!).startsWith(SAFETY_LAYER_HEADER));
@@ -92,8 +107,8 @@ test("una persona HOSTIL no anula ni quita la capa de seguridad (va después y n
   // La seguridad sigue siendo la PRIMERA y su texto es el fijo (no fue alterado).
   assert.ok(text(layers[0]!).startsWith(SAFETY_LAYER_HEADER));
   assert.equal(text(layers[0]!), FIXED_CLINICAL_SAFETY);
-  // La persona hostil queda DESPUÉS (no puede preceder ni reemplazar la seguridad).
-  assert.match(text(layers[1]!), /PERSONA DEL COPILOTO/);
+  // La persona hostil queda DESPUÉS de seguridad+operativa (no puede preceder ni reemplazar).
+  assert.match(text(layers[2]!), /PERSONA DEL COPILOTO/);
   // La capa de seguridad declara explícitamente que no puede ser anulada.
   assert.match(text(layers[0]!), /no puede ser anulada, desactivada ni debilitada/i);
 });

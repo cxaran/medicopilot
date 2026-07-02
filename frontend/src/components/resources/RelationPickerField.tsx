@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import type { ResourceFormFieldCapability } from "@/core/api/contracts";
+import { RequiredHint } from "@/components/resources/FieldRequirement";
 import type { ResourceRow } from "@/core/resources/list-types";
 import {
   relationItemId,
@@ -160,6 +161,7 @@ export function RelationPickerField({
     <div>
       <label htmlFor={field.name} className="block text-sm font-medium text-slate-900">
         {field.label}
+        <RequiredHint required={field.required} />
       </label>
 
       {manual ? (

@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
 import { AnimatedOrb } from "@/components/ui/AnimatedOrb";
 import { Markdown } from "@/components/copilot/Markdown";
+import { MessageActions } from "@/components/copilot/MessageActions";
 import { ProviderIcon } from "@/components/copilot/ProviderIcon";
 import { avatarColor } from "@/components/ui/avatar-color";
 import { Badge, type BadgeTone } from "@/components/ui/Badge";
@@ -145,12 +146,28 @@ export interface ChatMessage {
   // "note" = nota de CONTEXTO (acción humana inline, p. ej. crear/editar un recurso desde el
   // expediente). No es un turno: se muestra distinta y entra al contexto del próximo turno. Su rol
   // de cable es "user" (acción del médico registrada), pero NO dispara una llamada al modelo.
-  kind?: "note";
+  // "ui" = UI inyectada por el médico (p. ej. el formulario oficial de un recurso al pulsar
+  // "Nuevo"/"Editar" en el expediente); se renderiza con GeneratedUi en el hilo.
+  kind?: "note" | "ui";
+  // UiSpec a renderizar cuando kind === "ui" (formulario del recurso abierto desde el expediente).
+  uiSpec?: UiSpec;
+  // Specs de las tools ``ui.*`` del turno, anclados al mensaje del asistente que lo cerró. NO se
+  // renderizan aquí (en vivo los muestra TurnToolCalls): existen para PERSISTIRSE con el mensaje
+  // (payload.ui) y restaurarse gobernados al recargar, como mensajes kind "ui". No agrandan el
+  // contexto del modelo (el historial de cable sólo lleva el texto).
+  uiSpecs?: readonly UiSpec[];
+  // Notas deterministas de los planes P1 aprobados y ejecutados en el turno, ancladas igual que
+  // los specs. Se persisten (payload.approved_plans) y al recargar re-siembran los segmentos
+  // ``preserve`` de la compactación: el modelo no olvida qué escribió ni con qué ids.
+  approvedPlanNotes?: readonly string[];
   image?: AttachedImage;
   isError?: boolean;
   // Resumen de razonamiento del turno (proveedores con thinking). Se muestra colapsado
   // bajo la respuesta del asistente, como en OpenClaw.
   reasoning?: string;
+  // Turno del gateway que produjo este mensaje del asistente: ancla sus tool calls al lugar del
+  // hilo donde ocurrieron (no se persiste; las tool calls son efímeras de la sesión).
+  turnId?: string;
 }
 
 type ToolCallStatus = "running" | "awaiting_approval" | "success" | "error" | "rejected";
@@ -167,6 +184,10 @@ interface ToolCallView {
   resultText?: string;
   resultContent?: unknown;
   errorText?: string;
+  // Solo tools ui.* INTERACTIVAS (formularios/botones/paneles de revisión): el médico ya las usó
+  // (envió/confirmó/hizo clic) → la tarjeta se contrae al grupo de herramientas del turno. Las de
+  // visualización (gráficas/reportes) nunca se marcan como usadas: quedan visibles en el hilo.
+  uiUsed?: boolean;
 }
 
 const TOOL_STATUS: Record<ToolCallStatus, { label: string; tone: BadgeTone }> = {
@@ -193,13 +214,17 @@ const GLOBAL_SUGGESTIONS: readonly string[] = [
 ];
 
 function previewContent(value: unknown): string {
-  let text: string;
+  // OJO: JSON.stringify devuelve ``undefined`` (no un string) para undefined/función/símbolo —
+  // p. ej. código del sandbox que no retorna nada—; se cae a String(value) ("undefined"), que es
+  // la representación fiel de ese resultado.
+  let text: string | undefined;
   try {
     text = typeof value === "string" ? value : JSON.stringify(value, null, 2);
   } catch {
     text = String(value);
   }
-  return text.length > 800 ? `${text.slice(0, 800)}…` : text;
+  const safe = text ?? String(value);
+  return safe.length > 800 ? `${safe.slice(0, 800)}…` : safe;
 }
 
 const STATUS_LABEL: Record<ConnectionStatus, string> = {
@@ -254,6 +279,8 @@ export function CopilotPanel({
   embedded = false,
   initialMessages,
   onMessagesChange,
+  onMessagesRemoved,
+  onTruncateFrom,
 }: Readonly<{
   // Contexto clínico activo CONTROLADO por el host (p. ej. el shell chat-first: paciente=chat).
   // Si se omite (uso independiente en /copilot), el panel lo gestiona internamente como antes.
@@ -273,6 +300,15 @@ export function CopilotPanel({
   // Notifica al host el transcript completo en cada cambio, para que persista los mensajes nuevos
   // (append). Persistir el transcript NO es una escritura clínica (no pasa por P1).
   onMessagesChange?: (messages: readonly ChatMessage[]) => void;
+  // GESTIÓN DEL HISTORIAL: el panel quita mensajes del transcript local y notifica al host para
+  // que propague la baja lógica al backend (sin host, la limpieza es sólo local). Borrar historial
+  // de chat no toca datos clínicos.
+  onMessagesRemoved?: (messageIds: readonly string[]) => void;
+  // Truncado desde un mensaje (inclusive) hasta el final: lo usan "reiniciar desde aquí" y también
+  // Recrear/Editar (que recortan el hilo local; sin propagarlo, lo recortado reaparecería al
+  // recargar). El reinicio del hilo COMPLETO no vive aquí: es una opción del sidebar (menú de
+  // opciones del chat), que el ChatShell resuelve remontando el panel vacío.
+  onTruncateFrom?: (messageId: string) => void;
 }> = {}) {
   const [status, setStatus] = useState<ConnectionStatus>("idle");
   // Estado de la máquina de reconexión (resiliencia del WS). Se refleja en la UI; el ref es la
@@ -291,11 +327,17 @@ export function CopilotPanel({
   // Paletas "/" del composer (D1): resultados de la búsqueda de pacientes ("/paciente <texto>").
   const [patientResults, setPatientResults] = useState<PatientSearchCandidate[]>([]);
   const [patientSearchLoading, setPatientSearchLoading] = useState(false);
-  // Notas de contexto (acciones humanas inline del expediente): se consumen del shell y se añaden
-  // al hilo SIN disparar un turno. ``lastNoteIdRef`` marca hasta dónde ya se consumió.
+  // Notas de contexto (acciones humanas del expediente/tabla/agenda): se consumen del shell y se
+  // añaden al hilo SIN disparar un turno. El consumo es POR ID y DIRIGIDO (``note.target``): este
+  // chat sólo toma las suyas; las dirigidas a otro paciente permanecen en cola hasta abrir su chat.
+  // ``consumedNoteIdsRef`` evita el doble-append entre el timeout y la retirada de la cola.
   const chatNav = useChatNavOptional();
   const contextNotes = chatNav?.contextNotes ?? null;
-  const lastNoteIdRef = useRef(0);
+  const consumedNoteIdsRef = useRef<Set<number>>(new Set());
+  // Formularios inyectados desde el expediente (botones Nuevo/Editar). ``lastFormIdRef`` marca hasta
+  // dónde ya se consumió (mismo patrón que las notas de contexto).
+  const chatForms = chatNav?.chatForms ?? null;
+  const lastFormIdRef = useRef(0);
   // Esfuerzo de razonamiento NORMALIZADO por turno (P5). Solo se ofrece/envía cuando el modelo
   // negociado soporta el control; default "medium" (se omite en modelos sin razonamiento).
   const [reasoningEffort, setReasoningEffort] = useState<NormalizedReasoningEffort>("medium");
@@ -371,7 +413,21 @@ export function CopilotPanel({
   );
   // Planes APROBADOS que se conservan en el contexto verbatim (preserve): así el modelo
   // recuerda las acciones ya ejecutadas y sus identificadores aunque se compacte la charla.
-  const approvedPlansRef = useRef<ContextSegment[]>([]);
+  // Se SIEMBRAN desde el historial persistido (payload.approved_plans de cada mensaje): sin
+  // esto, tras recargar el modelo olvidaba qué escribió y con qué ids.
+  const [seededPlanSegments] = useState<ContextSegment[]>(() =>
+    (initialMessages ?? [])
+      .flatMap((message) => message.approvedPlanNotes ?? [])
+      .map((note) => ({
+        messages: [{ role: "system" as const, content: [{ type: "text" as const, text: note }] }],
+        text: note,
+        preserve: true,
+      })),
+  );
+  const approvedPlansRef = useRef<ContextSegment[]>(seededPlanSegments);
+  // Notas de plan del turno EN VUELO, para anclarlas al mensaje del asistente al cerrar (y que
+  // se persistan con él). Clave = turnId.
+  const turnPlanNotesRef = useRef<Map<string, string[]>>(new Map());
   // Presupuesto del modelo seleccionado (ventana efectiva + input usable), para usarlo dentro
   // de los handlers del turno (closures con deps vacías).
   const budgetRef = useRef<{ window: number; usable: number }>({ window: 0, usable: 0 });
@@ -418,14 +474,44 @@ export function CopilotPanel({
     return `m${idRef.current}`;
   };
 
+  // Espejo síncrono de las tool calls para los handlers de eventos (closures con deps vacías):
+  // al cerrar el turno se leen de aquí los specs ``ui.*`` a anclar en el mensaje del asistente.
+  const toolCallsRef = useRef<ToolCallView[]>([]);
+
   const upsertToolCall = (view: ToolCallView): void => {
+    toolCallsRef.current = [...toolCallsRef.current, view];
     setToolCalls((prev) => [...prev, view]);
   };
 
   const patchToolCall = (callId: string, patch: Partial<ToolCallView>): void => {
+    toolCallsRef.current = toolCallsRef.current.map((call) =>
+      call.callId === callId ? { ...call, ...patch } : call,
+    );
     setToolCalls((prev) =>
       prev.map((call) => (call.callId === callId ? { ...call, ...patch } : call)),
     );
+  };
+
+  // USO de interfaces generadas: al enviar/confirmar/hacer clic, la tool ui.* INTERACTIVA se marca
+  // usada y su tarjeta se contrae al grupo de herramientas del turno. Las de visualización
+  // (gráficas/reportes) nunca se contraen (isInlineToolCall las mantiene completas aunque se marquen).
+  const markUiUsed = (callId: string): void => {
+    patchToolCall(callId, { uiUsed: true });
+  };
+
+  // Mensajes "ui" (formularios inyectados desde el expediente o restaurados del historial) ya
+  // USADOS en esta sesión: se contraen a un resumen expandible. Efímero (no se persiste): al
+  // recargar, la interfaz restaurada vuelve expandida.
+  const [usedUiMessageIds, setUsedUiMessageIds] = useState<ReadonlySet<string>>(new Set());
+  const markUiMessageUsed = (messageId: string): void => {
+    setUsedUiMessageIds((prev) => {
+      if (prev.has(messageId)) {
+        return prev;
+      }
+      const next = new Set(prev);
+      next.add(messageId);
+      return next;
+    });
   };
 
   useEffect(() => {
@@ -443,12 +529,22 @@ export function CopilotPanel({
     if (!contextNotes || contextNotes.length === 0) {
       return;
     }
-    const fresh = contextNotes.filter((note) => note.id > lastNoteIdRef.current);
+    // Sólo las notas de ESTE chat: comodín (target undefined = acción inline del chat activo) o
+    // destinatario exacto (paciente activo, o null para el chat global). Las demás siguen en cola.
+    const activePatient = activeContext?.patientId ?? null;
+    const fresh = contextNotes.filter(
+      (note) =>
+        !consumedNoteIdsRef.current.has(note.id) &&
+        (note.target === undefined || note.target === activePatient),
+    );
     if (fresh.length === 0) {
       return;
     }
     const timer = setTimeout(() => {
-      lastNoteIdRef.current = fresh[fresh.length - 1].id;
+      const ids = fresh.map((note) => note.id);
+      for (const id of ids) {
+        consumedNoteIdsRef.current.add(id);
+      }
       setMessages((prev) => [
         ...prev,
         ...fresh.map((note) => ({
@@ -458,9 +554,39 @@ export function CopilotPanel({
           text: note.text,
         })),
       ]);
+      // Retira de la cola compartida las notas ya añadidas (consumo por id: las de otros chats
+      // no se tocan). El guard de ``consumedNoteIdsRef`` cubre la ventana hasta el re-render.
+      chatNav?.consumeContextNotes(ids);
     }, 0);
     return () => clearTimeout(timer);
-  }, [contextNotes]);
+  }, [contextNotes, activeContext, chatNav]);
+
+  // Consume los formularios inyectados desde el expediente (botones Nuevo/Editar) y los añade al hilo
+  // como mensajes "ui" (el formulario oficial del recurso, renderizado con GeneratedUi). No dispara un
+  // turno del modelo: el médico lo completa y al Guardar escribe directo (su acto de aprobación).
+  useEffect(() => {
+    if (!chatForms || chatForms.length === 0) {
+      return;
+    }
+    const fresh = chatForms.filter((form) => form.id > lastFormIdRef.current);
+    if (fresh.length === 0) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      lastFormIdRef.current = fresh[fresh.length - 1].id;
+      setMessages((prev) => [
+        ...prev,
+        ...fresh.map((form) => ({
+          id: nextId(),
+          role: "assistant" as const,
+          kind: "ui" as const,
+          uiSpec: form.spec,
+          text: "",
+        })),
+      ]);
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [chatForms]);
 
   // Mantiene el ref del contexto activo en sincronía para los handlers del turno (closures).
   useEffect(() => {
@@ -577,15 +703,45 @@ export function CopilotPanel({
       setTurn(next);
 
       if (event.type === "turn.completed") {
-        if (next.assistantText.trim()) {
+        // Specs de UI generados por las tools ``ui.*`` de ESTE turno: se anclan al mensaje del
+        // asistente para PERSISTIRSE con él (payload.ui) y sobrevivir a recargas (se restauran
+        // gobernados como mensajes kind "ui"). En vivo los sigue mostrando TurnToolCalls. Las
+        // RESPUESTAS SUGERIDAS son efímeras del hilo vivo (caducan con el siguiente mensaje):
+        // no se persisten ni restauran.
+        const turnUiSpecs: UiSpec[] = next.turnId
+          ? toolCallsRef.current
+              .filter((call) => {
+                if (call.turnId !== next.turnId) {
+                  return false;
+                }
+                const spec = toolCallUiSpec(call);
+                return spec !== null && spec.kind !== "suggested_replies";
+              })
+              .map((call) => call.resultContent as UiSpec)
+          : [];
+        // Notas de los planes P1 aprobados/ejecutados en este turno: se anclan al mensaje para
+        // persistirse con él (payload.approved_plans) y resembrar los preserve al recargar.
+        const turnPlanNotes = next.turnId
+          ? (turnPlanNotesRef.current.get(next.turnId) ?? [])
+          : [];
+        if (next.turnId) {
+          turnPlanNotesRef.current.delete(next.turnId);
+        }
+        // El mensaje ancla se crea si hay texto O contenido que conservar (specs de UI o notas de
+        // plan); MessageBubble no muestra burbuja vacía.
+        if (next.assistantText.trim() || turnUiSpecs.length > 0 || turnPlanNotes.length > 0) {
           setMessages((prev) => [
             ...prev,
             {
               id: nextId(),
               role: "assistant",
               text: next.assistantText,
+              // Ancla las tool calls de este turno al mensaje (se muestran contraídas encima).
+              ...(next.turnId ? { turnId: next.turnId } : {}),
               // Conserva el razonamiento (si lo hubo) para mostrarlo colapsado bajo la respuesta.
               ...(next.reasoningText.trim() ? { reasoning: next.reasoningText } : {}),
+              ...(turnUiSpecs.length > 0 ? { uiSpecs: turnUiSpecs } : {}),
+              ...(turnPlanNotes.length > 0 ? { approvedPlanNotes: turnPlanNotes } : {}),
             },
           ]);
         }
@@ -616,6 +772,8 @@ export function CopilotPanel({
             role: "assistant",
             text: turnFailureMessage(next.error, protocolRef.current),
             isError: true,
+            // También el mensaje de fallo ancla las tool calls del turno (si las hubo).
+            ...(next.turnId ? { turnId: next.turnId } : {}),
           },
         ]);
         turnRef.current = initialTurnState();
@@ -1013,6 +1171,14 @@ export function CopilotPanel({
     if ((!text && !image) || status !== "connected" || isBusy) {
       return;
     }
+    // Las RESPUESTAS SUGERIDAS pendientes caducan al enviar CUALQUIER mensaje (elegido de los
+    // chips o escrito a mano): se marcan usadas para que se contraigan y no queden clicables en
+    // turnos viejos (la conversación ya siguió por otro camino).
+    for (const call of toolCallsRef.current) {
+      if (!call.uiUsed && toolCallUiSpec(call)?.kind === "suggested_replies") {
+        patchToolCall(call.callId, { uiUsed: true });
+      }
+    }
     const userMessage: ChatMessage = {
       id: nextId(),
       role: "user",
@@ -1106,6 +1272,99 @@ export function CopilotPanel({
     clearAttachedImage();
   };
 
+  // RECREAR (acción del mensaje del agente): regenera la respuesta. Quita el mensaje del asistente
+  // y todo lo posterior, y reenvía el mensaje del usuario que lo originó. ``messagesRef`` se ajusta
+  // a mano antes del envío para evitar el race con ``sendUserTurn`` (que lee el ref, no el estado).
+  const regenerateAssistant = (assistantId: string): void => {
+    if (status !== "connected" || isBusy) {
+      return;
+    }
+    const msgs = messagesRef.current;
+    const idx = msgs.findIndex((message) => message.id === assistantId);
+    if (idx < 0) {
+      return;
+    }
+    let userIdx = idx - 1;
+    while (userIdx >= 0 && msgs[userIdx].role !== "user") {
+      userIdx -= 1;
+    }
+    if (userIdx < 0) {
+      return;
+    }
+    const userMessage = msgs[userIdx];
+    const base = msgs.slice(0, userIdx);
+    messagesRef.current = base;
+    setMessages(base);
+    // Propaga el recorte al backend ANTES de reenviar: sin esto, lo recortado reaparecería al
+    // recargar (seguía persistido). El host serializa reset y append en la misma cola.
+    onTruncateFrom?.(userMessage.id);
+    void sendUserTurn(userMessage.text, userMessage.image ?? null);
+  };
+
+  // EDITAR (acción del mensaje del usuario): carga el texto en el composer para reescribirlo. Quita
+  // el mensaje y lo posterior (al reenviar, la conversación continúa desde ahí) y enfoca el composer.
+  const editUserMessage = (userId: string): void => {
+    if (isBusy) {
+      return;
+    }
+    const msgs = messagesRef.current;
+    const idx = msgs.findIndex((message) => message.id === userId);
+    if (idx < 0) {
+      return;
+    }
+    const base = msgs.slice(0, idx);
+    messagesRef.current = base;
+    setMessages(base);
+    // Propaga el recorte al backend (ver regenerateAssistant): el hilo continúa desde aquí.
+    onTruncateFrom?.(msgs[idx].id);
+    setInput(msgs[idx].text);
+    window.requestAnimationFrame(() => {
+      document.getElementById("copilot-composer-input")?.focus();
+    });
+  };
+
+  // ELIMINAR (acción de cualquier mensaje): quita SOLO ese mensaje del hilo, conservando el resto.
+  // Limpieza del historial de chat (no es un borrado clínico); el host propaga la baja al backend.
+  const deleteTranscriptMessage = (messageId: string): void => {
+    if (isBusy) {
+      return;
+    }
+    const msgs = messagesRef.current;
+    const base = msgs.filter((message) => message.id !== messageId);
+    if (base.length === msgs.length) {
+      return;
+    }
+    messagesRef.current = base;
+    setMessages(base);
+    onMessagesRemoved?.([messageId]);
+  };
+
+  // REINICIAR DESDE AQUÍ (acción de cualquier mensaje): recorta este mensaje y todo lo posterior;
+  // la conversación continúa desde el mensaje anterior. Pide confirmación (acción destructiva).
+  const resetFromMessage = (messageId: string): void => {
+    if (isBusy) {
+      return;
+    }
+    const msgs = messagesRef.current;
+    const idx = msgs.findIndex((message) => message.id === messageId);
+    if (idx < 0) {
+      return;
+    }
+    const removedCount = msgs.length - idx;
+    if (
+      !window.confirm(
+        `¿Reiniciar la conversación desde este punto? Se eliminarán ${removedCount} mensaje(s) ` +
+          "del historial de chat (los datos del expediente no se tocan).",
+      )
+    ) {
+      return;
+    }
+    const base = msgs.slice(0, idx);
+    messagesRef.current = base;
+    setMessages(base);
+    onTruncateFrom?.(messageId);
+  };
+
   // Mantiene fresca la vía de envío para la cola del dictado (sendUserTurn cambia cada render).
   useEffect(() => {
     sendUserTurnRef.current = (text: string): void => {
@@ -1194,6 +1453,10 @@ export function CopilotPanel({
           ...approvedPlansRef.current,
           { messages: [{ role: "system", content: [{ type: "text", text: note }] }], text: note, preserve: true },
         ];
+        // Registra la nota en su turno: al cerrarse, se ancla al mensaje del asistente y se
+        // persiste (payload.approved_plans) para resembrar los preserve al recargar.
+        const turnNotes = turnPlanNotesRef.current.get(pending.turnId) ?? [];
+        turnPlanNotesRef.current.set(pending.turnId, [...turnNotes, note]);
       }
       clientRef.current?.sendToolResult(pending.turnId, callId, result);
     });
@@ -1220,6 +1483,31 @@ export function CopilotPanel({
   const badge = gatewayConfigured
     ? reconnectBadge(reconnect, reconnected)
     : { label: STATUS_LABEL[status], tone: STATUS_TONE[status] };
+
+  // AGRUPACIÓN POR TURNO: las tool calls se muestran EN el turno donde ocurrieron (ancladas al
+  // mensaje del asistente vía ``turnId``), no acumuladas al final del hilo. Las del turno EN VUELO
+  // se muestran en vivo bajo el orbe; las huérfanas (turno sin mensaje anclado, p. ej. respuesta
+  // vacía o mensaje borrado) caen al final para no perderse.
+  const toolCallsByTurn = new Map<string, ToolCallView[]>();
+  for (const call of toolCalls) {
+    const group = toolCallsByTurn.get(call.turnId);
+    if (group) {
+      group.push(call);
+    } else {
+      toolCallsByTurn.set(call.turnId, [call]);
+    }
+  }
+  const claimedTurnIds = new Set<string>();
+  for (const message of messages) {
+    if (message.turnId) {
+      claimedTurnIds.add(message.turnId);
+    }
+  }
+  const liveTurnId = isBusy ? turn.turnId : null;
+  const liveToolCalls = liveTurnId ? (toolCallsByTurn.get(liveTurnId) ?? []) : [];
+  const orphanTurnIds = [...toolCallsByTurn.keys()].filter(
+    (turnId) => !claimedTurnIds.has(turnId) && turnId !== liveTurnId,
+  );
 
   return (
     <div
@@ -1359,19 +1647,88 @@ export function CopilotPanel({
             </p>
           )}
 
-          {messages.map((message) => (
-            <MessageBubble key={message.id} message={message} />
-          ))}
+          {messages.map((message) => {
+            if (message.kind === "ui" && message.uiSpec) {
+              // Formulario del recurso abierto desde el expediente (botón Nuevo/Editar) o interfaz
+              // restaurada del historial: se renderiza con GeneratedUi como un mensaje del asistente.
+              // Al Guardar reporta como nota de contexto (sin turno del modelo) y refresca las listas
+              // del expediente vía bumpRecordVersion. Una interfaz INTERACTIVA ya usada se contrae a
+              // un resumen expandible (las de visualización nunca se contraen).
+              const used =
+                usedUiMessageIds.has(message.id) && !DISPLAY_UI_KINDS.has(message.uiSpec.kind);
+              return (
+                <div key={message.id} className="flex items-start justify-start gap-2.5">
+                  <AnimatedOrb size={30} />
+                  <div className="min-w-0 flex-1 pt-0.5">
+                    <UsedUiCollapse collapsed={used}>
+                      <GeneratedUi
+                        spec={message.uiSpec}
+                        onSendFollowup={(text) => {
+                          markUiMessageUsed(message.id);
+                          chatNav?.pushContextNote(text);
+                          chatNav?.bumpRecordVersion();
+                        }}
+                        onOpenRecord={(context) => {
+                          markUiMessageUsed(message.id);
+                          setActiveContext(context);
+                        }}
+                      />
+                    </UsedUiCollapse>
+                  </div>
+                </div>
+              );
+            }
+            const turnToolCalls = message.turnId
+              ? toolCallsByTurn.get(message.turnId)
+              : undefined;
+            return (
+              <Fragment key={message.id}>
+                {/* Ancla de texto vacío (turno que sólo rindió UI): conserva sus tool calls y sus
+                    specs persistibles, sin pintar una burbuja vacía. */}
+                {message.text.trim().length > 0 && (
+                  <MessageBubble
+                    message={message}
+                    actionsDisabled={isBusy}
+                    onRegenerate={() => regenerateAssistant(message.id)}
+                    onEdit={() => editUserMessage(message.id)}
+                    onDelete={() => deleteTranscriptMessage(message.id)}
+                    onResetFrom={() => resetFromMessage(message.id)}
+                  />
+                )}
+                {/* Herramientas del turno DEBAJO del mensaje (el razonamiento queda arriba, dentro
+                    del mensaje): los pasos de datos y las interfaces YA USADAS van contraídos; las
+                    interfaces vigentes (formulario sin enviar, botones sin usar, aprobaciones) y
+                    las visualizaciones (gráficas/reportes) se muestran completas. El ``pl-10``
+                    alinea con la columna de texto del asistente (orbe 30px + gap 10px). */}
+                {turnToolCalls && turnToolCalls.length > 0 && (
+                  <div className="pl-10">
+                    <TurnToolCalls
+                      calls={turnToolCalls}
+                      onApprove={approveWrite}
+                      onReject={rejectWrite}
+                      onSendFollowup={handleSendFollowup}
+                      onOpenRecord={setActiveContext}
+                      onUiUsed={markUiUsed}
+                    />
+                  </div>
+                )}
+              </Fragment>
+            );
+          })}
 
-          {toolCalls.map((call) => (
-            <ToolCallCard
-              key={call.callId}
-              call={call}
-              onApprove={() => approveWrite(call.callId)}
-              onReject={() => rejectWrite(call.callId)}
-              onSendFollowup={handleSendFollowup}
-              onOpenRecord={setActiveContext}
-            />
+          {/* Huérfanas: turnos cuyo mensaje anclado no existe (respuesta vacía o mensaje borrado).
+              Se conservan al final del hilo, contraídas, para no perder su rastro. */}
+          {orphanTurnIds.map((turnId) => (
+            <div key={turnId} className="pl-10">
+              <TurnToolCalls
+                calls={toolCallsByTurn.get(turnId) ?? []}
+                onApprove={approveWrite}
+                onReject={rejectWrite}
+                onSendFollowup={handleSendFollowup}
+                onOpenRecord={setActiveContext}
+                onUiUsed={markUiUsed}
+              />
+            </div>
           ))}
 
           {isBusy && (
@@ -1381,7 +1738,7 @@ export function CopilotPanel({
                 {turn.reasoningText && <ReasoningPanel reasoning={turn.reasoningText} live />}
                 {turn.assistantText ? (
                   <Markdown content={turn.assistantText} />
-                ) : turn.reasoningText ? null : (
+                ) : turn.reasoningText || liveToolCalls.length > 0 ? null : (
                   <div className="flex gap-1.5 py-1.5" aria-label="Pensando…">
                     <span
                       className="h-[7px] w-[7px] rounded-full bg-[var(--tx3)]"
@@ -1394,6 +1751,22 @@ export function CopilotPanel({
                     <span
                       className="h-[7px] w-[7px] rounded-full bg-[var(--tx3)]"
                       style={{ animation: "mcbounce 1s infinite .3s" }}
+                    />
+                  </div>
+                )}
+                {/* Herramientas del turno EN VUELO, DEBAJO del contenido (el razonamiento va arriba):
+                    el grupo se ve abierto mientras se ejecutan (patrón del razonamiento en vivo); al
+                    completarse el turno se re-anclan contraídas bajo el mensaje del asistente. */}
+                {liveToolCalls.length > 0 && (
+                  <div className="mt-2">
+                    <TurnToolCalls
+                      calls={liveToolCalls}
+                      live
+                      onApprove={approveWrite}
+                      onReject={rejectWrite}
+                      onSendFollowup={handleSendFollowup}
+                      onOpenRecord={setActiveContext}
+                      onUiUsed={markUiUsed}
                     />
                   </div>
                 )}
@@ -1507,6 +1880,7 @@ export function CopilotPanel({
             )}
 
             <Input
+              id="copilot-composer-input"
               value={input}
               onChange={(event) => setInput(event.target.value)}
               onKeyDown={(event) => {
@@ -2195,7 +2569,22 @@ function ReasoningPanel({
   );
 }
 
-function MessageBubble({ message }: Readonly<{ message: ChatMessage }>) {
+function MessageBubble({
+  message,
+  actionsDisabled = false,
+  onRegenerate,
+  onEdit,
+  onDelete,
+  onResetFrom,
+}: Readonly<{
+  message: ChatMessage;
+  actionsDisabled?: boolean;
+  onRegenerate?: () => void;
+  onEdit?: () => void;
+  onDelete?: () => void;
+  onResetFrom?: () => void;
+}>) {
+  const hasText = Boolean(message.text && message.text.trim());
   // Nota de contexto (acción humana inline): pill centrada y discreta; no es ni del médico ni del
   // agente, es un registro de lo que se hizo desde el expediente, visible y en contexto.
   if (message.kind === "note") {
@@ -2213,7 +2602,7 @@ function MessageBubble({ message }: Readonly<{ message: ChatMessage }>) {
   // con esquina inferior derecha recortada y sombra suave.
   if (isUser) {
     return (
-      <div className="user-message-enter flex justify-end">
+      <div className="user-message-enter group flex flex-col items-end">
         <div className="max-w-[82%] whitespace-pre-wrap rounded-[18px] rounded-br-[6px] bg-[var(--panel)] px-4 py-2.5 text-[14px] leading-relaxed text-[var(--tx)] shadow-[var(--soft)]">
           {message.image && (
             <>
@@ -2227,6 +2616,16 @@ function MessageBubble({ message }: Readonly<{ message: ChatMessage }>) {
           )}
           {message.text}
         </div>
+        {hasText && (
+          <MessageActions
+            text={message.text}
+            variant="user"
+            onEdit={onEdit}
+            onDelete={onDelete}
+            onResetFrom={onResetFrom}
+            disabled={actionsDisabled}
+          />
+        )}
       </div>
     );
   }
@@ -2234,7 +2633,7 @@ function MessageBubble({ message }: Readonly<{ message: ChatMessage }>) {
   // Mensaje del ASISTENTE: orbe animado como avatar + texto que fluye al lado (sin burbuja), fiel al
   // diseño. Se conserva el marcador "Borrador" (principio rector: toda salida de IA es un borrador).
   return (
-    <div className="flex items-start justify-start gap-2.5">
+    <div className="group flex items-start justify-start gap-2.5">
       <AnimatedOrb size={30} />
       <div className="min-w-0 flex-1 pt-0.5">
         {message.reasoning && <ReasoningPanel reasoning={message.reasoning} />}
@@ -2246,6 +2645,16 @@ function MessageBubble({ message }: Readonly<{ message: ChatMessage }>) {
           </div>
         ) : (
           <Markdown content={message.text} />
+        )}
+        {hasText && (
+          <MessageActions
+            text={message.text}
+            variant="agent"
+            onRegenerate={onRegenerate}
+            onDelete={onDelete}
+            onResetFrom={onResetFrom}
+            disabled={actionsDisabled}
+          />
         )}
       </div>
     </div>
@@ -2456,6 +2865,196 @@ function ToolCallCard({
       {(call.status === "error" || call.status === "rejected") && call.errorText && (
         <p className="mt-2 text-xs text-[var(--danger)]">{call.errorText}</p>
       )}
+    </div>
+  );
+}
+
+/**
+ * Kinds de UiSpec de VISUALIZACIÓN: su valor es lo que muestran (gráficas, reportes/propuestas de
+ * sólo lectura), no una acción por consumir → quedan visibles en el hilo permanentemente, aunque
+ * tengan algún botón de seguimiento. Los demás kinds son INTERACTIVOS (formularios, botones,
+ * paneles de revisión/confirmación): una vez usados se contraen.
+ */
+const DISPLAY_UI_KINDS: ReadonlySet<UiSpec["kind"]> = new Set<UiSpec["kind"]>([
+  "chart",
+  "template_promotion_proposal",
+]);
+
+/** UiSpec rendido por una tool ``ui.*`` exitosa (null si la llamada no renderiza interfaz). */
+function toolCallUiSpec(call: ToolCallView): UiSpec | null {
+  return call.status === "success" && call.name.startsWith("ui.") && isUiSpec(call.resultContent)
+    ? call.resultContent
+    : null;
+}
+
+/**
+ * Tool call que debe verse COMPLETA en el hilo (no contraída):
+ * - escrituras a la ESPERA de aprobación (la tarjeta P1 es interactiva; ocultarla bloquearía el turno);
+ * - interfaces de VISUALIZACIÓN (gráficas/reportes): permanentes;
+ * - interfaces INTERACTIVAS (formularios/botones/paneles) mientras el médico NO las haya usado.
+ * El resto (pasos de datos e interfaces ya usadas) se contrae en el resumen del turno.
+ */
+function isInlineToolCall(call: ToolCallView): boolean {
+  if (call.status === "awaiting_approval") {
+    return true;
+  }
+  const spec = toolCallUiSpec(call);
+  if (!spec) {
+    return false;
+  }
+  return DISPLAY_UI_KINDS.has(spec.kind) || !call.uiUsed;
+}
+
+/**
+ * Envoltorio de una interfaz generada YA USADA: la contrae a un resumen expandible ("Interfaz
+ * utilizada"), mismo lenguaje visual del panel de razonamiento. Sin ``collapsed`` rinde el hijo
+ * tal cual (interfaz vigente o de visualización).
+ */
+function UsedUiCollapse({
+  collapsed,
+  children,
+}: Readonly<{ collapsed: boolean; children: ReactNode }>) {
+  if (!collapsed) {
+    return <>{children}</>;
+  }
+  return (
+    <details className="group/usedui">
+      <summary className="inline-flex cursor-pointer select-none list-none items-center gap-1.5 rounded-[9px] border border-[var(--border)] bg-[var(--bg2)] px-2.5 py-1 text-[11.5px] font-medium text-[var(--tx3)] transition hover:text-[var(--tx2)] [&::-webkit-details-marker]:hidden">
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+          className="shrink-0 transition-transform group-open/usedui:rotate-90"
+        >
+          <path d="M9 6l6 6-6 6" />
+        </svg>
+        Interfaz utilizada
+      </summary>
+      <div className="mt-2 border-l-2 border-[var(--border2)] pl-3">{children}</div>
+    </details>
+  );
+}
+
+/**
+ * Herramientas de UN turno, en su lugar del hilo (patrón ReasoningPanel): los pasos de datos van
+ * contraídos bajo un resumen con el conteo, expandible si el médico quiere el detalle; las que
+ * renderizan interfaz o esperan aprobación se muestran completas debajo. Con ``live`` (turno en
+ * vuelo) el grupo se ve abierto mientras se ejecutan.
+ */
+function TurnToolCalls({
+  calls,
+  live = false,
+  onApprove,
+  onReject,
+  onSendFollowup,
+  onOpenRecord,
+  onUiUsed,
+}: Readonly<{
+  calls: readonly ToolCallView[];
+  live?: boolean;
+  onApprove: (callId: string) => void;
+  onReject: (callId: string) => void;
+  onSendFollowup: (text: string) => void;
+  onOpenRecord?: (context: ActiveClinicalContext) => void;
+  // Marca una tool ui.* como USADA cuando su interfaz dispara un seguimiento o abre el expediente
+  // (isInlineToolCall contrae las interactivas usadas; las de visualización quedan intactas).
+  onUiUsed?: (callId: string) => void;
+}>) {
+  const steps = calls.filter((call) => !isInlineToolCall(call));
+  const inline = calls.filter(isInlineToolCall);
+  // Tarjeta con los callbacks de uso envueltos: cualquier interacción de la interfaz generada
+  // (enviar formulario, confirmar plan, clic de botón, abrir expediente) marca la llamada usada.
+  const renderCard = (call: ToolCallView): ReactNode => (
+    <ToolCallCard
+      key={call.callId}
+      call={call}
+      onApprove={() => onApprove(call.callId)}
+      onReject={() => onReject(call.callId)}
+      onSendFollowup={(text) => {
+        onUiUsed?.(call.callId);
+        onSendFollowup(text);
+      }}
+      onOpenRecord={
+        onOpenRecord
+          ? (context) => {
+              onUiUsed?.(call.callId);
+              onOpenRecord(context);
+            }
+          : undefined
+      }
+    />
+  );
+  const running = steps.some((call) => call.status === "running");
+  const failed = steps.filter(
+    (call) => call.status === "error" || call.status === "rejected",
+  ).length;
+  return (
+    <div className="space-y-2">
+      {steps.length > 0 && (
+        <details open={live} className="group/tools">
+          <summary className="inline-flex cursor-pointer select-none list-none items-center gap-1.5 rounded-[9px] border border-[var(--border)] bg-[var(--bg2)] px-2.5 py-1 text-[11.5px] font-medium text-[var(--tx3)] transition hover:text-[var(--tx2)] [&::-webkit-details-marker]:hidden">
+            {running ? (
+              <span
+                aria-hidden="true"
+                className="inline-block h-[11px] w-[11px] shrink-0 rounded-full border-[1.7px] border-[var(--border2)] border-t-[var(--accent-tx)]"
+                style={{ animation: "mc-spin .7s linear infinite" }}
+              />
+            ) : (
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+                className="shrink-0 transition-transform group-open/tools:rotate-90"
+              >
+                <path d="M9 6l6 6-6 6" />
+              </svg>
+            )}
+            {running
+              ? "Usando herramientas…"
+              : `${steps.length} ${steps.length === 1 ? "herramienta" : "herramientas"}`}
+            {!running && failed > 0 && (
+              <span className="text-[var(--danger)]">
+                · {failed} con {failed === 1 ? "problema" : "problemas"}
+              </span>
+            )}
+          </summary>
+          <div className="mt-2 space-y-2 border-l-2 border-[var(--border2)] pl-3">
+            {steps.map(renderCard)}
+          </div>
+        </details>
+      )}
+      {inline.map((call) => {
+        // RESPUESTAS SUGERIDAS vigentes: chips LIMPIOS bajo el mensaje, sin el cromo de tarjeta de
+        // herramienta (deben leerse como continuaciones naturales, no como una tool). Al elegir
+        // una se envía el mensaje y la llamada se marca usada (cae contraída al grupo de pasos).
+        const spec = toolCallUiSpec(call);
+        if (spec && spec.kind === "suggested_replies") {
+          return (
+            <GeneratedUi
+              key={call.callId}
+              spec={spec}
+              onSendFollowup={(text) => {
+                onUiUsed?.(call.callId);
+                onSendFollowup(text);
+              }}
+              onOpenRecord={onOpenRecord}
+            />
+          );
+        }
+        return renderCard(call);
+      })}
     </div>
   );
 }

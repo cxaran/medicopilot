@@ -1,3 +1,4 @@
+import { AccountLogoutButton } from "@/components/account/AccountLogoutButton";
 import { AccountPasswordForm } from "@/components/account/AccountPasswordForm";
 import { AccountProfileForm } from "@/components/account/AccountProfileForm";
 import { AgentMemoriesSection } from "@/components/account/AgentMemoriesSection";
@@ -26,6 +27,7 @@ export default async function AccountPage() {
       <AiProvidersSection />
       <AgentPersonaSection />
       <AgentMemoriesSection />
+      <AccountLogoutButton />
     </div>
   );
 }

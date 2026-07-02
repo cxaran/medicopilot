@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { Geist } from "next/font/google";
-import Script from "next/script";
+import { cookies } from "next/headers";
 
 import "./globals.css";
 
@@ -17,22 +17,21 @@ export const metadata: Metadata = {
   description: "Shell base reutilizable para productos MedicoPilot",
 };
 
-// Aplica el tema persistido (localStorage "mp-theme") antes del primer paint para
-// evitar parpadeo claro->oscuro. El default SSR sigue siendo light (R1).
-const themeInitScript = `(function(){try{var t=localStorage.getItem("mp-theme");if(t==="dark"||t==="light"){document.documentElement.setAttribute("data-theme",t);}}catch(e){}})();`;
+// Clave de la preferencia de tema (cookie + localStorage). Debe coincidir con THEME_STORAGE_KEY
+// del ThemeToggle. La cookie permite fijar el tema en el SERVIDOR (sin parpadeo y SIN un <script>
+// inline en el árbol, que React 19 rechaza con "Encountered a script tag...").
+const THEME_COOKIE = "mp-theme";
 
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  // No-flash SIN script cliente: el tema persistido viaja en la cookie ``mp-theme`` y se aplica en
+  // ``data-theme`` del <html> durante el render del servidor. El ThemeToggle escribe la cookie al
+  // alternar; así el primer paint ya sale en el tema correcto.
+  const stored = (await cookies()).get(THEME_COOKIE)?.value;
+  const theme = stored === "dark" ? "dark" : "light";
+
   return (
-    <html lang="es" data-theme="light" className={geist.variable}>
-      <body>
-        {/* Aplica el tema persistido antes del primer paint (no-flash). Con next/script y
-            ``beforeInteractive`` Next lo inyecta en el HTML inicial; evita el warning de React por
-            renderizar un <script> crudo dentro del árbol de componentes. */}
-        <Script id="mp-theme-init" strategy="beforeInteractive">
-          {themeInitScript}
-        </Script>
-        {children}
-      </body>
+    <html lang="es" data-theme={theme} className={geist.variable}>
+      <body>{children}</body>
     </html>
   );
 }

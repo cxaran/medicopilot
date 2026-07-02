@@ -82,6 +82,28 @@ test("buildToolCatalog: escritura GATEADA con motivo si falta el permiso de crea
   assert.match(entry.reason ?? "", /prescriptions/);
 });
 
+test("buildToolCatalog: escritura PREAUTORIZADA (derivada del contrato) se declara sin estar en creable", () => {
+  // Las tools derivadas de update/acciones marcan approval.preauthorized: el contrato ya las
+  // autorizó (sólo aparecen si el backend concede el permiso), así que el gate de 'creable' no aplica.
+  const writeTool = {
+    name: "resource.update_appointments",
+    description: "",
+    kind: "write",
+    inputSchema: { type: "object", properties: {}, required: [], additionalProperties: false },
+    approval: {
+      actionType: "update_appointments",
+      targetResource: "appointments",
+      preauthorized: true,
+      summarize: () => "",
+    },
+    execute: async () => ({}),
+  } as unknown as ToolDefinition;
+  const [entry] = buildToolCatalog([writeTool], new Set()); // creable vacío
+  assert.equal(entry.status, "declared");
+  assert.equal(entry.targetResource, "appointments");
+  assert.equal(entry.reason, null);
+});
+
 test("effectiveTools: excluye escrituras gateadas, conserva lecturas", () => {
   const tools = listTools();
   // Médico que solo puede crear consultas (no recetas/diagnósticos/citas/items).

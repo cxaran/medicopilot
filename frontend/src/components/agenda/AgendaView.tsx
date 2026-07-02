@@ -227,7 +227,7 @@ function DayList({
         return (
           <div
             key={item.id}
-            className="flex w-full flex-wrap items-center gap-x-4 gap-y-2 rounded-[14px] border border-[var(--border)] bg-[var(--panel)] px-4 py-3.5"
+            className="flex w-full flex-wrap items-center gap-x-4 gap-y-2 rounded-[14px] border border-[var(--border)] bg-[var(--panel)] px-4 py-3.5 transition hover:border-[var(--accent-bd)]"
           >
             {/* Zona clicable: abre el chat del paciente (botón propio, no anida acciones). */}
             <button

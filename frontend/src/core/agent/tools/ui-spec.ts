@@ -11,6 +11,8 @@ export interface FormFieldSpec {
   placeholder?: string;
   required?: boolean;
   options?: { label: string; value: string }[];
+  /** Valor inicial (prellenado) del campo, p. ej. al crear con datos ya proporcionados. */
+  value?: string;
 }
 
 export interface FormSpec {
@@ -20,6 +22,26 @@ export interface FormSpec {
   fields: FormFieldSpec[];
   submit_label: string;
   submit_prompt: string;
+}
+
+/**
+ * Formulario de un RECURSO del contrato (Camino A) montado en el chat. A diferencia de `FormSpec`
+ * (formulario ad-hoc que el modelo describe campo a campo), aquí el agente sólo nombra el recurso y
+ * el modo; el FORMULARIO lo deriva el frontend del contrato `/resources` (campos, validaciones,
+ * allowlist) y, en particular, las RELACIONES (FK como patient_id/doctor_id) se renderizan como
+ * BUSCADORES por nombre — el médico nunca teclea UUIDs. Al guardar escribe directo por la API del
+ * recurso (RBAC server-side) y devuelve una nota de contexto al hilo; no obliga al modelo a invocar
+ * la tool de escritura. `values` PRELLENA con datos ya dados; `resource_id` es obligatorio en update.
+ */
+export interface ResourceFormSpec {
+  kind: "resource_form";
+  resource: string;
+  mode: "create" | "update";
+  title?: string;
+  /** Requerido en modo "update": id del registro a editar (resuelve detalle + URL de mutación). */
+  resource_id?: string;
+  /** Prellenado: pares campo→valor con los datos ya proporcionados (p. ej. el nombre). */
+  values?: Record<string, string>;
 }
 
 export interface ChartDatum {
@@ -36,7 +58,34 @@ export interface ChartSpec {
 
 export type ButtonAction =
   | { type: "message"; prompt: string }
-  | { type: "tool"; tool: string; args?: Record<string, unknown> };
+  | { type: "tool"; tool: string; args?: Record<string, unknown> }
+  // Enlace de CONTACTO externo (p. ej. abrir WhatsApp con un texto). No muta el sistema; al hacer
+  // clic abre la URL en otra pestaña. La URL se valida con `isSafeButtonUrl` (lista blanca estricta).
+  | { type: "link"; url: string };
+
+/**
+ * ¿La URL de un botón de enlace es segura para abrirse desde la UI generada por el modelo? Lista
+ * blanca ESTRICTA de canales de contacto: WhatsApp (wa.me / api.whatsapp.com), teléfono, correo y
+ * SMS. Se rechaza todo lo demás (http inseguro, dominios arbitrarios, javascript:/data:) para no
+ * abrir vías de phishing/exfiltración desde la salida del modelo.
+ */
+export function isSafeButtonUrl(url: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  const scheme = parsed.protocol.toLowerCase();
+  if (scheme === "tel:" || scheme === "mailto:" || scheme === "sms:") {
+    return true;
+  }
+  if (scheme === "https:") {
+    const host = parsed.hostname.toLowerCase();
+    return host === "wa.me" || host === "api.whatsapp.com";
+  }
+  return false;
+}
 
 // Clasificación de gobierno de un botón (MP-CTRL-0130). La resolución la calcula button-actions.ts
 // (catálogo + RBAC); parseButtonsSpec sólo valida la ESTRUCTURA y NO la fija (queda undefined hasta
@@ -61,6 +110,18 @@ export interface ButtonsSpec {
   buttons: ButtonSpec[];
 }
 
+/**
+ * RESPUESTAS SUGERIDAS (quick replies): el agente propone las posibles SIGUIENTES respuestas del
+ * médico como chips bajo su mensaje. Al hacer clic, el texto elegido se envía AUTOMÁTICAMENTE como
+ * mensaje del médico (un turno normal) y los chips se contraen (interfaz de un solo uso; además
+ * caducan al enviar cualquier otro mensaje). Sólo texto plano: nunca ejecutan tools ni escriben.
+ */
+export interface SuggestedRepliesSpec {
+  kind: "suggested_replies";
+  title?: string;
+  replies: string[];
+}
+
 // La spec de UI DINÁMICA en lista blanca (MP-CTRL-0117), el panel de CIERRE post-transcripción
 // (MP-CTRL-0120), el PLAN DE TAREAS revisable (MP-CTRL-0129) y la CHECKLIST DE CIERRE (MP-CTRL-0131)
 // se integran a la unión: se validan en su propio módulo y se pintan dentro de `GeneratedUi`, sin un
@@ -76,8 +137,10 @@ import type { WizardSpec } from "./wizard";
 
 export type UiSpec =
   | FormSpec
+  | ResourceFormSpec
   | ChartSpec
   | ButtonsSpec
+  | SuggestedRepliesSpec
   | DynamicFormSpec
   | DetectedActionsSpec
   | TaskPlanSpec
@@ -96,8 +159,10 @@ export function isUiSpec(value: unknown): value is UiSpec {
   const kind = (value as { kind?: unknown }).kind;
   return (
     kind === "form" ||
+    kind === "resource_form" ||
     kind === "chart" ||
     kind === "buttons" ||
+    kind === "suggested_replies" ||
     kind === "dynamic_form" ||
     kind === "detected_actions" ||
     kind === "task_plan" ||
@@ -112,6 +177,8 @@ export function isUiSpec(value: unknown): value is UiSpec {
 const MAX_FIELDS = 30;
 const MAX_DATA_POINTS = 60;
 const MAX_BUTTONS = 12;
+const MAX_REPLIES = 6;
+const MAX_REPLY_LENGTH = 140;
 const ALLOWED_FIELD_TYPES: FormFieldType[] = ["text", "number", "textarea", "select"];
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -151,6 +218,10 @@ export function parseFormSpec(input: unknown): ParseResult<FormSpec> {
     const placeholder = asString(raw.placeholder);
     if (placeholder) field.placeholder = placeholder;
     if (raw.required === true) field.required = true;
+    // Valor inicial (prellenado): permite renderizar el formulario ya con los datos que el médico
+    // proporcionó (p. ej. el nombre al crear un paciente), en vez de pedirlos por texto.
+    const value = asString(raw.value);
+    if (value !== undefined) field.value = value;
     if (type === "select") {
       if (!Array.isArray(raw.options) || raw.options.length === 0) {
         return { ok: false, error: `El campo select '${name}' requiere 'options'.` };
@@ -182,6 +253,43 @@ export function parseFormSpec(input: unknown): ParseResult<FormSpec> {
       submit_prompt: asString(input.submit_prompt) ?? asString(input.title) ?? "Formulario enviado",
     },
   };
+}
+
+export function parseResourceFormSpec(input: unknown): ParseResult<ResourceFormSpec> {
+  if (!isObject(input)) {
+    return { ok: false, error: "La especificación del formulario de recurso debe ser un objeto." };
+  }
+  const resource = asString(input.resource);
+  if (!resource) {
+    return { ok: false, error: "Se requiere 'resource' (nombre del recurso del contrato)." };
+  }
+  const mode = asString(input.mode) ?? "create";
+  if (mode !== "create" && mode !== "update") {
+    return { ok: false, error: "El 'mode' debe ser 'create' o 'update'." };
+  }
+  const resourceId = asString(input.resource_id);
+  if (mode === "update" && !resourceId) {
+    return { ok: false, error: "El modo 'update' requiere 'resource_id'." };
+  }
+  // Prellenado: sólo valores escalares (string/number/boolean) → string. Se descarta lo demás (no se
+  // inventan estructuras); los campos fuera del esquema los filtra después el formulario del contrato.
+  const values: Record<string, string> = {};
+  if (isObject(input.values)) {
+    for (const [key, raw] of Object.entries(input.values)) {
+      if (typeof raw === "string") {
+        values[key] = raw;
+      } else if (typeof raw === "number" || typeof raw === "boolean") {
+        values[key] = String(raw);
+      }
+    }
+  }
+
+  const spec: ResourceFormSpec = { kind: "resource_form", resource, mode };
+  const title = asString(input.title);
+  if (title) spec.title = title;
+  if (resourceId) spec.resource_id = resourceId;
+  if (Object.keys(values).length > 0) spec.values = values;
+  return { ok: true, spec };
 }
 
 export function parseChartSpec(input: unknown): ParseResult<ChartSpec> {
@@ -237,6 +345,10 @@ function parseButtonAction(raw: unknown): ButtonAction | null {
     }
     return isObject(raw.args) ? { type: "tool", tool, args: raw.args } : { type: "tool", tool };
   }
+  if (type === "link") {
+    const url = asString(raw.url);
+    return url && isSafeButtonUrl(url) ? { type: "link", url } : null;
+  }
   return null;
 }
 
@@ -274,6 +386,50 @@ export function parseButtonsSpec(input: unknown): ParseResult<ButtonsSpec> {
 }
 
 /**
+ * Valida la spec de RESPUESTAS SUGERIDAS. Sólo texto plano corto (los chips se envían como mensaje
+ * del médico al hacer clic); se descartan entradas vacías/duplicadas y se acota cantidad y largo
+ * para que la interfaz no degenere en un menú interminable.
+ */
+export function parseSuggestedRepliesSpec(input: unknown): ParseResult<SuggestedRepliesSpec> {
+  if (!isObject(input)) {
+    return { ok: false, error: "La especificación de respuestas sugeridas debe ser un objeto." };
+  }
+  if (!Array.isArray(input.replies) || input.replies.length === 0) {
+    return { ok: false, error: "Se requiere al menos una respuesta en 'replies'." };
+  }
+  if (input.replies.length > MAX_REPLIES) {
+    return { ok: false, error: `Demasiadas respuestas sugeridas (máximo ${MAX_REPLIES}).` };
+  }
+  const replies: string[] = [];
+  for (const raw of input.replies) {
+    if (typeof raw !== "string") {
+      return { ok: false, error: "Cada respuesta sugerida debe ser texto." };
+    }
+    const reply = raw.trim();
+    if (!reply) {
+      return { ok: false, error: "Las respuestas sugeridas no pueden estar vacías." };
+    }
+    if (reply.length > MAX_REPLY_LENGTH) {
+      return {
+        ok: false,
+        error: `Cada respuesta sugerida debe tener como máximo ${MAX_REPLY_LENGTH} caracteres.`,
+      };
+    }
+    if (!replies.includes(reply)) {
+      replies.push(reply);
+    }
+  }
+  return {
+    ok: true,
+    spec: {
+      kind: "suggested_replies",
+      ...(asString(input.title) ? { title: asString(input.title) } : {}),
+      replies,
+    },
+  };
+}
+
+/**
  * Mensaje de seguimiento al enviar un formulario generado: el envío continúa la
  * conversación con el modelo (no escribe nada por sí mismo; si el modelo decide una
  * acción clínica de escritura, pasa por la aprobación de B8).
@@ -287,6 +443,11 @@ export function buildFormSubmissionMessage(spec: FormSpec, values: Record<string
 export function buttonActionToMessage(action: ButtonAction): string {
   if (action.type === "message") {
     return action.prompt;
+  }
+  // Los enlaces se abren directamente en el render (no continúan la conversación); este texto es un
+  // respaldo defensivo y no debería usarse en el flujo normal.
+  if (action.type === "link") {
+    return action.url;
   }
   const argsText = action.args ? ` con argumentos ${JSON.stringify(action.args)}` : "";
   return `Usa la herramienta ${action.tool}${argsText}.`;

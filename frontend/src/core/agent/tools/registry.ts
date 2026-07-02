@@ -4,7 +4,12 @@ import type { WireTool } from "@/core/agent/protocol";
 
 import type { ObjectSchema, PropSchema } from "./schema-validator";
 import { browserSandboxRunner, type SandboxRunner } from "./sandbox";
-import { parseChartSpec, parseFormSpec } from "./ui-spec";
+import {
+  parseChartSpec,
+  parseFormSpec,
+  parseResourceFormSpec,
+  parseSuggestedRepliesSpec,
+} from "./ui-spec";
 import { validateDynamicForm } from "./dynamic-form";
 import {
   buildCloseOutPlan,
@@ -84,6 +89,10 @@ export interface ToolApprovalMeta {
   // por el catálogo de recursos RBAC (no es un recurso global), pero SÍ pasa por la aprobación
   // del médico como cualquier otra escritura. Sin esto, una escritura se gatea por rol.
   ownerScoped?: boolean;
+  // Escritura YA AUTORIZADA por la proyección del contrato (tools derivadas de /resources, F6): el
+  // backend sólo expone el form/acción si concede el permiso, así que el gate de "creable" no aplica
+  // (cubre update/acciones sobre recursos editables pero no creables). Igual pasa por aprobación P1.
+  preauthorized?: boolean;
 }
 
 export interface ToolDefinition {
@@ -198,14 +207,18 @@ function clinicalListSchema(filters: Record<string, PropSchema>): ObjectSchema {
 
 // Construye el query string de un listado clínico: filtros de igualdad (mismo nombre que el
 // campo del backend) + rango de fecha (date_from/date_to -> <campo>_from/<campo>_to) + paginación.
+// UUID "nulo" (todo ceros): algunos modelos lo inventan como relleno cuando NO quieren filtrar por
+// una relación. Tratarlo como filtro real devolvería 0 resultados siempre, así que se ignora.
+const NIL_UUID = "00000000-0000-0000-0000-000000000000";
+
 function clinicalListQuery(
   args: Record<string, unknown>,
-  spec: { eq?: readonly string[]; dateField?: string },
+  spec: { eq?: readonly string[]; dateField?: string; dateRangeField?: string },
 ): string {
   const params = new URLSearchParams();
   for (const key of spec.eq ?? []) {
     const value = args[key];
-    if (typeof value === "string" && value !== "") {
+    if (typeof value === "string" && value !== "" && value !== NIL_UUID) {
       params.set(key, value);
     }
   }
@@ -217,6 +230,17 @@ function clinicalListQuery(
     }
     if (typeof to === "string" && to !== "") {
       params.set(`${spec.dateField}_to`, to);
+    }
+  }
+  // Rango por extremos gte/lte (campos de fecha/numéricos en filter_fields del contrato).
+  if (spec.dateRangeField) {
+    const from = args.date_from;
+    const to = args.date_to;
+    if (typeof from === "string" && from !== "") {
+      params.set(`${spec.dateRangeField}_gte`, from);
+    }
+    if (typeof to === "string" && to !== "") {
+      params.set(`${spec.dateRangeField}_lte`, to);
     }
   }
   if (typeof args.limit === "number") {
@@ -415,7 +439,8 @@ const TOOLS: ToolDefinition[] = [
     description:
       "Lista citas de la agenda (paginado). Puede filtrar por paciente (patient_id), médico " +
       "(doctor_id), estado (status) y rango de fecha agendada (date_from/date_to, sobre " +
-      "scheduled_date). Solo lectura.",
+      "scheduled_date). Todos los filtros son OPCIONALES: OMITE el que no necesites (no envíes " +
+      "cadenas vacías ni UUID de ceros como relleno). Solo lectura.",
     kind: "read",
     inputSchema: clinicalListSchema({
       patient_id: PATIENT_FILTER_PROP,
@@ -428,7 +453,7 @@ const TOOLS: ToolDefinition[] = [
       ctx.api(
         `/api/v1/appointments${clinicalListQuery(args, {
           eq: ["patient_id", "doctor_id", "status"],
-          dateField: "scheduled_date",
+          dateRangeField: "scheduled_date",
         })}`,
       ),
   },
@@ -1966,12 +1991,17 @@ const TOOLS: ToolDefinition[] = [
     // 'posibles coincidencias para elegir' con campos seguros (sin CURP/correo/dirección).
     name: "clinical.search_patients",
     description:
-      "Busca pacientes EXISTENTES por nombre (difuso, tolera acentos/mayúsculas), teléfono, " +
-      "CURP, fecha de nacimiento o correo, y devuelve POSIBLES COINCIDENCIAS ordenadas por " +
-      "confianza (nivel exacto/fuerte/posible) para que el médico ELIJA una o decida crear una " +
-      "nueva. Úsala ANTES de crear un paciente para detectar duplicados (has_strong_match). Solo " +
-      "lectura: no abre ni crea expedientes; si no hay coincidencia suficiente devuelve vacío. " +
-      "Sólo expone campos seguros (nombre, año de nacimiento, edad, sexo, teléfono enmascarado).",
+      "Busca pacientes EXISTENTES por nombre (DIFUSO: tolera acentos, mayúsculas, espacios, nombres " +
+      "PARCIALES como solo el nombre de pila, y errores de tipeo), teléfono, CURP, fecha de " +
+      "nacimiento o correo, y devuelve POSIBLES COINCIDENCIAS ordenadas por confianza " +
+      "(exacto/fuerte/posible). Cuando devuelva candidatos, MUÉSTRALOS al médico con ui.render_buttons " +
+      "(un botón por candidato con nombre + edad + teléfono enmascarado) para que ELIJA uno; no los " +
+      "listes solo en texto. Arma la acción de CADA botón como un mensaje que INCLUYA el id del " +
+      "candidato, p. ej. 'Usar paciente <id> (Nombre)', para poder continuar sin volver a buscar. Una " +
+      "vez que el médico elija un candidato, ÚSALO por su id: NO repitas esta búsqueda ni vuelvas a " +
+      "mostrar la lista de candidatos. Úsala ANTES de crear un paciente para detectar duplicados (has_strong_match). Solo " +
+      "lectura: no abre ni crea expedientes; si no hay coincidencia devuelve vacío. Sólo expone " +
+      "campos seguros (nombre, año de nacimiento, edad, sexo, teléfono enmascarado).",
     kind: "read",
     inputSchema: {
       type: "object",
@@ -2625,9 +2655,12 @@ const TOOLS: ToolDefinition[] = [
   {
     name: "ui.render_form",
     description:
-      "Genera un formulario para que el médico lo complete. Recibe una spec declarativa " +
-      "(fields con name/label/type[text|number|textarea|select]/options) y un submit_prompt. " +
-      "Al enviarlo se continúa la conversación con los valores; no escribe nada por sí mismo.",
+      "Genera un formulario para que el médico lo complete y revise. Recibe una spec declarativa " +
+      "(fields con name/label/type[text|number|textarea|select]/options, y 'value' OPCIONAL para " +
+      "PRELLENAR el campo) y un submit_prompt. SIEMPRE que el médico pida crear o editar algo, " +
+      "muestra este formulario PRELLENANDO con 'value' todos los datos que ya te dio (p. ej. el " +
+      "nombre del paciente); NO pidas los datos por texto. Deja vacíos los que falten. Al enviarlo " +
+      "se continúa la conversación con los valores; no escribe nada por sí mismo.",
     kind: "read",
     inputSchema: PASSTHROUGH_SCHEMA,
     wireSchema: {
@@ -2645,6 +2678,7 @@ const TOOLS: ToolDefinition[] = [
               type: { type: "string", enum: ["text", "number", "textarea", "select"] },
               placeholder: { type: "string" },
               required: { type: "boolean" },
+              value: { type: "string", description: "Valor inicial para PRELLENAR el campo (datos ya proporcionados)." },
               options: {
                 type: "array",
                 items: {
@@ -2664,6 +2698,45 @@ const TOOLS: ToolDefinition[] = [
     },
     execute: async (args) => {
       const parsed = parseFormSpec(args);
+      if (!parsed.ok) {
+        throw new ToolExecutionError("invalid_ui_spec", parsed.error);
+      }
+      return parsed.spec;
+    },
+  },
+  {
+    name: "ui.open_resource_form",
+    description:
+      "Abre en el chat el FORMULARIO OFICIAL de un recurso del contrato (pacientes, consultas, " +
+      "citas, recetas, etc.) para CREAR o EDITAR. PREFIERE esta herramienta sobre ui.render_form " +
+      "siempre que el recurso exista en el catálogo: el formulario, sus campos y validaciones salen " +
+      "del contrato, y las RELACIONES (paciente, médico, etc.) aparecen como BUSCADORES por nombre " +
+      "— NUNCA pidas ni muestres UUIDs. Recibe { resource (nombre del recurso, p. ej. 'patients' o " +
+      "'consultations'), mode ('create'|'update'), resource_id (REQUERIDO en 'update'), values? " +
+      "(prellenado: pares campo→valor con lo que ya te dieron, p. ej. {\"full_name\":\"Jordan ...\"}; " +
+      "deja fuera lo que falte). title? }. No teclees relaciones por id: pon en 'values' sólo datos " +
+      "que tengas; el médico elegirá las relaciones en el buscador. El nombre del formulario lo pone " +
+      "la plataforma a partir del recurso (no lo escribas tú). El médico completa el formulario y, al " +
+      "pulsar Guardar, el registro se GUARDA directamente (ése es su acto de revisión): no hay un paso " +
+      "de revisión posterior, no invoques otra herramienta de escritura ni pidas confirmación por texto.",
+    kind: "read",
+    inputSchema: PASSTHROUGH_SCHEMA,
+    wireSchema: {
+      type: "object",
+      properties: {
+        resource: { type: "string", description: "Nombre del recurso del contrato (p. ej. 'patients', 'consultations')." },
+        mode: { type: "string", enum: ["create", "update"] },
+        resource_id: { type: "string", description: "Id del registro a editar (REQUERIDO en mode 'update')." },
+        values: {
+          type: "object",
+          description: "Prellenado: pares campo→valor con los datos ya proporcionados. Omite los que falten.",
+          additionalProperties: { type: "string" },
+        },
+      },
+      required: ["resource", "mode"],
+    },
+    execute: async (args) => {
+      const parsed = parseResourceFormSpec(args);
       if (!parsed.ok) {
         throw new ToolExecutionError("invalid_ui_spec", parsed.error);
       }
@@ -2702,6 +2775,42 @@ const TOOLS: ToolDefinition[] = [
     },
   },
   {
+    // RESPUESTAS SUGERIDAS (quick replies): chips bajo el mensaje del agente con las posibles
+    // siguientes respuestas del médico. Al hacer clic, el texto se envía como mensaje del médico
+    // (turno normal) y los chips se contraen; también caducan si el médico escribe otra cosa.
+    // Sólo texto plano: no despachan tools ni escriben nada.
+    name: "ui.suggest_replies",
+    description:
+      "Sugiere las SIGUIENTES respuestas del médico como chips bajo tu mensaje. Recibe { title?, " +
+      "replies: [texto, ...] } (2 a 6 respuestas CORTAS, máx. 140 caracteres, en primera persona " +
+      "del médico, p. ej. 'Busca al paciente Juan Pérez' o 'Muéstrame la agenda de hoy'). Al hacer " +
+      "clic, esa respuesta se envía automáticamente como mensaje del médico y los chips desaparecen. " +
+      "Úsala al FINAL de tu turno cuando haya caminos claros de continuación (saludo inicial, " +
+      "resultado con varios pasos posibles, pregunta con opciones); no la uses si la continuación es " +
+      "libre. Es texto plano: para acciones ejecutables usa ui.render_buttons. Solo lectura.",
+    kind: "read",
+    inputSchema: PASSTHROUGH_SCHEMA,
+    wireSchema: {
+      type: "object",
+      properties: {
+        title: { type: "string" },
+        replies: {
+          type: "array",
+          items: { type: "string" },
+          description: "Respuestas sugeridas (2 a 6, cortas, redactadas como las diría el médico).",
+        },
+      },
+      required: ["replies"],
+    },
+    execute: async (args) => {
+      const parsed = parseSuggestedRepliesSpec(args);
+      if (!parsed.ok) {
+        throw new ToolExecutionError("invalid_ui_spec", parsed.error);
+      }
+      return parsed.spec;
+    },
+  },
+  {
     // BOTONES ACCIONABLES GOBERNADOS (MP-CTRL-0130). Cada botón se RESUELVE contra el catálogo de
     // tools + RBAC: una acción de mensaje o una tool de lectura es de sólo lectura; una tool de
     // escritura permitida es ACCIONABLE y al hacer clic la ejecuta el modelo pasando por la
@@ -2711,12 +2820,16 @@ const TOOLS: ToolDefinition[] = [
     name: "ui.render_buttons",
     description:
       "Genera botones para el chat. Recibe { title?, buttons: [{label, action}] } donde action es " +
-      "{ type:'message', prompt } o { type:'tool', tool, args? }. La plataforma RESUELVE cada botón " +
-      "contra el catálogo de herramientas + permisos: un mensaje o una herramienta de lectura es de " +
-      "sólo lectura; una herramienta de ESCRITURA permitida es accionable y al hacer clic se ejecuta " +
-      "pasando por tu aprobación (P1); una herramienta desconocida o una escritura sin permiso queda " +
-      "bloqueada con motivo. Los argumentos fuera del esquema de la herramienta se descartan (no se " +
-      "inventan). No se ejecuta ni guarda nada por sí mismo. Solo lectura.",
+      "{ type:'message', prompt }, { type:'tool', tool, args? } o { type:'link', url }. La plataforma " +
+      "RESUELVE cada botón contra el catálogo de herramientas + permisos: un mensaje o una herramienta " +
+      "de lectura es de sólo lectura; una herramienta de ESCRITURA permitida es accionable y al hacer " +
+      "clic se ejecuta pasando por tu aprobación (P1); una herramienta desconocida o una escritura sin " +
+      "permiso queda bloqueada con motivo. Los argumentos fuera del esquema se descartan (no se " +
+      "inventan). type:'link' abre un enlace de CONTACTO en otra pestaña (sólo WhatsApp wa.me/" +
+      "api.whatsapp.com, tel:, mailto:, sms:; cualquier otra URL se descarta). Para ENVIAR un mensaje " +
+      "por WhatsApp usa un botón link con url 'https://wa.me/<telefono_internacional_sin_+>?text=<texto " +
+      "URL-encoded>'; toma el teléfono COMPLETO del expediente del paciente (la búsqueda lo entrega " +
+      "ENMASCARADO, no sirve para el enlace). No se ejecuta ni guarda nada por sí mismo. Solo lectura.",
     kind: "read",
     inputSchema: PASSTHROUGH_SCHEMA,
     wireSchema: {
@@ -2732,13 +2845,17 @@ const TOOLS: ToolDefinition[] = [
               action: {
                 type: "object",
                 properties: {
-                  type: { type: "string", enum: ["message", "tool"] },
+                  type: { type: "string", enum: ["message", "tool", "link"] },
                   prompt: { type: "string", description: "Para type='message': texto a continuar." },
                   tool: { type: "string", description: "Para type='tool': nombre de la herramienta." },
                   args: {
                     type: "object",
                     description: "Argumentos de la herramienta (se validan contra su esquema).",
                     additionalProperties: true,
+                  },
+                  url: {
+                    type: "string",
+                    description: "Para type='link': URL de contacto (wa.me/api.whatsapp.com, tel:, mailto:, sms:).",
                   },
                 },
                 required: ["type"],

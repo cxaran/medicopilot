@@ -13,7 +13,7 @@
 // (el clic continúa la conversación; el modelo ejecuta la tool y el médico aprueba). Los botones de
 // sólo lectura (mensaje, re-consulta, navegación, tool de lectura) NO pueden mutar y se conservan.
 
-import type { ButtonAction, ButtonGovernance, ButtonSpec, ButtonsSpec } from "./ui-spec";
+import { isSafeButtonUrl, type ButtonAction, type ButtonGovernance, type ButtonSpec, type ButtonsSpec } from "./ui-spec";
 
 const MAX_BUTTONS = 12;
 
@@ -83,6 +83,12 @@ function resolveButton(
     return { label, action, governance: "read_only" };
   }
 
+  // Acción de ENLACE de contacto (WhatsApp/tel/correo): abre una URL externa; no muta el sistema.
+  // La URL ya se validó en parseAction (lista blanca); es de sólo lectura.
+  if (action.type === "link") {
+    return { label, action, governance: "read_only" };
+  }
+
   // Acción de TOOL: debe RESOLVERSE contra el catálogo. Una tool desconocida se bloquea (nunca se
   // emite una llamada arbitraria).
   const entry = ctx.tools.get(action.tool);
@@ -140,6 +146,10 @@ function parseAction(raw: unknown): ButtonAction | null {
     const tool = asString(raw.tool);
     if (!tool) return null;
     return isObject(raw.args) ? { type: "tool", tool, args: raw.args } : { type: "tool", tool };
+  }
+  if (type === "link") {
+    const url = asString(raw.url);
+    return url && isSafeButtonUrl(url) ? { type: "link", url } : null;
   }
   return null;
 }

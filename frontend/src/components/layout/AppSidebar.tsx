@@ -1,16 +1,20 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 
 import { AccountMenu } from "@/components/layout/AccountMenu";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
-import { ActiveContextPicker } from "@/components/copilot/ActiveContextPicker";
+import { AnimatedOrb } from "@/components/ui/AnimatedOrb";
+import { avatarColor, BRAND_AVATAR_GRADIENT } from "@/components/ui/avatar-color";
 import { useChatNav } from "@/components/chat-shell/ChatNavProvider";
 import type { ActiveClinicalContext } from "@/core/agent/active-context";
-import type { RecentPatient } from "@/core/chat-shell/recent-patients";
+import { mergeRecentPatients, type RecentPatient } from "@/core/chat-shell/recent-patients";
 import type { SessionUser } from "@/core/auth/types";
+
+// Máximo de pacientes recientes visibles (mismo tope que la lista servida por el layout).
+const RECENT_LIMIT = 8;
 
 // Iconos SVG inline (sin dependencias). Heredan el color del item via currentColor.
 const iconProps = {
@@ -23,6 +27,15 @@ const iconProps = {
   strokeLinecap: "round" as const,
   strokeLinejoin: "round" as const,
 };
+
+function HomeIcon() {
+  return (
+    <svg {...iconProps} aria-hidden="true">
+      <path d="M3 11l9-7 9 7" />
+      <path d="M5 10v9a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-9" />
+    </svg>
+  );
+}
 
 function PatientsIcon() {
   return (
@@ -150,11 +163,25 @@ function AuditIcon() {
   );
 }
 
+function ResourcesIcon() {
+  return (
+    <svg {...iconProps} aria-hidden="true">
+      <rect x="4" y="4" width="7" height="7" rx="1.5" />
+      <rect x="13" y="4" width="7" height="7" rx="1.5" />
+      <rect x="4" y="13" width="7" height="7" rx="1.5" />
+      <rect x="13" y="13" width="7" height="7" rx="1.5" />
+    </svg>
+  );
+}
+
 type NavItem = {
   label: string;
   href: string;
   resource?: string;
   icon: ReactNode;
+  // Resaltado por igualdad exacta en lugar de prefijo. Necesario para "/resources" (el índice del
+  // catálogo), que de otro modo se marcaría activo también en /resources/patients y similares.
+  exact?: boolean;
 };
 
 // Navegación PRINCIPAL por ruta (clínica). Mapea a las RUTAS EXISTENTES; los items de recurso sólo
@@ -185,6 +212,10 @@ const MAIN_NAV: NavItem[] = [
   { label: "Reportes", href: "/reports", icon: <ReportsIcon /> },
   // Escalas clínicas (sin recurso de catálogo: degrada si falta clinical_scales:read).
   { label: "Escalas", href: "/scales", icon: <ScaleIcon /> },
+  // Catálogo COMPLETO de recursos (reincorpora ResourceCatalog): índice de todos los recursos
+  // visibles para el rol, no la lista curada. Sin recurso de catálogo: siempre visible para la
+  // sesión; la propia página proyecta por permisos.
+  { label: "Recursos", href: "/resources", icon: <ResourcesIcon />, exact: true },
 ];
 
 // Navegación de ADMINISTRACIÓN (pie de la barra), también filtrada por catálogo: cada item solo
@@ -222,6 +253,103 @@ const ADMIN_NAV: NavItem[] = [
   { label: "Roles y permisos", href: "/resources/roles", resource: "roles", icon: <RolesIcon /> },
 ];
 
+/**
+ * Menú de OPCIONES de un chat del sidebar (Inicio y cada paciente): botón de 3 puntos verticales
+ * que aparece al pasar el cursor (o al enfocar con teclado) y que también se abre con CLICK
+ * SECUNDARIO sobre el item (el wrapper lo maneja). Hoy ofrece "Reiniciar conversación": vacía el
+ * historial de ese chat (baja lógica en el backend), nunca datos clínicos.
+ */
+function ChatItemOptions({
+  open,
+  onToggle,
+  onClose,
+  onReset,
+  chatLabel,
+}: Readonly<{
+  open: boolean;
+  onToggle: () => void;
+  onClose: () => void;
+  onReset: () => void;
+  chatLabel: string;
+}>) {
+  return (
+    <>
+      <button
+        type="button"
+        onClick={(event) => {
+          event.stopPropagation();
+          onToggle();
+        }}
+        aria-label={`Opciones del chat de ${chatLabel}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title="Opciones del chat"
+        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] text-[var(--tx3)] transition hover:bg-[var(--bg2)] hover:text-[var(--tx)] focus:opacity-100 group-hover:opacity-100 ${
+          open ? "opacity-100" : "opacity-0"
+        }`}
+      >
+        <svg
+          width="15"
+          height="15"
+          viewBox="0 0 24 24"
+          fill="currentColor"
+          stroke="none"
+          aria-hidden="true"
+        >
+          <circle cx="12" cy="5.5" r="1.7" />
+          <circle cx="12" cy="12" r="1.7" />
+          <circle cx="12" cy="18.5" r="1.7" />
+        </svg>
+      </button>
+      {open && (
+        <>
+          {/* Telón transparente: cierra el menú al hacer click (o click secundario) fuera. */}
+          <div
+            className="fixed inset-0 z-40"
+            aria-hidden="true"
+            onClick={onClose}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              onClose();
+            }}
+          />
+          <div
+            role="menu"
+            aria-label={`Opciones del chat de ${chatLabel}`}
+            className="absolute right-1 top-[calc(100%-2px)] z-50 min-w-[210px] rounded-[12px] border border-[var(--border)] bg-[var(--panel)] p-1 shadow-[var(--soft)]"
+          >
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                onClose();
+                onReset();
+              }}
+              className="flex w-full items-center gap-2.5 rounded-[9px] px-2.5 py-2 text-left text-[13px] font-medium text-[var(--tx)] transition hover:bg-[var(--panel2)] hover:text-[var(--danger)]"
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M4 11a8 8 0 1 1 1.6 5.5" />
+                <path d="M4 20v-5h5" />
+              </svg>
+              Reiniciar conversación
+            </button>
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
 function navItemClass(active: boolean): string {
   return `flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-sm transition ${
     active
@@ -253,7 +381,29 @@ export function AppSidebar({
 }>) {
   const pathname = usePathname();
   const router = useRouter();
-  const { activeContext, setActiveContext } = useChatNav();
+  const { activeContext, setActiveContext, requestChatReset, recentChatBumps } = useChatNav();
+
+  // Recientes = actividad de chat de ESTA SESIÓN (bumps, al frente) + la lista servida (ya ordenada
+  // por la última actividad de las conversaciones persistidas), sin duplicados y acotada.
+  const patients = mergeRecentPatients(recentChatBumps, recentPatients, RECENT_LIMIT);
+
+  // Menú de opciones abierto ("global" o el id del paciente); las opciones del chat viven en el
+  // sidebar (3 puntos al pasar el cursor o click secundario sobre el item), no dentro del hilo.
+  const [openMenuKey, setOpenMenuKey] = useState<string | null>(null);
+
+  // Reinicio con confirmación (acción destructiva sobre el historial de chat, nunca sobre datos
+  // clínicos). Declara la intención en ChatNavProvider; el ChatShell la resuelve.
+  const confirmChatReset = (patientId: string | null, label: string): void => {
+    if (
+      !window.confirm(
+        `¿Reiniciar la conversación de ${label}? Se eliminará todo el historial de este chat ` +
+          "(los datos del expediente no se tocan).",
+      )
+    ) {
+      return;
+    }
+    requestChatReset(patientId);
+  };
 
   const available = new Set(availableResources);
   const mainItems = MAIN_NAV.filter((item) => !item.resource || available.has(item.resource));
@@ -271,73 +421,63 @@ export function AppSidebar({
   const initial = (session.name?.trim()?.[0] ?? "M").toUpperCase();
 
   return (
-    <aside className="flex w-[286px] shrink-0 flex-col border-r border-[var(--border)] bg-[var(--bg2)]">
+    <aside className="mc-sidebar flex w-[286px] shrink-0 flex-col border-r border-[var(--border)] bg-[var(--bg2)]">
       {/* Marca */}
-      <div className="flex items-center gap-2.5 px-5 pb-3 pt-5">
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-[var(--accent)] text-sm font-bold text-[var(--on-accent)]">
-          M
-        </span>
+      <div className="flex items-center gap-2.5 px-5 pb-4 pt-5">
+        <AnimatedOrb size={30} />
         <span className="text-[17px] font-semibold tracking-tight text-[var(--tx)]">
           MediCopilot
         </span>
       </div>
 
-      {/* Nueva consulta: inicia una conversación nueva sin paciente (chat-first). Limpia el
-          contexto activo y lleva al inicio, donde el médico puede buscar/elegir paciente. */}
+      {/* Inicio (chat-first): el agente global sin paciente es, simplemente, el INICIO — un ítem de
+          navegación con icono de casa, como en el diseño (no una tarjeta "Agente global"). Limpia el
+          contexto activo y lleva a "/"; se resalta cuando estás en el inicio sin paciente. */}
       <div className="px-3.5 pb-2">
-        <button
-          type="button"
-          onClick={() => selectContext(null)}
-          className="flex w-full items-center justify-center gap-2.5 rounded-[14px] border border-[var(--accent-bd)] bg-[var(--accent-dim)] px-3.5 py-2.5 text-sm font-semibold text-[var(--accent-tx)] transition hover:bg-[var(--accent)] hover:text-[var(--on-accent)]"
-        >
-          <svg
-            aria-hidden="true"
-            width="17"
-            height="17"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.1"
-            strokeLinecap="round"
-          >
-            <path d="M12 5v14M5 12h14" />
-          </svg>
-          Nueva consulta
-        </button>
-      </div>
-
-      {/* Agente global (inicio chat-first) */}
-      <div className="px-3.5 pb-2">
-        <button
-          type="button"
-          onClick={() => selectContext(null)}
-          aria-current={globalActive ? "true" : undefined}
-          className={`flex w-full items-center gap-2.5 rounded-[12px] px-3 py-2.5 text-left text-sm transition ${
-            globalActive
-              ? "bg-[var(--accent-dim)] font-semibold text-[var(--accent-tx)]"
-              : "border border-[var(--accent-bd)] bg-[var(--accent-dim)] font-semibold text-[var(--accent-tx)] hover:brightness-105"
+        {/* Wrapper con el menú de opciones del chat global: 3 puntos al pasar el cursor y click
+            secundario sobre el item. El botón principal sigue siendo el de navegación. */}
+        <div
+          className={`group relative flex items-center rounded-[10px] pr-1 transition ${
+            globalActive ? "bg-[var(--accent-dim)]" : "hover:bg-[var(--panel2)]"
           }`}
+          onContextMenu={(event) => {
+            event.preventDefault();
+            setOpenMenuKey((key) => (key === "global" ? null : "global"));
+          }}
         >
-          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[9px] bg-[var(--accent)] text-xs font-bold text-[var(--on-accent)]">
-            IA
-          </span>
-          <span className="min-w-0">
-            <span className="block truncate font-semibold">Agente global</span>
-            <span className="block truncate text-xs text-[var(--tx3)]">Tareas sin paciente</span>
-          </span>
-        </button>
-      </div>
-
-      {/* Buscador de cualquier paciente (reusa el selector de contexto existente). */}
-      <div className="px-3.5 pb-2">
-        <ActiveContextPicker context={onHome ? activeContext : null} onChange={selectContext} />
+          <button
+            type="button"
+            onClick={() => selectContext(null)}
+            aria-current={globalActive ? "page" : undefined}
+            title="Inicio"
+            className={`flex min-w-0 flex-1 items-center gap-3 rounded-[10px] border-0 bg-transparent px-3 py-2.5 text-left text-sm transition ${
+              globalActive
+                ? "font-semibold text-[var(--accent-tx)]"
+                : "font-medium text-[var(--tx2)] group-hover:text-[var(--tx)]"
+            }`}
+          >
+            <span className="flex shrink-0 items-center justify-center">
+              <HomeIcon />
+            </span>
+            <span className="truncate">Inicio</span>
+          </button>
+          <ChatItemOptions
+            open={openMenuKey === "global"}
+            onToggle={() => setOpenMenuKey((key) => (key === "global" ? null : "global"))}
+            onClose={() => setOpenMenuKey(null)}
+            onReset={() => confirmChatReset(null, "Inicio")}
+            chatLabel="Inicio"
+          />
+        </div>
       </div>
 
       {/* Navegación principal por ruta. */}
       {mainItems.length > 0 ? (
         <nav className="flex flex-col gap-1 px-3.5 pb-1">
           {mainItems.map((item) => {
-            const active = pathname.startsWith(item.href);
+            const active = item.exact
+              ? pathname === item.href
+              : pathname.startsWith(item.href);
             return (
               <Link
                 key={item.href}
@@ -359,42 +499,64 @@ export function AppSidebar({
         Pacientes recientes
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-3.5 pb-2">
-        {recentPatients.length === 0 ? (
+        {patients.length === 0 ? (
           <p className="px-2 py-1.5 text-xs text-[var(--tx3)]">
             No hay pacientes para mostrar todavía.
           </p>
         ) : (
-          recentPatients.map((patient) => {
+          patients.map((patient) => {
             const active = onHome && activeContext?.patientId === patient.id;
             return (
-              <button
+              // Wrapper con el menú de opciones del chat del paciente: 3 puntos al pasar el cursor
+              // y click secundario sobre el item (el botón principal sigue abriendo el chat).
+              <div
                 key={patient.id}
-                type="button"
-                onClick={() =>
-                  selectContext({
-                    patientId: patient.id,
-                    patientLabel: patient.label,
-                    consultationId: null,
-                    consultationLabel: null,
-                  })
-                }
-                aria-current={active ? "true" : undefined}
-                title={patient.label}
-                className={`flex items-center gap-2.5 rounded-[10px] px-2.5 py-2 text-left transition ${
+                className={`group relative flex items-center rounded-[10px] pr-1 transition ${
                   active ? "bg-[var(--accent-dim)]" : "hover:bg-[var(--panel2)]"
                 }`}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  setOpenMenuKey((key) => (key === patient.id ? null : patient.id));
+                }}
               >
-                <span className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-[9px] bg-[var(--accent)] text-xs font-bold text-[var(--on-accent)]">
-                  {patient.initial}
-                </span>
-                <span
-                  className={`block min-w-0 flex-1 truncate text-sm ${
-                    active ? "font-semibold text-[var(--accent-tx)]" : "text-[var(--tx)]"
-                  }`}
+                <button
+                  type="button"
+                  onClick={() =>
+                    selectContext({
+                      patientId: patient.id,
+                      patientLabel: patient.label,
+                      consultationId: null,
+                      consultationLabel: null,
+                    })
+                  }
+                  aria-current={active ? "true" : undefined}
+                  title={patient.label}
+                  className="flex min-w-0 flex-1 items-center gap-2.5 rounded-[10px] px-2.5 py-2 text-left"
                 >
-                  {patient.label}
-                </span>
-              </button>
+                  <span
+                    className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-[9px] text-xs font-bold text-white"
+                    style={{ background: avatarColor(patient.id) }}
+                  >
+                    {patient.initial}
+                  </span>
+                  <span
+                    className={`block min-w-0 flex-1 truncate text-sm ${
+                      active ? "font-semibold text-[var(--accent-tx)]" : "text-[var(--tx)]"
+                    }`}
+                  >
+                    {patient.label}
+                  </span>
+                </button>
+                <ChatItemOptions
+                  open={openMenuKey === patient.id}
+                  onToggle={() =>
+                    setOpenMenuKey((key) => (key === patient.id ? null : patient.id))
+                  }
+                  onClose={() => setOpenMenuKey(null)}
+                  onReset={() => confirmChatReset(patient.id, patient.label)}
+                  chatLabel={patient.label}
+                />
+              </div>
             );
           })
         )}
@@ -404,7 +566,9 @@ export function AppSidebar({
       {adminItems.length > 0 ? (
         <nav className="flex flex-col gap-1 border-t border-[var(--border)] px-3.5 py-2">
           {adminItems.map((item) => {
-            const active = pathname.startsWith(item.href);
+            const active = item.exact
+              ? pathname === item.href
+              : pathname.startsWith(item.href);
             return (
               <Link
                 key={item.href}
@@ -421,10 +585,13 @@ export function AppSidebar({
         </nav>
       ) : null}
 
-      {/* Pie: identidad + tema + cuenta/cierre de sesión. */}
-      <div className="flex flex-col gap-3 border-t border-[var(--border)] px-3.5 py-4">
-        <div className="flex items-center gap-2.5">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-[var(--accent)] text-sm font-bold text-[var(--on-accent)]">
+      {/* Pie: identidad + tema + cuenta (engranaje) + cerrar sesión, en una sola fila. */}
+      <div className="border-t border-[var(--border)] px-3.5 py-4">
+        <div className="flex items-center gap-2">
+          <span
+            className="flex h-[38px] w-[38px] shrink-0 items-center justify-center rounded-[11px] text-[13px] font-bold text-white"
+            style={{ background: BRAND_AVATAR_GRADIENT }}
+          >
             {initial}
           </span>
           <span className="min-w-0 flex-1">
@@ -442,8 +609,8 @@ export function AppSidebar({
             </span>
           </span>
           <ThemeToggle />
+          <AccountMenu />
         </div>
-        <AccountMenu />
       </div>
     </aside>
   );

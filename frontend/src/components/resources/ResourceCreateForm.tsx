@@ -5,8 +5,10 @@ import { useRouter } from "next/navigation";
 
 import { Button } from "@/components/ui/Button";
 import { ResourceFormFields } from "@/components/resources/ResourceFormFields";
+import { useChatNavOptional } from "@/components/chat-shell/ChatNavProvider";
 import { ApiRequestError } from "@/core/api/api-error";
 import type { ResourceFormCapability } from "@/core/api/contracts";
+import { resourceWriteNote } from "@/core/chat-shell/action-notes";
 import { buildCreatePayload, buildMultipartPayload } from "@/core/resources/resource-form";
 import { createResource } from "@/core/resources/resource-mutation-client";
 
@@ -61,6 +63,8 @@ export function ResourceCreateForm({
   create: ResourceFormCapability;
 }>) {
   const router = useRouter();
+  // Nota de contexto al chat del paciente tras guardar (opcional: sin provider se omite).
+  const chatNav = useChatNavOptional();
   const [pending, setPending] = useState(false);
   const [generalError, setGeneralError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
@@ -101,9 +105,16 @@ export function ResourceCreateForm({
           setPending(false);
           return;
         }
-        await createResource(create, buildMultipartPayload(create.fields, formData, fileField));
-      } else {
-        await createResource(create, buildCreatePayload(create.fields, formData));
+      }
+
+      const created = fileField
+        ? await createResource(create, buildMultipartPayload(create.fields, formData, fileField))
+        : await createResource(create, buildCreatePayload(create.fields, formData));
+      // Guardado: deja su nota compacta en el chat del paciente (memoria del hilo, sin turno del
+      // modelo). Sólo recursos ligados a paciente; best-effort.
+      const note = resourceWriteNote("create", resourceName, resourceLabel, created);
+      if (note) {
+        chatNav?.pushContextNote(note.text, note.target);
       }
       router.replace(listPath);
     } catch (error) {

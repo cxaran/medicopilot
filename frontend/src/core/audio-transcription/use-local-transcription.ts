@@ -3,7 +3,7 @@
 // Hook de UI para transcribir un documento de audio. Encapsula el estado (progreso, resultado,
 // error) y delega en ``runAudioTranscript`` (navegador-local por defecto, servidor de respaldo).
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { browserApi } from "@/core/api/browser-client";
 import { preloadModel, runAudioTranscript, runRecordingTranscript } from "./runtime";
@@ -50,6 +50,15 @@ export function useLocalTranscription(): UseLocalTranscription {
   const [error, setError] = useState<string | null>(null);
   const [preloaded, setPreloaded] = useState(false);
   const runningRef = useRef(false);
+
+  // Detección de soporte tras el montaje: en SSR no hay window/Worker, así que calcularla
+  // durante el render produce HTML distinto entre servidor y cliente (hydration mismatch).
+  const [localSupported, setLocalSupported] = useState(false);
+  const [webgpu, setWebgpu] = useState(false);
+  useEffect(() => {
+    setLocalSupported(isLocalTranscriptionSupported());
+    setWebgpu(isWebGpuAvailable());
+  }, []);
 
   const transcribe = useCallback(
     async (documentId: string, options?: { model?: WhisperModel; forceServer?: boolean }) => {
@@ -146,8 +155,8 @@ export function useLocalTranscription(): UseLocalTranscription {
     outcome,
     error,
     preloaded,
-    localSupported: isLocalTranscriptionSupported(),
-    webgpu: isWebGpuAvailable(),
+    localSupported,
+    webgpu,
     localEnabled: localTranscriptionEnabled(),
     transcribe,
     transcribeBlob,

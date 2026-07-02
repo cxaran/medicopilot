@@ -8,6 +8,9 @@ import {
   parseButtonsSpec,
   parseChartSpec,
   parseFormSpec,
+  parseResourceFormSpec,
+  parseSuggestedRepliesSpec,
+  isSafeButtonUrl,
 } from "./ui-spec.ts";
 import { getTool, type ToolExecutionContext } from "./registry.ts";
 import { executeTool } from "./tool-runner.ts";
@@ -45,6 +48,79 @@ test("parseFormSpec: normaliza campos y aplica defaults de submit", () => {
 test("parseFormSpec: rechaza form sin campos", () => {
   const parsed = parseFormSpec({ fields: [] });
   assert.equal(parsed.ok, false);
+});
+
+test("parseResourceFormSpec: create con valores prellenados (sin exigir id)", () => {
+  const parsed = parseResourceFormSpec({
+    resource: "patients",
+    mode: "create",
+    values: { full_name: "Karen Magdalena Guzman Ferral", age: 30, active: true, bad: { x: 1 } },
+  });
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  assert.equal(parsed.spec.kind, "resource_form");
+  assert.equal(parsed.spec.resource, "patients");
+  assert.equal(parsed.spec.mode, "create");
+  assert.equal(parsed.spec.values?.full_name, "Karen Magdalena Guzman Ferral");
+  // Escalares se normalizan a string; estructuras se descartan (no se inventan).
+  assert.equal(parsed.spec.values?.age, "30");
+  assert.equal(parsed.spec.values?.active, "true");
+  assert.equal(parsed.spec.values?.bad, undefined);
+});
+
+test("parseResourceFormSpec: update exige resource_id", () => {
+  assert.equal(parseResourceFormSpec({ resource: "consultations", mode: "update" }).ok, false);
+  const ok = parseResourceFormSpec({ resource: "consultations", mode: "update", resource_id: "abc" });
+  assert.equal(ok.ok, true);
+  if (ok.ok) assert.equal(ok.spec.resource_id, "abc");
+});
+
+test("parseResourceFormSpec: rechaza sin recurso o con modo inválido", () => {
+  assert.equal(parseResourceFormSpec({ mode: "create" }).ok, false);
+  assert.equal(parseResourceFormSpec({ resource: "patients", mode: "delete" }).ok, false);
+});
+
+test("isUiSpec reconoce resource_form", () => {
+  assert.equal(isUiSpec({ kind: "resource_form", resource: "patients", mode: "create" }), true);
+});
+
+test("isSafeButtonUrl: lista blanca de contacto (WhatsApp/tel/mailto/sms), rechaza el resto", () => {
+  assert.equal(isSafeButtonUrl("https://wa.me/5215551234567?text=Hola"), true);
+  assert.equal(isSafeButtonUrl("https://api.whatsapp.com/send?phone=521555&text=Hola"), true);
+  assert.equal(isSafeButtonUrl("tel:+525551234567"), true);
+  assert.equal(isSafeButtonUrl("mailto:paciente@example.com"), true);
+  // Rechazos: dominio arbitrario, http inseguro, esquemas peligrosos, basura.
+  assert.equal(isSafeButtonUrl("https://evil.example.com"), false);
+  assert.equal(isSafeButtonUrl("http://wa.me/123"), false);
+  assert.equal(isSafeButtonUrl("javascript:alert(1)"), false);
+  assert.equal(isSafeButtonUrl("data:text/html,x"), false);
+  assert.equal(isSafeButtonUrl("no-es-url"), false);
+});
+
+test("parseButtonsSpec: acepta botón link seguro y rechaza inseguro", () => {
+  const ok = parseButtonsSpec({
+    buttons: [{ label: "WhatsApp", action: { type: "link", url: "https://wa.me/521555?text=Hi" } }],
+  });
+  assert.equal(ok.ok, true);
+  const bad = parseButtonsSpec({
+    buttons: [{ label: "Mal", action: { type: "link", url: "https://evil.com" } }],
+  });
+  assert.equal(bad.ok, false);
+});
+
+test("parseFormSpec: conserva 'value' para prellenar el campo", () => {
+  const parsed = parseFormSpec({
+    title: "Nuevo paciente",
+    fields: [
+      { name: "full_name", label: "Nombre", type: "text", value: "Karen Magdalena Guzman Ferral" },
+      { name: "phone", label: "Teléfono", type: "text" },
+    ],
+  });
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  assert.equal(parsed.spec.fields[0].value, "Karen Magdalena Guzman Ferral");
+  // Un campo sin 'value' no inventa uno.
+  assert.equal(parsed.spec.fields[1].value, undefined);
 });
 
 test("parseFormSpec: select sin options es inválido", () => {
@@ -151,6 +227,55 @@ test("ui.render_buttons (tool): produce el spec gobernado (consulta el catálogo
 
 test("ui.render_form (tool): spec inválida -> error 'invalid_ui_spec'", async () => {
   const result = await executeTool(uiTool("ui.render_form"), { fields: [] }, ctx);
+  assert.equal(result.status, "error");
+  if (result.status !== "error") return;
+  assert.equal(result.code, "invalid_ui_spec");
+});
+
+// --- Respuestas sugeridas (quick replies): texto plano que se envía como mensaje del médico ---
+
+test("parseSuggestedRepliesSpec: normaliza (trim + dedupe) y conserva el título", () => {
+  const parsed = parseSuggestedRepliesSpec({
+    title: "Sugerencias",
+    replies: ["  Muéstrame la agenda de hoy  ", "Busca un paciente", "Busca un paciente"],
+  });
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  assert.equal(parsed.spec.kind, "suggested_replies");
+  assert.equal(parsed.spec.title, "Sugerencias");
+  assert.deepEqual(parsed.spec.replies, ["Muéstrame la agenda de hoy", "Busca un paciente"]);
+});
+
+test("parseSuggestedRepliesSpec: rechaza vacías, no-texto, demasiadas o demasiado largas", () => {
+  assert.equal(parseSuggestedRepliesSpec({ replies: [] }).ok, false);
+  assert.equal(parseSuggestedRepliesSpec({ replies: ["ok", 5] }).ok, false);
+  assert.equal(parseSuggestedRepliesSpec({ replies: ["   "] }).ok, false);
+  assert.equal(parseSuggestedRepliesSpec({ replies: ["a", "b", "c", "d", "e", "f", "g"] }).ok, false);
+  assert.equal(parseSuggestedRepliesSpec({ replies: ["x".repeat(141)] }).ok, false);
+});
+
+test("isUiSpec: detecta suggested_replies", () => {
+  assert.equal(isUiSpec({ kind: "suggested_replies" }), true);
+});
+
+test("ui.suggest_replies (tool): produce el spec normalizado, sin tocar la API", async () => {
+  const result = await executeTool(
+    uiTool("ui.suggest_replies"),
+    { replies: ["Busca al paciente Juan Pérez", "Muéstrame la agenda de hoy"] },
+    ctx,
+  );
+  assert.equal(result.status, "success");
+  if (result.status !== "success") return;
+  assert.equal((result.content as { kind: string }).kind, "suggested_replies");
+  assert.deepEqual((result.content as { replies: string[] }).replies, [
+    "Busca al paciente Juan Pérez",
+    "Muéstrame la agenda de hoy",
+  ]);
+});
+
+test("ui.suggest_replies (tool): es lectura y spec inválida -> error 'invalid_ui_spec'", async () => {
+  assert.equal(uiTool("ui.suggest_replies").kind, "read");
+  const result = await executeTool(uiTool("ui.suggest_replies"), { replies: [] }, ctx);
   assert.equal(result.status, "error");
   if (result.status !== "error") return;
   assert.equal(result.code, "invalid_ui_spec");

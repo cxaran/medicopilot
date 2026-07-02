@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/Button";
+import { CopilotDictationPreference } from "@/components/account/CopilotDictationPreference";
 import { Input } from "@/components/ui/Input";
 import { ApiRequestError } from "@/core/api/api-error";
 import type { AgentPersonaRead } from "@/core/api/contracts";
@@ -174,6 +175,9 @@ export function AgentPersonaSection() {
           </>
         )}
       </form>
+
+      {/* Preferencia de dictado por voz (movida desde el chat). Local a este dispositivo. */}
+      <CopilotDictationPreference />
     </section>
   );
 }

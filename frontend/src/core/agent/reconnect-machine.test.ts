@@ -103,14 +103,24 @@ test("manual_retry sólo aplica desde failed (no-op en otras fases)", () => {
   assert.deepEqual(reduceReconnect(connected, { type: "manual_retry" }), connected);
 });
 
-test("dispose es TERMINAL: un cierre intencional NO dispara reconexión", () => {
+test("dispose es TERMINAL para eventos de reconexión: un cierre intencional NO dispara reconexión", () => {
   const connected = run([{ type: "connect_start" }, { type: "connected" }]);
   const disposed = reduceReconnect(connected, { type: "dispose" });
   assert.equal(disposed.phase, "disposed");
-  // Eventos posteriores se ignoran: nunca vuelve a reconnecting/connecting.
-  for (const event of [{ type: "dropped" }, { type: "retry" }, { type: "manual_retry" }, { type: "connect_start" }] as const) {
+  // Los eventos de RECONEXIÓN se ignoran: nunca vuelve a reconnecting/connecting por su cuenta.
+  for (const event of [{ type: "dropped" }, { type: "retry" }, { type: "manual_retry" }] as const) {
     assert.equal(reduceReconnect(disposed, event).phase, "disposed");
   }
+});
+
+test("connect_start RESUCITA desde disposed: un remonte legítimo (StrictMode/reabrir chat) reconecta", () => {
+  const connected = run([{ type: "connect_start" }, { type: "connected" }]);
+  const disposed = reduceReconnect(connected, { type: "dispose" });
+  assert.equal(disposed.phase, "disposed");
+  // El nuevo montaje del panel dispara connect_start y DEBE arrancar un ciclo de conexión limpio.
+  const revived = reduceReconnect(disposed, { type: "connect_start" });
+  assert.equal(revived.phase, "connecting");
+  assert.equal(revived.attempts, 0);
 });
 
 test("retry fuera de reconnecting es no-op (no salta intentos)", () => {

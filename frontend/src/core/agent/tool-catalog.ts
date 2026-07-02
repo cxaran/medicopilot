@@ -105,7 +105,7 @@ export function buildToolCatalog(
     const target = tool.approval?.targetResource ?? null;
     // Escritura OWNER-SCOPED (p. ej. memorias del médico): no se gatea por el catálogo RBAC
     // (no es un recurso global), siempre disponible para el dueño. Igual pasa por aprobación.
-    if (tool.approval?.ownerScoped) {
+    if (tool.approval?.ownerScoped || tool.approval?.preauthorized) {
       return {
         name: tool.name,
         kind: "write",

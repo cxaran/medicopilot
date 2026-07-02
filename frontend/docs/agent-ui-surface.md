@@ -31,6 +31,7 @@ la entrada, resuelve contra el contrato + RBAC y devuelve la spec; **no escribe 
 | ------------------------------ | -------------------------------- | -------- | ---------------------- |
 | `form`                         | `ui.render_form`                 | B9       | `ui-spec.ts`           |
 | `chart`                        | `ui.render_chart`                | B9       | `ui-spec.ts`           |
+| `suggested_replies`            | `ui.suggest_replies`             | —        | `ui-spec.ts`           |
 | `buttons`                      | `ui.render_buttons`              | 0130     | `button-actions.ts`    |
 | `dynamic_form`                 | `ui.render_dynamic_form`         | 0117     | `dynamic-form.ts`      |
 | `detected_actions`             | `ui.review_detected_actions`     | 0120     | `detected-actions.ts`  |
@@ -55,6 +56,11 @@ Notas honestas sobre el inventario:
 
 - `form` / `chart`: `parseFormSpec` / `parseChartSpec` normalizan y validan estructura (tipos cerrados,
   números, longitudes). Sólo presentación.
+- `suggested_replies`: `parseSuggestedRepliesSpec` valida TEXTO PLANO corto (2–6 chips, ≤140
+  caracteres, trim + dedupe). Al hacer clic, el texto se envía como mensaje del médico (turno
+  normal, sin despachar tools); los chips se contraen al usarse y **caducan** al enviar cualquier
+  otro mensaje. Efímeros del hilo vivo: **no** se persisten ni restauran (a diferencia del resto de
+  specs `ui.*`).
 - `dynamic_form`: `validateDynamicForm` = la **frontera de lista blanca** (0117). Tipos de widget y
   props cerrados; rechaza contenido ejecutable; límites de anidación/cantidad.
 - `buttons` (0130): `buildButtonsModel` resuelve cada botón contra el catálogo de tools + RBAC. Un

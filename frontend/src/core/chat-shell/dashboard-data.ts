@@ -52,19 +52,21 @@ const CONSULTATIONS_LIMIT = 6;
 const PATIENTS_LIMIT = 200;
 const FALLBACK_TZ = "UTC";
 
-/** Parámetro real del filtro "en la fecha" (operador ``on``) de ``scheduled_date``, si existe. */
-function scheduledOnOperator(
+/** Parámetro real del filtro de igualdad por día (operador ``eq``) de ``scheduled_date``, si existe. */
+function scheduledTodayFilter(
   controls: FilterableControls,
 ): { parameter: string; timeZone: string } | null {
   const field = controls.ordered.find((entry) => entry.key === "scheduled_date");
   if (!field) {
     return null;
   }
-  const operator = field.operators.find((op) => op.key === "on" && op.parameterName);
-  if (!operator?.parameterName) {
+  const eq = field.operators.find((op) => op.key === "eq" && op.parameterName);
+  if (!eq?.parameterName) {
     return null;
   }
-  return { parameter: operator.parameterName, timeZone: operator.calendarTimezone ?? FALLBACK_TZ };
+  // La zona (para "hoy") la llevan los operadores de fecha (gte/lte); se toma del primero que la declare.
+  const timeZone = field.operators.find((op) => op.calendarTimezone)?.calendarTimezone ?? FALLBACK_TZ;
+  return { parameter: eq.parameterName, timeZone };
 }
 
 /** Fecha de hoy (yyyy-mm-dd) en la zona del consultorio. */
@@ -85,14 +87,14 @@ async function fetchTodayAppointments(): Promise<{ rows: ResourceRow[]; timeZone
       return { rows: [], timeZone: FALLBACK_TZ };
     }
     const controls = buildFilterableControls(capability.list);
-    const onOperator = scheduledOnOperator(controls);
-    const timeZone = onOperator?.timeZone ?? FALLBACK_TZ;
+    const todayFilter = scheduledTodayFilter(controls);
+    const timeZone = todayFilter?.timeZone ?? FALLBACK_TZ;
     const synthetic: Record<string, string> = {
       sort: "scheduled_date",
       limit: String(AGENDA_LIMIT),
     };
-    if (onOperator) {
-      synthetic[onOperator.parameter] = todayIso(timeZone);
+    if (todayFilter) {
+      synthetic[todayFilter.parameter] = todayIso(timeZone);
     }
     const query = parseListQuery(synthetic, capability.list, controls);
     const page = await getResourceListPage(capability, query);

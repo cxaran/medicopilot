@@ -265,3 +265,32 @@ test("ui.render_buttons: descubrible y no gateada en cliente", () => {
   const entry = buildToolCatalog(tools, new Set<string>()).find((e) => e.name === "ui.render_buttons");
   assert.notEqual(entry?.status, "gated_out");
 });
+
+test("buildButtonsModel: botón link de WhatsApp -> sólo lectura; URL insegura -> rechazada", () => {
+  // Enlace de contacto válido (WhatsApp): no muta el sistema, es de sólo lectura.
+  const ok = buildButtonsModel(
+    input([
+      { label: "Enviar por WhatsApp", action: { type: "link", url: "https://wa.me/5215551234567?text=Hola" } },
+    ]),
+    CTX,
+  );
+  assert.equal(ok.ok, true);
+  if (ok.ok) {
+    assert.equal(ok.spec.buttons[0].governance, "read_only");
+    assert.equal(ok.spec.buttons[0].action.type, "link");
+  }
+
+  // URL fuera de la lista blanca (dominio arbitrario / http): la acción no parsea -> botón inválido.
+  const bad = buildButtonsModel(
+    input([{ label: "Phishing", action: { type: "link", url: "http://evil.example.com/x" } }]),
+    CTX,
+  );
+  assert.equal(bad.ok, false);
+
+  // javascript: jamás se acepta.
+  const js = buildButtonsModel(
+    input([{ label: "XSS", action: { type: "link", url: "javascript:alert(1)" } }]),
+    CTX,
+  );
+  assert.equal(js.ok, false);
+});

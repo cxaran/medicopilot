@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import Link from "next/link";
 
 import type {
@@ -57,6 +58,8 @@ export function ResourceTable({
   itemReference = null,
   editEnabled = false,
   detailEnabled = false,
+  onEditInline,
+  renderRowLead,
 }: Readonly<{
   label: string;
   list: ResourceListCapability;
@@ -69,12 +72,19 @@ export function ResourceTable({
   itemReference?: ItemReference | null;
   editEnabled?: boolean;
   detailEnabled?: boolean;
+  // Opt-in: si se pasa, "Editar" abre el formulario INLINE (callback con id+fila) en vez de navegar
+  // a /resources/.../edit. Las páginas /resources NO lo pasan → conservan la navegación de siempre.
+  onEditInline?: (id: string, row: Record<string, unknown>) => void;
+  // Acción ESPECIAL por fila, renderizada al inicio de la celda de acciones (p. ej. el botón de chat
+  // del paciente). Opt-in: sólo lo pasa la tabla de pacientes; los demás recursos no se ven afectados.
+  renderRowLead?: (id: string, row: Record<string, unknown>) => ReactNode;
 }>) {
   const columns = list.fields.filter((field) => field.visible_in_list);
   const { items } = page;
   const idField = itemReference?.field ?? "id";
   const actionPlaceholder = itemReference?.placeholder ?? "id";
-  const hasActions = detailEnabled || editEnabled || relations.length > 0 || actions.length > 0;
+  const hasActions =
+    detailEnabled || editEnabled || relations.length > 0 || actions.length > 0 || Boolean(renderRowLead);
   const totalColumns = columns.length + (hasActions ? 1 : 0);
 
   function itemHref(id: string, ...segments: string[]): string {
@@ -149,6 +159,7 @@ export function ResourceTable({
                     {hasActions ? (
                       <td className="px-4 py-3">
                         <div className="flex flex-wrap items-center gap-3">
+                          {id && renderRowLead ? renderRowLead(id, row) : null}
                           {id && detailEnabled ? (
                             <Link
                               href={`/resources/${encodeURIComponent(resourceName)}/${encodeURIComponent(id)}`}
@@ -158,12 +169,22 @@ export function ResourceTable({
                             </Link>
                           ) : null}
                           {id && editEnabled ? (
-                            <Link
-                              href={itemHref(id, "edit")}
-                              className="text-sm font-medium text-[var(--accent-tx)] underline-offset-2 hover:underline"
-                            >
-                              Editar
-                            </Link>
+                            onEditInline ? (
+                              <button
+                                type="button"
+                                onClick={() => onEditInline(id, row)}
+                                className="text-sm font-medium text-[var(--accent-tx)] underline-offset-2 hover:underline"
+                              >
+                                Editar
+                              </button>
+                            ) : (
+                              <Link
+                                href={itemHref(id, "edit")}
+                                className="text-sm font-medium text-[var(--accent-tx)] underline-offset-2 hover:underline"
+                              >
+                                Editar
+                              </Link>
+                            )
                           ) : null}
                           {id
                             ? relations.map((relation) => (

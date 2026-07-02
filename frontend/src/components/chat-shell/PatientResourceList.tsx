@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 
 import { ResourceTable } from "@/components/resources/ResourceTable";
+import { useChatNav } from "@/components/chat-shell/ChatNavProvider";
 import type { ResourceCapability } from "@/core/api/contracts";
 import {
   buildFilterableControls,
@@ -53,6 +54,10 @@ export function PatientResourceList({
   patientId,
 }: Readonly<{ resourceName: string; patientId: string }>) {
   const [state, setState] = useState<LoadState>({ status: "loading" });
+  // "Nuevo"/"Editar" abren el FORMULARIO OFICIAL del recurso DENTRO del chat del agente (mismo
+  // ``resource_form`` que ``ui.open_resource_form``), no inline. ``recordVersion`` se incrementa al
+  // guardar desde ese formulario y re-dispara esta carga para reflejar el registro nuevo/editado.
+  const { pushChatForm, recordVersion } = useChatNav();
 
   useEffect(() => {
     let cancelled = false;
@@ -86,7 +91,7 @@ export function PatientResourceList({
     return () => {
       cancelled = true;
     };
-  }, [resourceName, patientId]);
+  }, [resourceName, patientId, recordVersion]);
 
   const moduleHref = `/resources/${encodeURIComponent(resourceName)}`;
 
@@ -125,18 +130,34 @@ export function PatientResourceList({
   );
   const detailEnabled = Boolean(capability.item_reference && capability.detail);
 
+  // Abre el formulario del recurso EN EL CHAT del agente: crear (prellenado con el paciente activo) o
+  // editar (con el id de la fila). El chat lo renderiza y al Guardar escribe directo + refresca.
+  const openCreateForm = (): void => {
+    pushChatForm({
+      kind: "resource_form",
+      resource: resourceName,
+      mode: "create",
+      values: { patient_id: patientId },
+    });
+  };
+  const openEditForm = (id: string): void => {
+    pushChatForm({ kind: "resource_form", resource: resourceName, mode: "update", resource_id: id });
+  };
+
   return (
     <div className="rounded-[14px] border border-[var(--border)] bg-[var(--panel)] p-4 shadow-[var(--soft)]">
       <div className="mb-3 flex items-center justify-between gap-3">
         <span className="text-[13.5px] font-semibold text-[var(--tx)]">{capability.label}</span>
         <div className="flex items-center gap-2">
           {capability.forms?.create && (
-            <Link
-              href={`${moduleHref}/new`}
-              className="rounded-[10px] border border-[var(--accent-bd)] bg-[var(--accent-dim)] px-3 py-1.5 text-[12.5px] font-semibold text-[var(--accent-tx)] transition hover:bg-[var(--panel2)]"
+            <button
+              type="button"
+              onClick={openCreateForm}
+              title="Abrir el formulario en el chat"
+              className="rounded-[10px] border border-[var(--accent-bd)] bg-[var(--accent-dim)] px-3 py-1.5 text-[12.5px] font-semibold text-[var(--accent-tx)] transition hover:bg-[var(--accent)] hover:text-[var(--on-accent)]"
             >
               Nuevo
-            </Link>
+            </button>
           )}
           <Link
             href={scopedModuleHref}
@@ -146,6 +167,7 @@ export function PatientResourceList({
           </Link>
         </div>
       </div>
+
       {/* ResourceTable genérico REUSADO: columnas/orden/acciones del contrato. El orden y el detalle
           enlazan a la ruta /resources (servidor) preservando el scope del paciente. */}
       <ResourceTable
@@ -160,6 +182,7 @@ export function PatientResourceList({
         itemReference={capability.item_reference ?? null}
         editEnabled={editEnabled}
         detailEnabled={detailEnabled}
+        onEditInline={editEnabled ? (id) => openEditForm(id) : undefined}
       />
     </div>
   );

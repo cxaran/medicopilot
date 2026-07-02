@@ -1,48 +1,31 @@
-"use client";
-
-import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-
-import { logout } from "@/core/auth/account-mutation-client";
 
 /**
- * Controles de identidad del shell autenticado: acceso a "Mi cuenta" y cierre de
- * sesión. El logout llama al backend (borra la cookie httponly) y redirige a login;
- * cualquier error igualmente termina en login para no dejar al usuario atrapado.
+ * Acceso a "Mi cuenta" desde el pie del shell: un botón de icono (engranaje). El cierre de sesión
+ * vive DENTRO de la página de cuenta (``/account``), no aquí.
  */
 export function AccountMenu() {
-  const router = useRouter();
-  const [pending, setPending] = useState(false);
-
-  async function onLogout() {
-    if (pending) return;
-    setPending(true);
-    try {
-      await logout();
-    } catch {
-      // El logout es idempotente desde la perspectiva del usuario: ante cualquier
-      // error igual se le envía a login.
-    }
-    router.replace("/login");
-  }
-
   return (
-    <div className="flex items-center gap-3">
-      <Link
-        href="/account"
-        className="text-sm font-medium text-[var(--tx2)] underline-offset-2 hover:text-[var(--tx)] hover:underline"
+    <Link
+      href="/account"
+      title="Mi cuenta"
+      aria-label="Mi cuenta"
+      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] border border-[var(--border)] bg-[var(--panel)] text-[var(--tx2)] transition hover:bg-[var(--panel2)] hover:text-[var(--tx)]"
+    >
+      <svg
+        width="17"
+        height="17"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
       >
-        Mi cuenta
-      </Link>
-      <button
-        type="button"
-        onClick={onLogout}
-        disabled={pending}
-        className="rounded-[10px] border border-[var(--border)] px-3 py-1.5 text-sm font-medium text-[var(--tx2)] transition hover:bg-[var(--panel2)] hover:text-[var(--tx)] disabled:cursor-not-allowed disabled:opacity-60"
-      >
-        {pending ? "Cerrando..." : "Cerrar sesión"}
-      </button>
-    </div>
+        <circle cx="12" cy="12" r="3" />
+        <path d="M19.4 13a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.9 1.2V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-2.9-1.2l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0-1.2-2.9H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.3 7l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.6V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 2.9 1.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.6 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" />
+      </svg>
+    </Link>
   );
 }

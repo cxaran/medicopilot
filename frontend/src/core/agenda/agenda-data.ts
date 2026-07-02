@@ -13,7 +13,6 @@ import type { ResourceActionCapability } from "@/core/api/contracts";
 import { buildPatientLabelMap, type PatientLabelMap } from "@/core/chat-shell/dashboard";
 
 import {
-  addDays,
   computeRange,
   formatCivilDate,
   parseCivilDate,
@@ -24,8 +23,8 @@ import {
 } from "./calendar-range.ts";
 
 // Data layer SERVER-ONLY de la agenda en calendario (MP-CTRL-0135). COMPONE lecturas YA existentes del
-// contrato: cita por rango de calendario sobre el recurso ``appointments`` (operadores on/before/
-// after/between que el propio contrato publica para ``scheduled_date``) + el mapa id->nombre de
+// contrato: cita por rango sobre el recurso ``appointments`` (extremos ``gte``/``lte`` de fecha que el
+// propio contrato publica para ``scheduled_date``) + el mapa id->nombre de
 // pacientes (misma vía que el dashboard 0124). Deriva el rango visible del modo + ancla, hace UNA sola
 // consulta de citas en ese rango y devuelve las filas crudas; el reparto en celdas y los contadores
 // los hace el módulo PURO (calendar-range.ts) sobre el MISMO conjunto. Sólo lectura: nunca escribe.
@@ -72,13 +71,13 @@ function emptyData(mode: AgendaMode, anchor: CivilDate): AgendaData {
   };
 }
 
-/** Operadores de calendario de ``scheduled_date`` publicados por el contrato (o null si no existe). */
+/** Operadores filtrables de ``scheduled_date`` publicados por el contrato (o null si no existe). */
 function scheduledOperators(controls: FilterableControls): readonly FilterableOperatorControl[] | null {
   const field = controls.ordered.find((entry) => entry.key === "scheduled_date");
   return field ? field.operators : null;
 }
 
-/** Zona del consultorio tomada de cualquier operador de calendario de ``scheduled_date``. */
+/** Zona del consultorio tomada de cualquier operador de ``scheduled_date`` (los gte/lte de fecha la llevan). */
 function resolveTimeZone(operators: readonly FilterableOperatorControl[] | null): string {
   if (!operators) {
     return FALLBACK_TZ;
@@ -93,9 +92,9 @@ function resolveTimeZone(operators: readonly FilterableOperatorControl[] | null)
 
 /**
  * Parámetros de filtro que acotan la consulta al rango visible, usando los operadores REALES del
- * contrato (sin inventar nombres): prefiere ``between`` (daterange from/to); si no, ``after``+``before``
- * (ensanchando un día a cada lado, porque el reparto por día civil filtra con precisión); si sólo hay
- * ``on``, sólo el modo día puede acotar. Devuelve ``{}`` si no hay operador utilizable.
+ * contrato (sin inventar nombres): el rango por extremos ``gte``+``lte`` (fecha civil inclusiva en
+ * ambos extremos, comparación directa sin zona); si no estuvieran, cae a ``eq`` (sólo el modo día
+ * puede acotar a una fecha exacta). Devuelve ``{}`` si no hay operador utilizable.
  */
 function rangeFilterParams(
   operators: readonly FilterableOperatorControl[] | null,
@@ -105,25 +104,17 @@ function rangeFilterParams(
   if (!operators) {
     return {};
   }
-  const between = operators.find((op) => op.key === "between" && op.fromParameter && op.toParameter);
-  if (between?.fromParameter && between.toParameter) {
-    const to = between.rangeEndInclusive === false ? addDays(range.end, 1) : range.end;
+  const gte = operators.find((op) => op.key === "gte" && op.parameterName);
+  const lte = operators.find((op) => op.key === "lte" && op.parameterName);
+  if (gte?.parameterName && lte?.parameterName) {
     return {
-      [between.fromParameter]: formatCivilDate(range.start),
-      [between.toParameter]: formatCivilDate(to),
+      [gte.parameterName]: formatCivilDate(range.start),
+      [lte.parameterName]: formatCivilDate(range.end),
     };
   }
-  const after = operators.find((op) => op.key === "after" && op.parameterName);
-  const before = operators.find((op) => op.key === "before" && op.parameterName);
-  if (after?.parameterName && before?.parameterName) {
-    return {
-      [after.parameterName]: formatCivilDate(addDays(range.start, -1)),
-      [before.parameterName]: formatCivilDate(addDays(range.end, 1)),
-    };
-  }
-  const on = operators.find((op) => op.key === "on" && op.parameterName);
-  if (on?.parameterName && mode === "day") {
-    return { [on.parameterName]: formatCivilDate(range.start) };
+  const eq = operators.find((op) => op.key === "eq" && op.parameterName);
+  if (eq?.parameterName && mode === "day") {
+    return { [eq.parameterName]: formatCivilDate(range.start) };
   }
   return {};
 }

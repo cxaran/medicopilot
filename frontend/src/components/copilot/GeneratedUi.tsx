@@ -1,16 +1,23 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
+import { InlineResourceForm } from "@/components/chat-shell/InlineResourceForm";
+import { fetchResourceCapability } from "@/core/resources/embedded-list-client";
+import { fillPlaceholder } from "@/core/resources/item-reference";
+import { browserApi } from "@/core/api/browser-client";
+import type { ResourceCapability, ResourceFormCapability } from "@/core/api/contracts";
 import {
   buildFormSubmissionMessage,
   buttonActionToMessage,
   type ButtonsSpec,
   type ChartSpec,
   type FormSpec,
+  type ResourceFormSpec,
+  type SuggestedRepliesSpec,
   type UiSpec,
 } from "@/core/agent/tools/ui-spec";
 import { GOVERNANCE_LABEL } from "@/core/agent/tools/button-actions";
@@ -78,8 +85,14 @@ export function GeneratedUi({
   if (spec.kind === "form") {
     return <FormView spec={spec} onSubmit={(values) => onSendFollowup(buildFormSubmissionMessage(spec, values))} />;
   }
+  if (spec.kind === "resource_form") {
+    return <ResourceFormView spec={spec} onSendFollowup={onSendFollowup} />;
+  }
   if (spec.kind === "chart") {
     return <ChartView spec={spec} />;
+  }
+  if (spec.kind === "suggested_replies") {
+    return <SuggestedRepliesView spec={spec} onPick={onSendFollowup} />;
   }
   if (spec.kind === "dynamic_form") {
     return (
@@ -117,26 +130,48 @@ function FormView({
   spec,
   onSubmit,
 }: Readonly<{ spec: FormSpec; onSubmit: (values: Record<string, string>) => void }>) {
-  const [values, setValues] = useState<Record<string, string>>({});
+  // Prellenado: arranca con los valores iniciales que el modelo haya puesto en cada campo (p. ej.
+  // el nombre al crear un paciente con datos ya dados), en vez de un formulario vacío.
+  const [values, setValues] = useState<Record<string, string>>(() => {
+    const initial: Record<string, string> = {};
+    for (const field of spec.fields) {
+      if (field.value !== undefined) initial[field.name] = field.value;
+    }
+    return initial;
+  });
   const setValue = (name: string, value: string): void =>
     setValues((prev) => ({ ...prev, [name]: value }));
 
   return (
     <form
-      className="flex flex-col gap-3"
+      className="flex flex-col gap-3 rounded-[16px] border border-[var(--accent-bd)] bg-[var(--panel)] p-4 shadow-[var(--soft2)]"
       onSubmit={(event) => {
         event.preventDefault();
         onSubmit(values);
       }}
     >
-      {spec.title && <div className="text-sm font-semibold text-[var(--tx)]">{spec.title}</div>}
+      <div className="flex items-center gap-2.5">
+        <span className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-[9px] bg-[var(--accent-dim)] text-[var(--accent-tx)]" aria-hidden="true">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="4" y="3" width="16" height="18" rx="2.5" />
+            <path d="M8 8h8M8 12h8M8 16h5" />
+          </svg>
+        </span>
+        <span className="text-[14.5px] font-semibold tracking-tight text-[var(--tx)]">
+          {spec.title ?? "Formulario"}
+        </span>
+      </div>
       {spec.description && <p className="text-xs text-[var(--tx2)]">{spec.description}</p>}
 
       {spec.fields.map((field) => (
         <label key={field.name} className="flex flex-col gap-1 text-xs text-[var(--tx2)]">
           <span>
             {field.label}
-            {field.required && <span className="text-[var(--danger)]"> *</span>}
+            {field.required ? (
+              <span className="text-[var(--danger)]"> *</span>
+            ) : (
+              <span className="font-normal text-[var(--tx3)]"> (opcional)</span>
+            )}
           </span>
           {field.type === "select" ? (
             <Select
@@ -172,54 +207,232 @@ function FormView({
         </label>
       ))}
 
-      <div>
+      <div className="flex justify-end">
         <Button type="submit">{spec.submit_label}</Button>
       </div>
     </form>
   );
 }
 
-function ChartView({ spec }: Readonly<{ spec: ChartSpec }>) {
-  const max = Math.max(1, ...spec.data.map((datum) => Math.abs(datum.value)));
-  const rowHeight = 26;
-  const labelWidth = 110;
-  const barAreaWidth = 220;
-  const valueWidth = 50;
-  const width = labelWidth + barAreaWidth + valueWidth;
-  const height = spec.data.length * rowHeight;
+// FORMULARIO OFICIAL DE UN RECURSO montado en el chat (Camino A). El agente sólo nombra el recurso y
+// el modo; aquí se trae el CONTRATO (fetchResourceCapability) y se monta el MISMO InlineResourceForm
+// que el expediente: los campos, validaciones y allowlist salen del contrato y las RELACIONES (FK) se
+// renderizan como BUSCADORES por nombre (ResourceFormFields), nunca como UUID. Al guardar escribe
+// directo por la API del recurso (RBAC server-side) y devuelve el resultado al hilo como hecho
+// consumado (el agente continúa el flujo sin re-crear). No invoca ninguna tool de escritura.
+type ResourceFormState =
+  | { status: "loading" }
+  | { status: "error"; message: string }
+  | {
+      status: "ready";
+      label: string;
+      form: ResourceFormCapability;
+      mutationUrl?: string;
+      initialValues: Record<string, unknown>;
+    }
+  | { status: "done"; summary: string }
+  | { status: "cancelled" };
+
+function ResourceFormView({
+  spec,
+  onSendFollowup,
+}: Readonly<{ spec: ResourceFormSpec; onSendFollowup: (text: string) => void }>) {
+  const [state, setState] = useState<ResourceFormState>({ status: "loading" });
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      setState({ status: "loading" });
+      try {
+        const capability: ResourceCapability = await fetchResourceCapability(spec.resource);
+        if (cancelled) return;
+
+        if (spec.mode === "create") {
+          const form = capability.forms?.create;
+          if (!form) {
+            setState({ status: "error", message: "Este recurso no permite crear desde aquí." });
+            return;
+          }
+          setState({ status: "ready", label: capability.label, form, initialValues: spec.values ?? {} });
+          return;
+        }
+
+        // update: el detalle es la fuente de verdad de los valores; los datos nuevos del agente
+        // (values) lo sobreescriben. La URL de mutación se resuelve con el id del contrato.
+        const reference = capability.item_reference;
+        const detailCap = capability.detail;
+        const updateCap = capability.forms?.update;
+        if (!reference || !detailCap || !updateCap || !spec.resource_id) {
+          setState({ status: "error", message: "Este recurso no permite editar desde aquí." });
+          return;
+        }
+        const detailUrl = fillPlaceholder(detailCap.url_template, reference.placeholder, spec.resource_id);
+        const detail = await browserApi<Record<string, unknown>>(detailUrl);
+        if (cancelled) return;
+        const mutationUrl = fillPlaceholder(updateCap.url_template, reference.placeholder, spec.resource_id);
+        setState({
+          status: "ready",
+          label: capability.label,
+          form: updateCap,
+          mutationUrl,
+          initialValues: { ...detail, ...(spec.values ?? {}) },
+        });
+      } catch {
+        if (!cancelled) setState({ status: "error", message: "No se pudo cargar el formulario." });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [spec]);
+
+  if (state.status === "loading") {
+    return (
+      <div className="rounded-[14px] border border-[var(--border)] bg-[var(--panel)] p-4 text-[13px] text-[var(--tx3)]">
+        Cargando formulario…
+      </div>
+    );
+  }
+  if (state.status === "error") {
+    return (
+      <div className="rounded-[14px] border border-[var(--danger)] bg-[var(--panel)] p-4 text-[13px] text-[var(--danger)]">
+        {state.message}
+      </div>
+    );
+  }
+  if (state.status === "cancelled") {
+    return (
+      <div className="rounded-[14px] border border-[var(--border)] bg-[var(--panel)] p-3 text-[12.5px] text-[var(--tx3)]">
+        Formulario cerrado.
+      </div>
+    );
+  }
+  if (state.status === "done") {
+    return (
+      <div className="rounded-[14px] border border-[var(--accent-bd)] bg-[var(--accent-dim)] p-3 text-[12.5px] text-[var(--accent-tx)]">
+        ✓ {state.summary}
+      </div>
+    );
+  }
 
   return (
-    <div className="flex flex-col gap-2">
-      {spec.title && <div className="text-sm font-semibold text-[var(--tx)]">{spec.title}</div>}
-      <svg
-        width="100%"
-        viewBox={`0 0 ${width} ${height}`}
-        role="img"
-        aria-label={spec.title ?? "Gráfico de barras"}
-      >
-        {spec.data.map((datum, index) => {
-          const y = index * rowHeight;
-          const barWidth = Math.max(2, (Math.abs(datum.value) / max) * barAreaWidth);
-          return (
-            <g key={`${datum.label}-${index}`}>
-              <text x={0} y={y + rowHeight * 0.65} fontSize={11} fill="var(--tx2)">
-                {datum.label.length > 16 ? `${datum.label.slice(0, 16)}…` : datum.label}
-              </text>
-              <rect
-                x={labelWidth}
-                y={y + 4}
-                width={barWidth}
-                height={rowHeight - 10}
-                rx={3}
-                fill="var(--accent)"
-              />
-              <text x={labelWidth + barWidth + 6} y={y + rowHeight * 0.65} fontSize={11} fill="var(--tx)">
+    <InlineResourceForm
+      mode={spec.mode}
+      form={state.form}
+      mutationUrl={state.mutationUrl}
+      // El nombre mostrado es SIEMPRE el del recurso del contrato (p. ej. "Paciente"), no el `title`
+      // que mande el agente (suele venir como frase de acción "Crear nuevo paciente" y se vería como
+      // "Nuevo: Crear nuevo paciente" / "Creó Crear nuevo paciente").
+      resourceLabel={state.label}
+      initialValues={state.initialValues}
+      onCancel={() => setState({ status: "cancelled" })}
+      onDone={(summary) => {
+        // Hecho consumado: ya se escribió por API. Se reporta al hilo para que el agente continúe el
+        // flujo (p. ej. abrir la consulta tras crear el paciente) SIN volver a crear el registro.
+        setState({ status: "done", summary });
+        onSendFollowup(`✅ ${summary}`);
+      }}
+    />
+  );
+}
+
+// Gráfica de barras VERTICAL en tarjeta (fiel a ``chartPanel`` de MediCopilot.dc.html): barras con
+// degradado accent→accent-tx, etiqueta de valor arriba y de categoría abajo. Para muchas categorías
+// (>12) cae a barras horizontales legibles (mismo degradado) para no apretar el eje.
+const CHART_BAR_AREA = 132; // alto del área de barras (px)
+
+function ChartView({ spec }: Readonly<{ spec: ChartSpec }>) {
+  const max = Math.max(1, ...spec.data.map((datum) => Math.abs(datum.value)));
+  const vertical = spec.data.length <= 12;
+
+  return (
+    <div className="w-full rounded-[16px] border border-[var(--border2)] bg-[var(--panel)] p-4 shadow-[var(--soft)]">
+      {spec.title && (
+        <div className="mb-3 text-[14px] font-semibold tracking-tight text-[var(--tx)]">
+          {spec.title}
+        </div>
+      )}
+      {vertical ? (
+        <div
+          className="flex items-end gap-2 border-t border-[var(--border)] pt-3.5"
+          style={{ height: CHART_BAR_AREA + 44 }}
+          role="img"
+          aria-label={spec.title ?? "Gráfico de barras"}
+        >
+          {spec.data.map((datum, index) => (
+            <div
+              key={`${datum.label}-${index}`}
+              className="flex h-full flex-1 flex-col items-center justify-end gap-1.5"
+            >
+              <span className="text-[11px] font-bold tabular-nums text-[var(--tx2)]">
                 {datum.value}
-              </text>
-            </g>
-          );
-        })}
-      </svg>
+              </span>
+              <div
+                className="w-full max-w-[34px] rounded-t-[7px]"
+                style={{
+                  height: `${Math.max(6, (Math.abs(datum.value) / max) * CHART_BAR_AREA)}px`,
+                  background: "linear-gradient(180deg, var(--accent), var(--accent-tx))",
+                }}
+              />
+              <span className="max-w-full truncate text-[11px] text-[var(--tx3)]" title={datum.label}>
+                {datum.label}
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="flex flex-col gap-2" role="img" aria-label={spec.title ?? "Gráfico de barras"}>
+          {spec.data.map((datum, index) => (
+            <div key={`${datum.label}-${index}`} className="flex items-center gap-2">
+              <span className="w-[110px] shrink-0 truncate text-[11.5px] text-[var(--tx2)]" title={datum.label}>
+                {datum.label}
+              </span>
+              <div className="h-3.5 min-w-[2px] flex-1">
+                <div
+                  className="h-full rounded-[4px]"
+                  style={{
+                    width: `${Math.max(2, (Math.abs(datum.value) / max) * 100)}%`,
+                    background: "linear-gradient(90deg, var(--accent), var(--accent-tx))",
+                  }}
+                />
+              </div>
+              <span className="w-[42px] shrink-0 text-right text-[11.5px] font-semibold tabular-nums text-[var(--tx)]">
+                {datum.value}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// RESPUESTAS SUGERIDAS (quick replies): chips con las posibles siguientes respuestas del médico.
+// Al hacer clic, el texto se envía AUTOMÁTICAMENTE como mensaje del médico (onPick → turno normal);
+// el host marca la interfaz como usada y la contrae. Sólo texto plano: nada se ejecuta ni guarda.
+function SuggestedRepliesView({
+  spec,
+  onPick,
+}: Readonly<{ spec: SuggestedRepliesSpec; onPick: (text: string) => void }>) {
+  return (
+    <div className="flex flex-col gap-2">
+      {spec.title && (
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--tx3)]">
+          {spec.title}
+        </span>
+      )}
+      <div className="flex flex-wrap gap-2">
+        {spec.replies.map((reply) => (
+          <button
+            key={reply}
+            type="button"
+            onClick={() => onPick(reply)}
+            className="inline-flex items-center rounded-full border border-[var(--border)] bg-[var(--panel)] px-3.5 py-1.5 text-[13px] text-[var(--tx)] shadow-[var(--soft)] transition hover:border-[var(--accent-bd)] hover:bg-[var(--accent-dim)] hover:text-[var(--accent-tx)]"
+          >
+            {reply}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -244,13 +457,23 @@ function DynamicFormView({
 
   return (
     <form
-      className="flex flex-col gap-3"
+      className="flex flex-col gap-3 rounded-[16px] border border-[var(--accent-bd)] bg-[var(--panel)] p-4 shadow-[var(--soft2)]"
       onSubmit={(event) => {
         event.preventDefault();
         onSubmit(values);
       }}
     >
-      {spec.title && <div className="text-sm font-semibold text-[var(--tx)]">{spec.title}</div>}
+      <div className="flex items-center gap-2.5">
+        <span className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-[9px] bg-[var(--accent-dim)] text-[var(--accent-tx)]" aria-hidden="true">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="4" y="3" width="16" height="18" rx="2.5" />
+            <path d="M8 8h8M8 12h8M8 16h5" />
+          </svg>
+        </span>
+        <span className="text-[14.5px] font-semibold tracking-tight text-[var(--tx)]">
+          {spec.title ?? "Formulario"}
+        </span>
+      </div>
       {spec.description && <p className="text-xs text-[var(--tx2)]">{spec.description}</p>}
 
       {spec.widgets.map((widget, index) => (
@@ -262,7 +485,7 @@ function DynamicFormView({
         />
       ))}
 
-      <div>
+      <div className="flex justify-end">
         <Button type="submit">{spec.submit_label}</Button>
       </div>
     </form>
@@ -1161,17 +1384,57 @@ function ButtonsView({
               <span
                 key={`${button.label}-${index}`}
                 title={button.reason ?? GOVERNANCE_LABEL.blocked}
-                className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-[11px] border border-[var(--border2)] bg-[var(--bg2)] px-3 py-2 text-sm text-[var(--tx3)]"
+                className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-[12px] border border-[var(--border2)] bg-[var(--bg2)] px-3.5 py-2 text-[13.5px] font-medium text-[var(--tx3)]"
               >
-                <span aria-hidden="true">🚫</span>
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.9"
+                  aria-hidden="true"
+                >
+                  <circle cx="12" cy="12" r="9" />
+                  <path d="M5.6 5.6l12.8 12.8" />
+                </svg>
                 {button.label}
               </span>
             );
           }
+          // Acción de ENLACE de contacto (WhatsApp/tel/correo): se abre en otra pestaña (no continúa
+          // la conversación). La URL ya viene validada por el seam (lista blanca). Estilo de acento
+          // para que el CTA (p. ej. "Enviar por WhatsApp") destaque.
+          if (button.action.type === "link") {
+            return (
+              <a
+                key={`${button.label}-${index}`}
+                href={button.action.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 rounded-[12px] border border-[var(--accent-bd)] bg-[var(--accent-dim)] px-3.5 py-2 text-[13.5px] font-semibold text-[var(--accent-tx)] transition hover:bg-[var(--accent)] hover:text-[var(--on-accent)]"
+              >
+                {button.label}
+              </a>
+            );
+          }
+          // Acción de sólo lectura (mensaje/lectura): botón sutil contorneado; acción de escritura
+          // (gobernada por P1): botón de acento. Mismo lenguaje de gobierno del diseño.
+          const readOnly = button.governance === "read_only";
           return (
-            <Button key={`${button.label}-${index}`} type="button" onClick={() => onAction(button.action)}>
+            <button
+              key={`${button.label}-${index}`}
+              type="button"
+              onClick={() => onAction(button.action)}
+              title={button.reason ?? undefined}
+              className={
+                readOnly
+                  ? "inline-flex items-center gap-1.5 rounded-[12px] border border-[var(--border)] bg-[var(--panel)] px-3.5 py-2 text-[13.5px] font-medium text-[var(--tx)] shadow-[var(--soft)] transition hover:bg-[var(--panel2)]"
+                  : "inline-flex items-center gap-1.5 rounded-[12px] border border-[var(--accent-bd)] bg-[var(--accent-dim)] px-3.5 py-2 text-[13.5px] font-semibold text-[var(--accent-tx)] transition hover:bg-[var(--accent)] hover:text-[var(--on-accent)]"
+              }
+            >
               {button.label}
-            </Button>
+            </button>
           );
         })}
       </div>

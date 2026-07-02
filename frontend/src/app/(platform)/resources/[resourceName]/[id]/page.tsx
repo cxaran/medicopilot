@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { AudioTranscriptionPanel } from "@/components/audio/AudioTranscriptionPanel";
+import { BackLink } from "@/components/layout/BackLink";
 import { ResourceDetailFields } from "@/components/resources/ResourceDetailFields";
 import { ResourceRowActions } from "@/components/resources/ResourceRowActions";
 import { shouldShowAudioTranscription } from "@/core/audio-transcription/panel-view";
@@ -62,8 +63,11 @@ export default async function ResourceDetailPage({ params }: PageProps) {
     ? fillPlaceholder(capability.file_download.url_template, placeholder, id)
     : null;
 
+  const listPath = `/resources/${encodeURIComponent(resourceName)}`;
+
   return (
     <div className="space-y-6">
+      <BackLink href={listPath} label={capability.label} />
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="text-sm text-slate-500">{capability.label}</p>

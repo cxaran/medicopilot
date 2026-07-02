@@ -1,5 +1,6 @@
 import type { ResourceFormFieldCapability } from "@/core/api/contracts";
 import { RelationPickerField } from "@/components/resources/RelationPickerField";
+import { RequiredHint } from "@/components/resources/FieldRequirement";
 import { resolveRelationTarget } from "@/core/resources/relation-picker";
 
 type FieldErrors = Record<string, string[]>;
@@ -80,6 +81,7 @@ export function ResourceFormFields({
                   aria-describedby={errorId}
                 />
                 {field.label}
+                <RequiredHint required={field.required} />
               </label>
               {field.description ? (
                 <p className="mt-1 text-sm text-slate-500">{field.description}</p>
@@ -136,6 +138,7 @@ export function ResourceFormFields({
           <div key={field.name}>
             <label htmlFor={field.name} className="block text-sm font-medium text-slate-900">
               {field.label}
+              <RequiredHint required={field.required} />
             </label>
             {field.widget === "textarea" ? (
               <textarea
