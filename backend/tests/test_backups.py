@@ -758,11 +758,16 @@ class BackupApiAndTickTest(unittest.TestCase):
     def test_new_runs_get_initial_explorer_status_by_setting(self) -> None:
         from backend.app.models.enums import BackupExplorerStatus
 
-        with Session(self.engine) as session:
-            run_off = backups.enqueue_manual_run(session)
-            session.commit()
-            self.assertEqual(run_off.explorer_status, BackupExplorerStatus.NOT_REQUESTED)
-            self.assertIsNone(run_off.explorer_policy_version)
+        # Ambos sentidos se fijan explícitamente: el entorno de la suite puede
+        # correr con BACKUP_EXPLORER_ENABLED en cualquier valor.
+        with mock.patch.object(backups.settings, "backup_explorer_enabled", False):
+            with Session(self.engine) as session:
+                run_off = backups.enqueue_manual_run(session)
+                session.commit()
+                self.assertEqual(
+                    run_off.explorer_status, BackupExplorerStatus.NOT_REQUESTED
+                )
+                self.assertIsNone(run_off.explorer_policy_version)
         with mock.patch.object(backups.settings, "backup_explorer_enabled", True):
             with Session(self.engine) as session:
                 run_on = backups.enqueue_manual_run(session)
