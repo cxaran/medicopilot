@@ -31,6 +31,8 @@ import subprocess
 import tarfile
 import tempfile
 import uuid
+from collections.abc import Generator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta, timezone as dt_timezone
 from pathlib import Path
@@ -75,6 +77,47 @@ _PG_DUMP_TIMEOUT_SECONDS = 60 * 30
 _PG_RESTORE_LIST_TIMEOUT_SECONDS = 60 * 5
 
 MANIFEST_FORMAT_VERSION = 1
+
+
+def source_postgres_dsn() -> str:
+    """DSN plano (``postgresql://``) para conexiones directas con psycopg v3 (el DSN
+    de SQLAlchemy lleva el sufijo ``+psycopg2`` que psycopg no acepta). Contiene la
+    contraseña: nunca se loguea."""
+    from sqlalchemy.engine import make_url
+
+    url = make_url(str(settings.postgres_dsn))
+    return url.set(drivername="postgresql").render_as_string(hide_password=False)
+
+
+@contextmanager
+def exported_read_snapshot() -> Generator[str]:
+    """Exporta un snapshot PostgreSQL y lo mantiene ABIERTO mientras dura el bloque.
+
+    Dentro del ``with`` se generan el dump restaurable (``pg_dump --snapshot``) y el
+    explorer SQLite importando el MISMO snapshot: ambos artefactos representan
+    exactamente el mismo instante de la base. Sólo se usa desde el worker (nunca
+    desde FastAPI). Al salir: rollback y cierre garantizados.
+    """
+    import psycopg
+
+    # autocommit=True: psycopg v3 abriría una transacción implícita en el primer
+    # execute y el BEGIN manual chocaría con ella; el modo explícito la evita.
+    connection = psycopg.connect(source_postgres_dsn(), autocommit=True)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY"
+            )
+            cursor.execute("SELECT pg_export_snapshot()")
+            row = cursor.fetchone()
+            assert row is not None
+            snapshot_id = str(row[0])
+        yield snapshot_id
+    finally:
+        try:
+            connection.rollback()
+        finally:
+            connection.close()
 
 
 class BackupTemporaryError(Exception):
@@ -789,9 +832,10 @@ class BackupService:
             drive=drive,
         )
 
-    def _pg_dump(self, output_path: Path) -> None:
+    def _pg_dump(self, output_path: Path, snapshot_id: Optional[str] = None) -> None:
         """pg_dump -Fc de UNA base (sin roles/tablespaces globales), credenciales sólo
-        por env del subprocess (nunca argumentos)."""
+        por env del subprocess (nunca argumentos). Con ``snapshot_id`` el dump lee el
+        snapshot exportado (mismo instante que el explorer)."""
         env = {
             "PGHOST": settings.postgres_server,
             "PGPORT": str(settings.postgres_port),
@@ -799,16 +843,19 @@ class BackupService:
             "PGPASSWORD": settings.postgres_password,
             "PGDATABASE": settings.postgres_db,
         }
+        command = [
+            "pg_dump",
+            "--format=custom",
+            "--no-owner",
+            "--no-acl",
+            "--file",
+            str(output_path),
+        ]
+        if snapshot_id is not None:
+            command.append(f"--snapshot={snapshot_id}")
         try:
             result = subprocess.run(
-                [
-                    "pg_dump",
-                    "--format=custom",
-                    "--no-owner",
-                    "--no-acl",
-                    "--file",
-                    str(output_path),
-                ],
+                command,
                 shell=False,
                 check=False,
                 capture_output=True,
