@@ -24,6 +24,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from backend.app.models.base import Base
 from backend.app.models.enums import (
     BackupDriveStatus,
+    BackupExplorerStatus,
     BackupRunStatus,
     BackupTriggerKind,
     enum_values,
@@ -380,6 +381,61 @@ class BackupRun(Base):
         DateTime,
         nullable=True,
         comment="Momento (UTC) en que la retención borró el archivo remoto (la fila se conserva).",
+    )
+
+    # -- Artefacto de EXPLORACIÓN (SQLite legible del mismo snapshot). Estado propio:
+    # -- un explorer fallido NUNCA invalida un respaldo restaurable correcto.
+    explorer_status: Mapped[Optional[BackupExplorerStatus]] = mapped_column(
+        SAEnum(
+            BackupExplorerStatus,
+            name="backup_explorer_status",
+            native_enum=False,
+            create_constraint=True,
+            validate_strings=True,
+            values_callable=enum_values,
+        ),
+        nullable=True,
+        comment="Estado del artefacto de exploración: not_requested, building, ready o failed.",
+    )
+    explorer_file_name: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        nullable=True,
+        comment="Nombre del SQLite de exploración subido ({prefix}-{ts}-{run}.explorer.sqlite[.age]).",
+    )
+    explorer_file_size_bytes: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        nullable=True,
+        comment="Tamaño del artefacto de exploración subido, en bytes.",
+    )
+    explorer_ciphertext_sha256: Mapped[Optional[str]] = mapped_column(
+        String(64),
+        nullable=True,
+        comment="SHA-256 (hex) del artefacto de exploración subido.",
+    )
+    explorer_drive_file_id: Mapped[Optional[str]] = mapped_column(
+        String(128),
+        nullable=True,
+        comment="Id del artefacto de exploración en Google Drive.",
+    )
+    explorer_policy_version: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        nullable=True,
+        comment="Versión de la política de exportación con la que se construyó el explorer.",
+    )
+    explorer_created_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime,
+        nullable=True,
+        comment="Momento (UTC) en que el artefacto de exploración quedó listo.",
+    )
+    explorer_error_code: Mapped[Optional[str]] = mapped_column(
+        String(96),
+        nullable=True,
+        comment="Código del error del explorer (clasificado, sin texto crudo).",
+    )
+    explorer_error_summary: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        nullable=True,
+        comment="Resumen SEGURO del error del explorer (sin datos clínicos ni secretos).",
     )
 
     created_at: Mapped[datetime] = mapped_column(

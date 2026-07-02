@@ -211,6 +211,9 @@ class Settings(BaseSettings):
     # settings son el interruptor global y los secretos de despliegue. Apagado por
     # defecto: la API y el worker arrancan igual que antes sin configurar nada.
     backups_enabled: bool = False
+    # Artefacto de EXPLORACIÓN por respaldo (SQLite legible del mismo snapshot).
+    # Apagado por defecto: no afecta instalaciones existentes.
+    backup_explorer_enabled: bool = False
     backup_temp_dir: str = "/tmp/medicopilot-backups"
     backup_run_lease_minutes: int = 120
     backup_max_attempts: int = 3

@@ -385,5 +385,18 @@ class BackupTriggerKind(str, Enum):
     MANUAL = "manual"
 
 
+class BackupExplorerStatus(str, Enum):
+    """Estado del artefacto de EXPLORACIÓN (SQLite legible) de un respaldo.
+
+    Independiente del status principal: un respaldo restaurable correcto sigue
+    ``succeeded`` aunque su explorer haya fallado. Enum NO nativo (VARCHAR + CHECK);
+    el valor más largo es ``not_requested`` (13)."""
+
+    NOT_REQUESTED = "not_requested"
+    BUILDING = "building"
+    READY = "ready"
+    FAILED = "failed"
+
+
 def enum_values(enum_class: type[Enum]) -> list[str]:
     return [str(member.value) for member in enum_class]

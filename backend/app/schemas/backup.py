@@ -14,6 +14,7 @@ from pydantic import Field
 
 from backend.app.models.enums import (
     BackupDriveStatus,
+    BackupExplorerStatus,
     BackupRunStatus,
     BackupTriggerKind,
 )
@@ -165,6 +166,9 @@ class BackupRunRead(ApiReadSchema):
     error_code: Optional[str] = None
     error_summary: Optional[str] = None
     pruned_at: Optional[datetime] = None
+    # Artefacto de exploración (SQLite legible): estado y tamaño, de sólo lectura.
+    explorer_status: Optional[BackupExplorerStatus] = None
+    explorer_file_size_bytes: Optional[int] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 
@@ -198,5 +202,11 @@ class BackupRunListItem(ApiReadSchema):
     attempt_count: int = Field(title="Intentos", json_schema_extra={"ui": {"list": True}})
     error_code: Optional[str] = Field(
         default=None, title="Error", json_schema_extra={"ui": {"list": True}}
+    )
+    explorer_status: Optional[BackupExplorerStatus] = Field(
+        default=None, title="Explorador", json_schema_extra={"ui": {"list": True}}
+    )
+    explorer_file_size_bytes: Optional[int] = Field(
+        default=None, title="Explorador (bytes)", json_schema_extra={"ui": {"list": True}}
     )
     created_at: datetime = Field(title="Creado", json_schema_extra={"ui": {"list": True}})
