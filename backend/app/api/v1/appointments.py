@@ -16,13 +16,13 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Query, status
-from sqlmodel import Session, select
+from sqlmodel import select
 
 from backend.app.api.resource_actions import (
-    api_error,
     commit_or_conflict,
     create_entity,
-    get_or_404,
+    get_active_or_404,
+    lock_active_or_404,
     paginate_resource,
     patch_entity,
     serialize,
@@ -60,62 +60,7 @@ _OVERLAP = "El horario se traslapa con otra cita activa del médico"
 
 # Estados que aún ocupan agenda y admiten edición / transiciones.
 _ACTIVE = (AppointmentStatus.PENDING, AppointmentStatus.CONFIRMED)
-
-
-def _lock_appointment(session: Session, appointment_id: UUID) -> Appointment | None:
-    """Toma la fila de la cita con FOR UPDATE (serializa transiciones concurrentes)."""
-    return session.exec(
-        select(Appointment).where(Appointment.id == appointment_id).with_for_update()
-    ).first()
-
-
-def _get_active_appointment(session: Session, appointment_id: UUID) -> Appointment:
-    """Cita no eliminada; una con baja lógica responde 404."""
-    appointment = get_or_404(session, Appointment, appointment_id, _NOT_FOUND)
-    if appointment.deleted_at is not None:
-        api_error(status.HTTP_404_NOT_FOUND, "resource_not_found", _NOT_FOUND)
-    return appointment
-
-
-def _lock_active_appointment(session: Session, appointment_id: UUID) -> Appointment:
-    """Cita no eliminada, bloqueada con FOR UPDATE; una con baja lógica responde 404."""
-    appointment = _lock_appointment(session, appointment_id)
-    if appointment is None or appointment.deleted_at is not None:
-        api_error(status.HTTP_404_NOT_FOUND, "resource_not_found", _NOT_FOUND)
-    return appointment
-
-
-def _ensure_active_patient(session: Session, patient_id: UUID) -> Patient:
-    """El paciente debe existir, no estar eliminado y estar activo."""
-    patient = get_or_404(session, Patient, patient_id, _PATIENT_NOT_FOUND)
-    if patient.deleted_at is not None:
-        api_error(status.HTTP_404_NOT_FOUND, "resource_not_found", _PATIENT_NOT_FOUND)
-    if patient.status != PatientStatus.ACTIVE:
-        api_error(
-            status.HTTP_409_CONFLICT,
-            "resource_state_conflict",
-            "El paciente no está activo",
-        )
-    return patient
-
-
-def _ensure_active_doctor(session: Session, doctor_id: UUID) -> Doctor:
-    """El médico debe existir, no estar eliminado y estar activo."""
-    doctor = get_or_404(session, Doctor, doctor_id, _DOCTOR_NOT_FOUND)
-    if doctor.deleted_at is not None:
-        api_error(status.HTTP_404_NOT_FOUND, "resource_not_found", _DOCTOR_NOT_FOUND)
-    if doctor.status != RecordStatus.ACTIVE:
-        api_error(
-            status.HTTP_409_CONFLICT,
-            "resource_state_conflict",
-            "El médico no está activo",
-        )
-    return doctor
-
-
-def _require_status(appointment: Appointment, allowed: tuple[AppointmentStatus, ...], message: str) -> None:
-    if appointment.status not in allowed:
-        api_error(status.HTTP_409_CONFLICT, "resource_state_conflict", message)
+_DOCTOR_INACTIVE = "El médico no está activo"
 
 
 @router.get("", response_model=OffsetPage[AppointmentListItem])
@@ -135,7 +80,7 @@ def get_appointment(
     session: SessionDep,
     _: AppointmentPermissions.READ.requiere,
 ) -> AppointmentRead:
-    return serialize(AppointmentRead, _get_active_appointment(session, appointment_id))
+    return serialize(AppointmentRead, get_active_or_404(session, Appointment, appointment_id, _NOT_FOUND))
 
 
 @router.post("", response_model=AppointmentRead, status_code=status.HTTP_201_CREATED)
@@ -145,8 +90,14 @@ def create_appointment(
     current_user: CurrentUser,
     _: AppointmentPermissions.CREATE.requiere,
 ) -> AppointmentRead:
-    _ensure_active_patient(session, payload.patient_id)
-    _ensure_active_doctor(session, payload.doctor_id)
+    get_active_or_404(
+        session, Patient, payload.patient_id, _PATIENT_NOT_FOUND,
+        allowed_status=(PatientStatus.ACTIVE,), status_message="El paciente no está activo",
+    )
+    get_active_or_404(
+        session, Doctor, payload.doctor_id, _DOCTOR_NOT_FOUND,
+        allowed_status=(RecordStatus.ACTIVE,), status_message=_DOCTOR_INACTIVE,
+    )
     appointment = create_entity(
         session,
         Appointment,
@@ -170,13 +121,16 @@ def update_appointment(
     current_user: CurrentUser,
     _: AppointmentPermissions.UPDATE.requiere,
 ) -> AppointmentRead:
-    appointment = _lock_active_appointment(session, appointment_id)
-    _require_status(
-        appointment, _ACTIVE, "Sólo se puede editar una cita pendiente o confirmada"
+    appointment = lock_active_or_404(
+        session, Appointment, appointment_id, _NOT_FOUND,
+        allowed_status=_ACTIVE, status_message="Sólo se puede editar una cita pendiente o confirmada",
     )
     data = payload.model_dump(exclude_unset=True)
     if data.get("doctor_id") is not None and data["doctor_id"] != appointment.doctor_id:
-        _ensure_active_doctor(session, data["doctor_id"])
+        get_active_or_404(
+            session, Doctor, data["doctor_id"], _DOCTOR_NOT_FOUND,
+            allowed_status=(RecordStatus.ACTIVE,), status_message=_DOCTOR_INACTIVE,
+        )
     appointment = patch_entity(
         session,
         appointment,
@@ -195,13 +149,12 @@ def delete_appointment(
     current_user: CurrentUser,
     _: AppointmentPermissions.DELETE.requiere,
 ) -> AppointmentRead:
-    appointment = _lock_active_appointment(session, appointment_id)
     # Sólo una cita pendiente (creada por error operativo) se elimina; las confirmadas
     # se cancelan y los estados terminales se conservan.
-    _require_status(
-        appointment,
-        (AppointmentStatus.PENDING,),
-        "Sólo se puede eliminar una cita pendiente; cancela las confirmadas",
+    appointment = lock_active_or_404(
+        session, Appointment, appointment_id, _NOT_FOUND,
+        allowed_status=(AppointmentStatus.PENDING,),
+        status_message="Sólo se puede eliminar una cita pendiente; cancela las confirmadas",
     )
     appointment = soft_delete_entity(
         session,
@@ -220,11 +173,10 @@ def confirm_appointment(
     current_user: CurrentUser,
     _: AppointmentPermissions.UPDATE.requiere,
 ) -> AppointmentRead:
-    appointment = _lock_active_appointment(session, appointment_id)
-    _require_status(
-        appointment,
-        (AppointmentStatus.PENDING,),
-        "Sólo se puede confirmar una cita pendiente",
+    appointment = lock_active_or_404(
+        session, Appointment, appointment_id, _NOT_FOUND,
+        allowed_status=(AppointmentStatus.PENDING,),
+        status_message="Sólo se puede confirmar una cita pendiente",
     )
     appointment = update_entity_values(
         session,
@@ -244,9 +196,9 @@ def cancel_appointment(
     current_user: CurrentUser,
     _: AppointmentPermissions.UPDATE.requiere,
 ) -> AppointmentRead:
-    appointment = _lock_active_appointment(session, appointment_id)
-    _require_status(
-        appointment, _ACTIVE, "Sólo se puede cancelar una cita pendiente o confirmada"
+    appointment = lock_active_or_404(
+        session, Appointment, appointment_id, _NOT_FOUND,
+        allowed_status=_ACTIVE, status_message="Sólo se puede cancelar una cita pendiente o confirmada",
     )
     values: dict[str, object] = {"status": AppointmentStatus.CANCELLED}
     if payload.reason:
@@ -275,11 +227,10 @@ def no_show_appointment(
     current_user: CurrentUser,
     _: AppointmentPermissions.UPDATE.requiere,
 ) -> AppointmentRead:
-    appointment = _lock_active_appointment(session, appointment_id)
-    _require_status(
-        appointment,
-        _ACTIVE,
-        "Sólo se puede marcar inasistencia en una cita pendiente o confirmada",
+    appointment = lock_active_or_404(
+        session, Appointment, appointment_id, _NOT_FOUND,
+        allowed_status=_ACTIVE,
+        status_message="Sólo se puede marcar inasistencia en una cita pendiente o confirmada",
     )
     appointment = update_entity_values(
         session,
@@ -303,15 +254,18 @@ def reschedule_appointment(
     current_user: CurrentUser,
     _: AppointmentPermissions.UPDATE.requiere,
 ) -> AppointmentRead:
-    original = _lock_active_appointment(session, appointment_id)
-    _require_status(
-        original, _ACTIVE, "Sólo se puede reprogramar una cita pendiente o confirmada"
+    original = lock_active_or_404(
+        session, Appointment, appointment_id, _NOT_FOUND,
+        allowed_status=_ACTIVE, status_message="Sólo se puede reprogramar una cita pendiente o confirmada",
     )
     # El paciente se conserva; el resto se hereda de la original si no se envía.
     data = payload.model_dump(exclude_unset=True)
     new_doctor_id = data.get("doctor_id", original.doctor_id)
     if new_doctor_id != original.doctor_id:
-        _ensure_active_doctor(session, new_doctor_id)
+        get_active_or_404(
+            session, Doctor, new_doctor_id, _DOCTOR_NOT_FOUND,
+            allowed_status=(RecordStatus.ACTIVE,), status_message=_DOCTOR_INACTIVE,
+        )
 
     new_appointment = Appointment(
         patient_id=original.patient_id,

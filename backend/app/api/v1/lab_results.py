@@ -14,12 +14,11 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Query, status
-from sqlmodel import Session, select
+from sqlmodel import select
 
 from backend.app.api.resource_actions import (
-    api_error,
     create_entity,
-    get_or_404,
+    get_active_or_404,
     paginate_resource,
     patch_entity,
     serialize,
@@ -49,32 +48,6 @@ _CONSULTATION_NOT_FOUND = "Consulta no encontrada"
 _CONFLICT = "No se pudo guardar el resultado de laboratorio"
 
 
-def _get_active_result(session: Session, result_id: UUID) -> LabResult:
-    """Obtiene un resultado no eliminado; uno con baja lógica responde 404."""
-    result = get_or_404(session, LabResult, result_id, _NOT_FOUND)
-    if result.deleted_at is not None:
-        api_error(status.HTTP_404_NOT_FOUND, "resource_not_found", _NOT_FOUND)
-    return result
-
-
-def _ensure_active_patient(session: Session, patient_id: UUID) -> None:
-    """El resultado requiere un paciente vigente; ausente o eliminado -> 404."""
-    patient = get_or_404(session, Patient, patient_id, _PATIENT_NOT_FOUND)
-    if patient.deleted_at is not None:
-        api_error(status.HTTP_404_NOT_FOUND, "resource_not_found", _PATIENT_NOT_FOUND)
-
-
-def _ensure_active_consultation(session: Session, consultation_id: UUID) -> None:
-    """Si se enlaza una consulta, debe existir y no estar eliminada."""
-    consultation = get_or_404(
-        session, Consultation, consultation_id, _CONSULTATION_NOT_FOUND
-    )
-    if consultation.deleted_at is not None:
-        api_error(
-            status.HTTP_404_NOT_FOUND, "resource_not_found", _CONSULTATION_NOT_FOUND
-        )
-
-
 @router.get("", response_model=OffsetPage[LabResultListItem])
 def list_lab_results(
     session: SessionDep,
@@ -93,7 +66,7 @@ def get_lab_result(
     session: SessionDep,
     _: LabResultPermissions.READ.requiere,
 ) -> LabResultRead:
-    return serialize(LabResultRead, _get_active_result(session, result_id))
+    return serialize(LabResultRead, get_active_or_404(session, LabResult, result_id, _NOT_FOUND))
 
 
 @router.post("", response_model=LabResultRead, status_code=status.HTTP_201_CREATED)
@@ -103,9 +76,9 @@ def create_lab_result(
     current_user: CurrentUser,
     _: LabResultPermissions.CREATE.requiere,
 ) -> LabResultRead:
-    _ensure_active_patient(session, payload.patient_id)
+    get_active_or_404(session, Patient, payload.patient_id, _PATIENT_NOT_FOUND)
     if payload.consultation_id is not None:
-        _ensure_active_consultation(session, payload.consultation_id)
+        get_active_or_404(session, Consultation, payload.consultation_id, _CONSULTATION_NOT_FOUND)
     result = create_entity(
         session,
         LabResult,
@@ -128,9 +101,9 @@ def update_lab_result(
     current_user: CurrentUser,
     _: LabResultPermissions.UPDATE.requiere,
 ) -> LabResultRead:
-    result = _get_active_result(session, result_id)
+    result = get_active_or_404(session, LabResult, result_id, _NOT_FOUND)
     if payload.consultation_id is not None:
-        _ensure_active_consultation(session, payload.consultation_id)
+        get_active_or_404(session, Consultation, payload.consultation_id, _CONSULTATION_NOT_FOUND)
     result = patch_entity(
         session,
         result,
@@ -148,7 +121,7 @@ def delete_lab_result(
     current_user: CurrentUser,
     _: LabResultPermissions.DELETE.requiere,
 ) -> LabResultRead:
-    result = _get_active_result(session, result_id)
+    result = get_active_or_404(session, LabResult, result_id, _NOT_FOUND)
     result = soft_delete_entity(
         session,
         result,

@@ -9,12 +9,11 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Query, status
-from sqlmodel import Session, select
+from sqlmodel import select
 
 from backend.app.api.resource_actions import (
-    api_error,
     create_entity,
-    get_or_404,
+    get_active_or_404,
     paginate_resource,
     patch_entity,
     serialize,
@@ -39,14 +38,6 @@ _NOT_FOUND = "Médico no encontrado"
 _CONFLICT = "Ya existe un médico con esa cédula profesional o ese usuario"
 
 
-def _get_active_doctor(session: Session, doctor_id: UUID) -> Doctor:
-    """Obtiene un médico no eliminado; un perfil con baja lógica responde 404."""
-    doctor = get_or_404(session, Doctor, doctor_id, _NOT_FOUND)
-    if doctor.deleted_at is not None:
-        api_error(status.HTTP_404_NOT_FOUND, "resource_not_found", _NOT_FOUND)
-    return doctor
-
-
 @router.get("", response_model=OffsetPage[DoctorListItem])
 def list_doctors(
     session: SessionDep,
@@ -64,7 +55,7 @@ def get_doctor(
     session: SessionDep,
     _: DoctorPermissions.READ.requiere,
 ) -> DoctorRead:
-    return serialize(DoctorRead, _get_active_doctor(session, doctor_id))
+    return serialize(DoctorRead, get_active_or_404(session, Doctor, doctor_id, _NOT_FOUND))
 
 
 @router.post("", response_model=DoctorRead, status_code=status.HTTP_201_CREATED)
@@ -92,7 +83,7 @@ def update_doctor(
     current_user: CurrentUser,
     _: DoctorPermissions.UPDATE.requiere,
 ) -> DoctorRead:
-    doctor = _get_active_doctor(session, doctor_id)
+    doctor = get_active_or_404(session, Doctor, doctor_id, _NOT_FOUND)
     doctor = patch_entity(
         session,
         doctor,
@@ -110,7 +101,7 @@ def delete_doctor(
     current_user: CurrentUser,
     _: DoctorPermissions.DELETE.requiere,
 ) -> DoctorRead:
-    doctor = _get_active_doctor(session, doctor_id)
+    doctor = get_active_or_404(session, Doctor, doctor_id, _NOT_FOUND)
     doctor = soft_delete_entity(
         session,
         doctor,

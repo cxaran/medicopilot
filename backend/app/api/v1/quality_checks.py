@@ -31,10 +31,10 @@ Alcance por objetivo:
 from typing import Sequence
 from uuid import UUID
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter
 from sqlmodel import Session, select
 
-from backend.app.api.resource_actions import api_error, get_or_404
+from backend.app.api.resource_actions import get_active_or_404
 from backend.app.core.database import SessionDep
 from backend.app.models.consultation import Consultation
 from backend.app.models.enums import (
@@ -78,14 +78,6 @@ router = APIRouter(prefix="/quality", tags=["quality_checks"])
 _CONSULTATION_NOT_FOUND = "Consulta no encontrada"
 _PRESCRIPTION_NOT_FOUND = "Receta no encontrada"
 _PATIENT_NOT_FOUND = "Paciente no encontrado"
-
-
-def _get_active(session: Session, model, entity_id: UUID, message: str):  # type: ignore[no-untyped-def]
-    """Carga una entidad vigente (404 si no existe o está eliminada lógicamente)."""
-    entity = get_or_404(session, model, entity_id, message)
-    if entity.deleted_at is not None:
-        api_error(status.HTTP_404_NOT_FOUND, "resource_not_found", message)
-    return entity
 
 
 def _active_prescription_items(
@@ -399,17 +391,17 @@ def run_quality_check(
 ) -> QualityCheckResponse:
     """Ejecuta las verificaciones deterministas sobre el objetivo. Sólo lectura; no muta nada."""
     if payload.target_type == "consultation":
-        consultation = _get_active(
+        consultation = get_active_or_404(
             session, Consultation, payload.target_id, _CONSULTATION_NOT_FOUND
         )
         flags = _check_consultation(session, consultation)
     elif payload.target_type == "prescription":
-        prescription = _get_active(
+        prescription = get_active_or_404(
             session, Prescription, payload.target_id, _PRESCRIPTION_NOT_FOUND
         )
         flags = _check_prescription(session, prescription)
     else:  # patient
-        patient = _get_active(session, Patient, payload.target_id, _PATIENT_NOT_FOUND)
+        patient = get_active_or_404(session, Patient, payload.target_id, _PATIENT_NOT_FOUND)
         flags = _check_patient(session, patient)
 
     read_flags = [_to_read(flag) for flag in flags]

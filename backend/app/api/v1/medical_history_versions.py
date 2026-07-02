@@ -20,7 +20,8 @@ from sqlmodel import Session, select
 from backend.app.api.resource_actions import (
     api_error,
     commit_or_conflict,
-    get_or_404,
+    get_active_or_404,
+    lock_active_or_404,
     paginate_resource,
     patch_entity,
     serialize,
@@ -69,33 +70,10 @@ _NARRATIVE_FIELDS = (
 )
 
 
-def _get_active_version(session: Session, version_id: UUID) -> MedicalHistoryVersion:
-    """Obtiene una versión no eliminada; una con baja lógica responde 404."""
-    version = get_or_404(session, MedicalHistoryVersion, version_id, _NOT_FOUND)
-    if version.deleted_at is not None:
-        api_error(status.HTTP_404_NOT_FOUND, "resource_not_found", _NOT_FOUND)
-    return version
-
-
-def _require_draft(version: MedicalHistoryVersion) -> None:
-    """Edición, borrado y finalización sólo proceden sobre borradores."""
-    if version.status != MedicalHistoryVersionStatus.DRAFT:
-        api_error(status.HTTP_409_CONFLICT, "resource_state_conflict", _NOT_DRAFT)
-
-
-def _lock_active_patient(session: Session, patient_id: UUID) -> Patient:
-    """Bloquea (FOR UPDATE) y valida el paciente: serializa el versionado por paciente."""
-    patient = session.exec(
-        select(Patient).where(Patient.id == patient_id).with_for_update()
-    ).first()
-    if patient is None or patient.deleted_at is not None:
-        api_error(status.HTTP_404_NOT_FOUND, "resource_not_found", _PATIENT_NOT_FOUND)
-    return patient
-
-
 def _current_version(
     session: Session, patient_id: UUID, *, lock: bool = False
 ) -> MedicalHistoryVersion | None:
+    """Versión vigente (``current``) del paciente, o ``None``; ``lock`` la toma FOR UPDATE."""
     stmt = select(MedicalHistoryVersion).where(
         MedicalHistoryVersion.patient_id == patient_id,
         MedicalHistoryVersion.status == MedicalHistoryVersionStatus.CURRENT,
@@ -104,27 +82,6 @@ def _current_version(
     if lock:
         stmt = stmt.with_for_update()
     return session.exec(stmt).first()
-
-
-def _active_draft_exists(session: Session, patient_id: UUID) -> bool:
-    draft = session.exec(
-        select(MedicalHistoryVersion.id).where(
-            MedicalHistoryVersion.patient_id == patient_id,
-            MedicalHistoryVersion.status == MedicalHistoryVersionStatus.DRAFT,
-            MedicalHistoryVersion.deleted_at.is_(None),
-        )
-    ).first()
-    return draft is not None
-
-
-def _next_version_number(session: Session, patient_id: UUID) -> int:
-    """Siguiente número consecutivo. Se llama con la fila del paciente bloqueada."""
-    current_max = session.exec(
-        select(func.max(MedicalHistoryVersion.version_number)).where(
-            MedicalHistoryVersion.patient_id == patient_id
-        )
-    ).first()
-    return (current_max or 0) + 1
 
 
 @router.get("", response_model=OffsetPage[MedicalHistoryVersionListItem])
@@ -148,7 +105,8 @@ def get_medical_history_version(
     _: MedicalHistoryVersionPermissions.READ.requiere,
 ) -> MedicalHistoryVersionRead:
     return serialize(
-        MedicalHistoryVersionRead, _get_active_version(session, history_version_id)
+        MedicalHistoryVersionRead,
+        get_active_or_404(session, MedicalHistoryVersion, history_version_id, _NOT_FOUND),
     )
 
 
@@ -163,8 +121,15 @@ def create_medical_history_version(
 ) -> MedicalHistoryVersionRead:
     # Bloquea la fila del paciente: serializa la asignación de version_number y la
     # regla de un solo borrador activo frente a solicitudes concurrentes.
-    _lock_active_patient(session, payload.patient_id)
-    if _active_draft_exists(session, payload.patient_id):
+    lock_active_or_404(session, Patient, payload.patient_id, _PATIENT_NOT_FOUND)
+    draft_exists = session.exec(
+        select(MedicalHistoryVersion.id).where(
+            MedicalHistoryVersion.patient_id == payload.patient_id,
+            MedicalHistoryVersion.status == MedicalHistoryVersionStatus.DRAFT,
+            MedicalHistoryVersion.deleted_at.is_(None),
+        )
+    ).first()
+    if draft_exists is not None:
         api_error(
             status.HTTP_409_CONFLICT,
             "resource_state_conflict",
@@ -185,9 +150,15 @@ def create_medical_history_version(
         narrative = {field: sent.get(field) for field in _NARRATIVE_FIELDS}
         based_on_id = None
 
+    # Siguiente número consecutivo, calculado con la fila del paciente bloqueada.
+    max_number = session.exec(
+        select(func.max(MedicalHistoryVersion.version_number)).where(
+            MedicalHistoryVersion.patient_id == payload.patient_id
+        )
+    ).first()
     version = MedicalHistoryVersion(
         patient_id=payload.patient_id,
-        version_number=_next_version_number(session, payload.patient_id),
+        version_number=(max_number or 0) + 1,
         status=MedicalHistoryVersionStatus.DRAFT,
         based_on_version_id=based_on_id,
         created_by=current_user.id,
@@ -208,8 +179,10 @@ def update_medical_history_version(
     current_user: CurrentUser,
     _: MedicalHistoryVersionPermissions.UPDATE.requiere,
 ) -> MedicalHistoryVersionRead:
-    version = _get_active_version(session, history_version_id)
-    _require_draft(version)
+    version = get_active_or_404(
+        session, MedicalHistoryVersion, history_version_id, _NOT_FOUND,
+        allowed_status=(MedicalHistoryVersionStatus.DRAFT,), status_message=_NOT_DRAFT,
+    )
     version = patch_entity(
         session,
         version,
@@ -227,8 +200,10 @@ def delete_medical_history_version(
     current_user: CurrentUser,
     _: MedicalHistoryVersionPermissions.DELETE.requiere,
 ) -> MedicalHistoryVersionRead:
-    version = _get_active_version(session, history_version_id)
-    _require_draft(version)
+    version = get_active_or_404(
+        session, MedicalHistoryVersion, history_version_id, _NOT_FOUND,
+        allowed_status=(MedicalHistoryVersionStatus.DRAFT,), status_message=_NOT_DRAFT,
+    )
     version = soft_delete_entity(
         session,
         version,
@@ -248,8 +223,10 @@ def finalize_medical_history_version(
     current_user: CurrentUser,
     _: MedicalHistoryVersionPermissions.FINALIZE.requiere,
 ) -> MedicalHistoryVersionRead:
-    version = _get_active_version(session, history_version_id)
-    _require_draft(version)
+    version = get_active_or_404(
+        session, MedicalHistoryVersion, history_version_id, _NOT_FOUND,
+        allowed_status=(MedicalHistoryVersionStatus.DRAFT,), status_message=_NOT_DRAFT,
+    )
 
     # El paciente debe seguir vigente; también bloquea su fila para serializar la
     # finalización y evitar dos versiones vigentes simultáneas.

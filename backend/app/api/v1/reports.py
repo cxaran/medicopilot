@@ -55,29 +55,10 @@ _INVALID_RANGE = "El rango de fechas es inválido: date_to no puede ser anterior
 _RANGE_TOO_LARGE = "El rango de actividad no puede exceder 60 meses."
 
 
-def _app_tz() -> ZoneInfo:
-    return ZoneInfo(settings.application_timezone)
-
-
 def _month_start_utc(year: int, month: int, tz: ZoneInfo) -> datetime:
     """Inicio del mes (medianoche de pared del día 1 en ``tz``) como ``datetime`` UTC naive."""
     local = datetime(year, month, 1, tzinfo=tz)
     return local.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
-
-
-def _next_month_start_utc(year: int, month: int, tz: ZoneInfo) -> datetime:
-    next_year, next_month = (year + 1, 1) if month == 12 else (year, month + 1)
-    return _month_start_utc(next_year, next_month, tz)
-
-
-def _iter_months(date_from: date, date_to: date) -> list[tuple[int, int]]:
-    """Lista de (año, mes) que toca el rango, de date_from a date_to inclusive."""
-    months: list[tuple[int, int]] = []
-    year, month = date_from.year, date_from.month
-    while (year, month) <= (date_to.year, date_to.month):
-        months.append((year, month))
-        year, month = (year + 1, 1) if month == 12 else (year, month + 1)
-    return months
 
 
 def _validate_window(date_from: date, date_to: date) -> None:
@@ -94,11 +75,16 @@ def report_activity(
     doctor_id: Annotated[Optional[UUID], Query(description="Filtra por médico.")] = None,
 ) -> list[ActivityPoint]:
     _validate_window(date_from, date_to)
-    months = _iter_months(date_from, date_to)
+    # Meses (año, mes) que toca el rango, de date_from a date_to inclusive.
+    months: list[tuple[int, int]] = []
+    year, month = date_from.year, date_from.month
+    while (year, month) <= (date_to.year, date_to.month):
+        months.append((year, month))
+        year, month = (year + 1, 1) if month == 12 else (year, month + 1)
     if len(months) > _MAX_ACTIVITY_MONTHS:
         api_error(status.HTTP_422_UNPROCESSABLE_CONTENT, "invalid_query", _RANGE_TOO_LARGE)
 
-    tz = _app_tz()
+    tz = ZoneInfo(settings.application_timezone)
     # El rango exacto pedido (recorta meses parciales en los extremos).
     range_start = day_start_utc(date_from, tz)
     range_end = next_day_start_utc(date_to, tz)
@@ -106,7 +92,7 @@ def report_activity(
     points: list[ActivityPoint] = []
     for year, month in months:
         low = max(_month_start_utc(year, month, tz), range_start)
-        high = min(_next_month_start_utc(year, month, tz), range_end)
+        high = min(_month_start_utc(year + month // 12, month % 12 + 1, tz), range_end)
 
         cons_stmt = select(func.count()).select_from(Consultation).where(
             Consultation.deleted_at.is_(None),
@@ -145,7 +131,7 @@ def report_top_diagnoses(
     limit: Annotated[int, Query(ge=1, le=100, description="Máximo de diagnósticos.")] = 10,
 ) -> list[TopDiagnosis]:
     _validate_window(date_from, date_to)
-    tz = _app_tz()
+    tz = ZoneInfo(settings.application_timezone)
     range_start = day_start_utc(date_from, tz)
     range_end = next_day_start_utc(date_to, tz)
 

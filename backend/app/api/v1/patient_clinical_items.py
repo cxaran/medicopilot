@@ -12,12 +12,11 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Query, status
-from sqlmodel import Session, select
+from sqlmodel import select
 
 from backend.app.api.resource_actions import (
-    api_error,
     create_entity,
-    get_or_404,
+    get_active_or_404,
     paginate_resource,
     patch_entity,
     serialize,
@@ -46,21 +45,6 @@ _PATIENT_NOT_FOUND = "Paciente no encontrado"
 _CONFLICT = "No se pudo guardar el dato clínico"
 
 
-def _get_active_item(session: Session, item_id: UUID) -> PatientClinicalItem:
-    """Obtiene un dato clínico no eliminado; uno con baja lógica responde 404."""
-    item = get_or_404(session, PatientClinicalItem, item_id, _NOT_FOUND)
-    if item.deleted_at is not None:
-        api_error(status.HTTP_404_NOT_FOUND, "resource_not_found", _NOT_FOUND)
-    return item
-
-
-def _ensure_active_patient(session: Session, patient_id: UUID) -> None:
-    """El dato clínico requiere un paciente vigente; ausente o eliminado -> 404."""
-    patient = get_or_404(session, Patient, patient_id, _PATIENT_NOT_FOUND)
-    if patient.deleted_at is not None:
-        api_error(status.HTTP_404_NOT_FOUND, "resource_not_found", _PATIENT_NOT_FOUND)
-
-
 @router.get("", response_model=OffsetPage[PatientClinicalItemListItem])
 def list_patient_clinical_items(
     session: SessionDep,
@@ -79,7 +63,7 @@ def get_patient_clinical_item(
     session: SessionDep,
     _: PatientClinicalItemPermissions.READ.requiere,
 ) -> PatientClinicalItemRead:
-    return serialize(PatientClinicalItemRead, _get_active_item(session, item_id))
+    return serialize(PatientClinicalItemRead, get_active_or_404(session, PatientClinicalItem, item_id, _NOT_FOUND))
 
 
 @router.post(
@@ -91,7 +75,7 @@ def create_patient_clinical_item(
     current_user: CurrentUser,
     _: PatientClinicalItemPermissions.CREATE.requiere,
 ) -> PatientClinicalItemRead:
-    _ensure_active_patient(session, payload.patient_id)
+    get_active_or_404(session, Patient, payload.patient_id, _PATIENT_NOT_FOUND)
     item = create_entity(
         session,
         PatientClinicalItem,
@@ -110,7 +94,7 @@ def update_patient_clinical_item(
     current_user: CurrentUser,
     _: PatientClinicalItemPermissions.UPDATE.requiere,
 ) -> PatientClinicalItemRead:
-    item = _get_active_item(session, item_id)
+    item = get_active_or_404(session, PatientClinicalItem, item_id, _NOT_FOUND)
     item = patch_entity(
         session,
         item,
@@ -128,7 +112,7 @@ def delete_patient_clinical_item(
     current_user: CurrentUser,
     _: PatientClinicalItemPermissions.DELETE.requiere,
 ) -> PatientClinicalItemRead:
-    item = _get_active_item(session, item_id)
+    item = get_active_or_404(session, PatientClinicalItem, item_id, _NOT_FOUND)
     item = soft_delete_entity(
         session,
         item,

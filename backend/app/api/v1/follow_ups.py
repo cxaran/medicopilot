@@ -13,7 +13,7 @@ from typing import Annotated, Literal, Optional, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Query
-from sqlmodel import Session, select
+from sqlmodel import select
 
 from backend.app.core.database import SessionDep
 from backend.app.models.appointment import Appointment
@@ -59,19 +59,19 @@ _PRIORITY_RANK = {
 }
 
 
-def _patient_labels(session: Session, patient_ids: set[UUID]) -> dict[UUID, str]:
-    """Mapa id->nombre de los pacientes referidos (una sola consulta; no filtra por borrado)."""
-    ids = {pid for pid in patient_ids if pid is not None}
-    if not ids:
-        return {}
-    rows = session.execute(
-        select(Patient.id, Patient.full_name).where(Patient.id.in_(ids))
-    ).all()
-    return {row[0]: row[1] for row in rows}
+@router.get("/summary", response_model=FollowUpSummaryResponse)
+def get_follow_ups_summary(
+    session: SessionDep,
+    _: FollowUpPermissions.READ.requiere,
+    appointment_lookback_days: Annotated[int, Query(ge=1, le=365)] = (
+        _DEFAULT_APPOINTMENT_LOOKBACK_DAYS
+    ),
+) -> FollowUpSummaryResponse:
+    """Reúne los pendientes de seguimiento del médico. Sólo lectura; no muta nada."""
+    now = utc_now()
 
-
-def _pending_tasks(session: Session) -> list[ClinicalTask]:
-    """Tareas clínicas ABIERTAS (no hechas ni canceladas) y no eliminadas."""
+    # Tareas clínicas ABIERTAS (no hechas ni canceladas) y no eliminadas. Orden:
+    # prioridad alta primero; luego por vencimiento (con due_at antes; sin due_at al final).
     tasks = list(
         session.execute(
             select(ClinicalTask).where(
@@ -80,20 +80,15 @@ def _pending_tasks(session: Session) -> list[ClinicalTask]:
             )
         ).scalars().all()
     )
-    # Orden: prioridad alta primero; luego por vencimiento (los que tienen due_at antes; los
-    # sin due_at al final).
-    far_future = utc_now() + timedelta(days=365 * 100)
+    far_future = now + timedelta(days=365 * 100)
     tasks.sort(key=lambda t: (_PRIORITY_RANK.get(t.priority, 99), t.due_at or far_future))
-    return tasks
 
-
-def _missed_appointments(session: Session, lookback_days: int) -> list[Appointment]:
-    """Citas no asistidas (no_show) o canceladas dentro de la ventana reciente, no eliminadas."""
-    # La cita se agenda por FECHA civil (la hora es opcional): la ventana reciente se aplica
-    # sobre ``scheduled_date``. El orden desc deja primero las más recientes; dentro del mismo
-    # día, las que tienen hora antes que las sin hora (nulls last en desc de PostgreSQL).
-    since_date = (utc_now() - timedelta(days=lookback_days)).date()
-    return list(
+    # Citas no asistidas (no_show) o canceladas dentro de la ventana reciente, no eliminadas.
+    # La cita se agenda por FECHA civil (la hora es opcional): la ventana se aplica sobre
+    # ``scheduled_date``. El orden desc deja primero las más recientes; dentro del mismo día,
+    # las que tienen hora antes que las sin hora (nulls last en desc de PostgreSQL).
+    since_date = (now - timedelta(days=appointment_lookback_days)).date()
+    appointments = list(
         session.execute(
             select(Appointment)
             .where(
@@ -105,10 +100,8 @@ def _missed_appointments(session: Session, lookback_days: int) -> list[Appointme
         ).scalars().all()
     )
 
-
-def _unreviewed_abnormal_labs(session: Session) -> list[LabResult]:
-    """Resultados anormales (low/high/critical) SIN revisar (reviewed_at nulo), no eliminados."""
-    return list(
+    # Resultados anormales (low/high/critical) SIN revisar (reviewed_at nulo), no eliminados.
+    labs = list(
         session.execute(
             select(LabResult)
             .where(
@@ -120,30 +113,18 @@ def _unreviewed_abnormal_labs(session: Session) -> list[LabResult]:
         ).scalars().all()
     )
 
-
-@router.get("/summary", response_model=FollowUpSummaryResponse)
-def get_follow_ups_summary(
-    session: SessionDep,
-    _: FollowUpPermissions.READ.requiere,
-    appointment_lookback_days: Annotated[int, Query(ge=1, le=365)] = (
-        _DEFAULT_APPOINTMENT_LOOKBACK_DAYS
-    ),
-) -> FollowUpSummaryResponse:
-    """Reúne los pendientes de seguimiento del médico. Sólo lectura; no muta nada."""
-    now = utc_now()
-    tasks = _pending_tasks(session)
-    appointments = _missed_appointments(session, appointment_lookback_days)
-    labs = _unreviewed_abnormal_labs(session)
-
-    patient_ids: set[UUID] = set()
-    for task in tasks:
-        if task.patient_id is not None:
-            patient_ids.add(task.patient_id)
-    for appt in appointments:
-        patient_ids.add(appt.patient_id)
-    for lab in labs:
-        patient_ids.add(lab.patient_id)
-    labels = _patient_labels(session, patient_ids)
+    # Etiquetas id->nombre de los pacientes referidos (una sola consulta; no filtra por borrado).
+    patient_ids: set[UUID] = {task.patient_id for task in tasks if task.patient_id is not None}
+    patient_ids |= {appt.patient_id for appt in appointments}
+    patient_ids |= {lab.patient_id for lab in labs}
+    labels: dict[UUID, str] = {}
+    if patient_ids:
+        labels = {
+            row[0]: row[1]
+            for row in session.execute(
+                select(Patient.id, Patient.full_name).where(Patient.id.in_(patient_ids))
+            ).all()
+        }
 
     def _label(pid: Optional[UUID]) -> Optional[str]:
         return labels.get(pid) if pid is not None else None

@@ -12,12 +12,12 @@ from uuid import UUID
 
 from fastapi import APIRouter, Query, status
 from sqlalchemy import or_
-from sqlmodel import Session, select
+from sqlmodel import select
 
 from backend.app.api.resource_actions import (
     api_error,
     create_entity,
-    get_or_404,
+    get_active_or_404,
     paginate_resource,
     patch_entity,
     serialize,
@@ -59,32 +59,6 @@ _CONFLICT = "Ya existe un paciente con ese número de expediente o esa CURP"
 _SEARCH_SCAN_CAP = 2000
 # Niveles que cuentan como posible DUPLICADO para advertir antes de crear.
 _STRONG_TIERS = frozenset({"exacto", "fuerte"})
-
-
-def _compute_age(birth_date: date) -> int:
-    """Edad en años cumplidos a hoy (UTC)."""
-    today = utc_now().date()
-    return today.year - birth_date.year - (
-        (today.month, today.day) < (birth_date.month, birth_date.day)
-    )
-
-
-def _mask_phone(phone: Optional[str]) -> Optional[str]:
-    """Enmascara el teléfono dejando visibles sólo los últimos 4 dígitos (p. ej. ******1234)."""
-    digits = normalize_phone(phone)
-    if not digits:
-        return None
-    if len(digits) <= 4:
-        return "*" * len(digits)
-    return "*" * (len(digits) - 4) + digits[-4:]
-
-
-def _get_active_patient(session: Session, patient_id: UUID) -> Patient:
-    """Obtiene un paciente no eliminado; un expediente con baja lógica responde 404."""
-    patient = get_or_404(session, Patient, patient_id, _NOT_FOUND)
-    if patient.deleted_at is not None:
-        api_error(status.HTTP_404_NOT_FOUND, "resource_not_found", _NOT_FOUND)
-    return patient
 
 
 @router.get("", response_model=OffsetPage[PatientListItem])
@@ -168,20 +142,27 @@ def search_patients(
     ]
     ranked = rank_candidates(query, candidates, limit)
 
-    cards = [
-        PatientSearchCandidate(
-            id=s.candidate.id,
-            full_name=s.candidate.full_name,
-            birth_year=s.candidate.birth_date.year,
-            age=_compute_age(s.candidate.birth_date),
-            sex=s.candidate.sex,
-            phone_masked=_mask_phone(s.candidate.phone),
-            score=s.score,
-            tier=s.tier,
-            reasons=list(s.reasons),
+    today = utc_now().date()
+    cards = []
+    for s in ranked:
+        born = s.candidate.birth_date
+        # Teléfono enmascarado: sólo los últimos 4 dígitos visibles (p. ej. ******1234).
+        digits = normalize_phone(s.candidate.phone)
+        masked = "*" * (len(digits) - 4) + digits[-4:] if len(digits) > 4 else "*" * len(digits) or None
+        cards.append(
+            PatientSearchCandidate(
+                id=s.candidate.id,
+                full_name=s.candidate.full_name,
+                birth_year=born.year,
+                # Edad en años cumplidos a hoy (UTC).
+                age=today.year - born.year - ((today.month, today.day) < (born.month, born.day)),
+                sex=s.candidate.sex,
+                phone_masked=masked,
+                score=s.score,
+                tier=s.tier,
+                reasons=list(s.reasons),
+            )
         )
-        for s in ranked
-    ]
     return PatientSearchResponse(
         count=len(cards),
         has_strong_match=any(s.tier in _STRONG_TIERS for s in ranked),
@@ -195,7 +176,7 @@ def get_patient(
     session: SessionDep,
     _: PatientPermissions.READ.requiere,
 ) -> PatientRead:
-    return serialize(PatientRead, _get_active_patient(session, patient_id))
+    return serialize(PatientRead, get_active_or_404(session, Patient, patient_id, _NOT_FOUND))
 
 
 @router.post("", response_model=PatientRead, status_code=status.HTTP_201_CREATED)
@@ -224,7 +205,7 @@ def update_patient(
     current_user: CurrentUser,
     _: PatientPermissions.UPDATE.requiere,
 ) -> PatientRead:
-    patient = _get_active_patient(session, patient_id)
+    patient = get_active_or_404(session, Patient, patient_id, _NOT_FOUND)
     patient = patch_entity(
         session,
         patient,
@@ -242,7 +223,7 @@ def delete_patient(
     current_user: CurrentUser,
     _: PatientPermissions.DELETE.requiere,
 ) -> PatientRead:
-    patient = _get_active_patient(session, patient_id)
+    patient = get_active_or_404(session, Patient, patient_id, _NOT_FOUND)
     patient = soft_delete_entity(
         session,
         patient,

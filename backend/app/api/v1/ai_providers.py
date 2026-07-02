@@ -13,8 +13,8 @@ from sqlmodel import select
 
 from backend.app.agent.crypto import encrypt_secret
 from backend.app.api.resource_actions import (
-    api_error,
     commit_or_conflict,
+    get_owned_or_404,
     serialize,
     soft_delete_entity,
     update_entity_values,
@@ -30,22 +30,6 @@ from backend.app.schemas.ai_provider_credential import (
 from backend.app.schemas.auth import MessageResponse
 
 router = APIRouter(prefix="/users/me/ai-providers", tags=["ai-providers"])
-
-
-def _get_owned(
-    session: SessionDep,
-    credential_id: uuid.UUID,
-    owner_id: uuid.UUID,
-) -> AiProviderCredential:
-    """Devuelve la credencial vigente del dueño o 404 (no revela credenciales ajenas)."""
-    credential = session.get(AiProviderCredential, credential_id)
-    if (
-        credential is None
-        or credential.deleted_at is not None
-        or credential.user_id != owner_id
-    ):
-        api_error(status.HTTP_404_NOT_FOUND, "resource_not_found", "Credencial no encontrada")
-    return credential
 
 
 @router.get("", response_model=list[AiProviderCredentialRead])
@@ -92,7 +76,9 @@ def update_credential(
     session: SessionDep,
     current_user: CurrentUser,
 ) -> AiProviderCredentialRead:
-    credential = _get_owned(session, credential_id, current_user.id)
+    credential = get_owned_or_404(
+        session, AiProviderCredential, credential_id, current_user.id, "Credencial no encontrada"
+    )
 
     data = payload.model_dump(exclude_unset=True)
     # El secreto se recifra si viene; nunca se guarda en claro.
@@ -117,7 +103,9 @@ def delete_credential(
     session: SessionDep,
     current_user: CurrentUser,
 ) -> MessageResponse:
-    credential = _get_owned(session, credential_id, current_user.id)
+    credential = get_owned_or_404(
+        session, AiProviderCredential, credential_id, current_user.id, "Credencial no encontrada"
+    )
     soft_delete_entity(
         session,
         credential,

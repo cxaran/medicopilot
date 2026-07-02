@@ -20,22 +20,13 @@ from backend.app.schemas.agent_persona import AgentPersonaRead, AgentPersonaUpda
 router = APIRouter(prefix="/users/me/agent-persona", tags=["agent-persona"])
 
 
-def _get_owned(session: SessionDep, owner_id) -> AgentPersona | None:
-    return session.exec(
-        select(AgentPersona).where(AgentPersona.user_id == owner_id)
-    ).first()
-
-
-def _serialize(persona: AgentPersona | None) -> AgentPersonaRead:
-    """Persona del dueño, o una vacía si aún no configuró ninguna."""
-    if persona is None:
-        return AgentPersonaRead()
-    return AgentPersonaRead.model_validate(persona)
-
-
 @router.get("", response_model=AgentPersonaRead)
 def get_persona(session: SessionDep, current_user: CurrentUser) -> AgentPersonaRead:
-    return _serialize(_get_owned(session, current_user.id))
+    persona = session.exec(
+        select(AgentPersona).where(AgentPersona.user_id == current_user.id)
+    ).first()
+    # Persona del dueño, o una vacía si aún no configuró ninguna.
+    return AgentPersonaRead.model_validate(persona) if persona else AgentPersonaRead()
 
 
 @router.put("", response_model=AgentPersonaRead)
@@ -45,7 +36,9 @@ def upsert_persona(
     current_user: CurrentUser,
 ) -> AgentPersonaRead:
     data = payload.model_dump(exclude_unset=True)
-    persona = _get_owned(session, current_user.id)
+    persona = session.exec(
+        select(AgentPersona).where(AgentPersona.user_id == current_user.id)
+    ).first()
     if persona is None:
         persona = AgentPersona(user_id=current_user.id, created_by=current_user.id, **data)
         session.add(persona)
@@ -55,4 +48,4 @@ def upsert_persona(
         persona.updated_by = current_user.id
     commit_or_conflict(session, "No se pudo guardar la persona")
     session.refresh(persona)
-    return _serialize(persona)
+    return AgentPersonaRead.model_validate(persona)

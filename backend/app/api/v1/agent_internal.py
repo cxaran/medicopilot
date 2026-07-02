@@ -35,23 +35,6 @@ from backend.app.utils.utc_now import utc_now
 router = APIRouter(prefix="/internal/agent", tags=["internal"])
 
 
-def _require_internal_auth(provided: str | None) -> None:
-    """Valida el secreto compartido server-to-server en tiempo constante."""
-    expected = settings.agent_gateway_internal_secret
-    if expected is None or not expected.get_secret_value().strip():
-        api_error(
-            status.HTTP_503_SERVICE_UNAVAILABLE,
-            "internal_auth_not_configured",
-            "El puente interno no está configurado.",
-        )
-    if not provided or not secrets_lib.compare_digest(provided, expected.get_secret_value()):
-        api_error(
-            status.HTTP_401_UNAUTHORIZED,
-            "invalid_internal_auth",
-            "Credencial interna inválida.",
-        )
-
-
 @router.post("/credential-lease", response_model=CredentialLeaseResponse)
 def lease_credential(
     payload: CredentialLeaseRequest,
@@ -59,7 +42,22 @@ def lease_credential(
     session: SessionDep,
     x_internal_auth: str | None = Header(default=None, alias="X-Internal-Auth"),
 ) -> CredentialLeaseResponse:
-    _require_internal_auth(x_internal_auth)
+    # Secreto compartido server-to-server (X-Internal-Auth), comparado en tiempo constante.
+    expected = settings.agent_gateway_internal_secret
+    if expected is None or not expected.get_secret_value().strip():
+        api_error(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "internal_auth_not_configured",
+            "El puente interno no está configurado.",
+        )
+    if not x_internal_auth or not secrets_lib.compare_digest(
+        x_internal_auth, expected.get_secret_value()
+    ):
+        api_error(
+            status.HTTP_401_UNAUTHORIZED,
+            "invalid_internal_auth",
+            "Credencial interna inválida.",
+        )
     limit_internal_lease(request)
 
     query = select(AiProviderCredential).where(

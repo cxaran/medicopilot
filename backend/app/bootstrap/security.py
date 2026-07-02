@@ -14,7 +14,7 @@ def bootstrap_token_required(token: SecretStr | None) -> bool:
 
 
 def require_bootstrap_token(configured_token: SecretStr | None, provided_token: str | None) -> None:
-    if not bootstrap_token_required(configured_token):
+    if configured_token is None or not bootstrap_token_required(configured_token):
         return
     expected = configured_token.get_secret_value()
     provided = provided_token or ""

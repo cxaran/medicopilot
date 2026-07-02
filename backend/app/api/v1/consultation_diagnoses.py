@@ -18,9 +18,9 @@ from fastapi import APIRouter, Query, status
 from sqlmodel import Session, select
 
 from backend.app.api.resource_actions import (
-    api_error,
     create_entity,
-    get_or_404,
+    get_active_or_404,
+    lock_active_or_404,
     paginate_resource,
     patch_entity,
     serialize,
@@ -51,50 +51,24 @@ _CONFLICT = "No se pudo guardar el diagnóstico"
 _SEALED = "La consulta está finalizada: los diagnósticos quedaron sellados"
 
 
-def _lock_consultation(session: Session, consultation_id: UUID) -> Consultation | None:
-    """Carga la consulta tomando su fila con FOR UPDATE (serializa con finalize)."""
-    return session.exec(
-        select(Consultation).where(Consultation.id == consultation_id).with_for_update()
-    ).first()
-
-
-def _get_writable_consultation(session: Session, consultation_id: UUID) -> Consultation:
-    """Consulta destino de una creación: bloqueada, existente, no eliminada ni finalizada."""
-    consultation = _lock_consultation(session, consultation_id)
-    if consultation is None or consultation.deleted_at is not None:
-        api_error(
-            status.HTTP_404_NOT_FOUND, "resource_not_found", _CONSULTATION_NOT_FOUND
-        )
-    if consultation.status != ConsultationStatus.DRAFT:
-        api_error(status.HTTP_409_CONFLICT, "resource_state_conflict", _SEALED)
-    return consultation
-
-
 def _load_active_diagnosis(
     session: Session, diagnosis_id: UUID, *, lock_parent: bool = False
-) -> tuple[ConsultationDiagnosis, Consultation]:
+) -> ConsultationDiagnosis:
     """Carga un diagnóstico disponible: ni él ni su consulta padre eliminados (-> 404).
 
-    ``lock_parent`` toma la fila de la consulta con FOR UPDATE: las mutaciones lo
-    activan para verificar ``draft`` bajo bloqueo; las lecturas no."""
-    diagnosis = get_or_404(session, ConsultationDiagnosis, diagnosis_id, _NOT_FOUND)
-    if diagnosis.deleted_at is not None:
-        api_error(status.HTTP_404_NOT_FOUND, "resource_not_found", _NOT_FOUND)
+    ``lock_parent`` (mutaciones) toma la fila de la consulta con FOR UPDATE —serializa
+    con ``consultations.finalize``— y exige que siga en ``draft`` (409 si está sellada);
+    las lecturas no bloquean ni exigen estado."""
+    diagnosis = get_active_or_404(session, ConsultationDiagnosis, diagnosis_id, _NOT_FOUND)
     if lock_parent:
-        consultation = _lock_consultation(session, diagnosis.consultation_id)
-    else:
-        consultation = get_or_404(
-            session, Consultation, diagnosis.consultation_id, _NOT_FOUND
+        lock_active_or_404(
+            session, Consultation, diagnosis.consultation_id, _NOT_FOUND,
+            allowed_status=(ConsultationStatus.DRAFT,), status_message=_SEALED,
         )
-    if consultation is None or consultation.deleted_at is not None:
+    else:
         # La consulta padre eliminada hace que sus diagnósticos no estén disponibles.
-        api_error(status.HTTP_404_NOT_FOUND, "resource_not_found", _NOT_FOUND)
-    return diagnosis, consultation
-
-
-def _require_editable_parent(consultation: Consultation) -> None:
-    if consultation.status != ConsultationStatus.DRAFT:
-        api_error(status.HTTP_409_CONFLICT, "resource_state_conflict", _SEALED)
+        get_active_or_404(session, Consultation, diagnosis.consultation_id, _NOT_FOUND)
+    return diagnosis
 
 
 @router.get("", response_model=OffsetPage[ConsultationDiagnosisListItem])
@@ -122,7 +96,7 @@ def get_consultation_diagnosis(
     session: SessionDep,
     _: ConsultationDiagnosisPermissions.READ.requiere,
 ) -> ConsultationDiagnosisRead:
-    diagnosis, _consultation = _load_active_diagnosis(session, diagnosis_id)
+    diagnosis = _load_active_diagnosis(session, diagnosis_id)
     return serialize(ConsultationDiagnosisRead, diagnosis)
 
 
@@ -135,7 +109,11 @@ def create_consultation_diagnosis(
     current_user: CurrentUser,
     _: ConsultationDiagnosisPermissions.CREATE.requiere,
 ) -> ConsultationDiagnosisRead:
-    _get_writable_consultation(session, payload.consultation_id)
+    # Consulta destino: bloqueada (serializa con finalize), vigente y aún en borrador.
+    lock_active_or_404(
+        session, Consultation, payload.consultation_id, _CONSULTATION_NOT_FOUND,
+        allowed_status=(ConsultationStatus.DRAFT,), status_message=_SEALED,
+    )
     diagnosis = create_entity(
         session,
         ConsultationDiagnosis,
@@ -154,10 +132,7 @@ def update_consultation_diagnosis(
     current_user: CurrentUser,
     _: ConsultationDiagnosisPermissions.UPDATE.requiere,
 ) -> ConsultationDiagnosisRead:
-    diagnosis, consultation = _load_active_diagnosis(
-        session, diagnosis_id, lock_parent=True
-    )
-    _require_editable_parent(consultation)
+    diagnosis = _load_active_diagnosis(session, diagnosis_id, lock_parent=True)
     diagnosis = patch_entity(
         session,
         diagnosis,
@@ -175,10 +150,7 @@ def delete_consultation_diagnosis(
     current_user: CurrentUser,
     _: ConsultationDiagnosisPermissions.DELETE.requiere,
 ) -> ConsultationDiagnosisRead:
-    diagnosis, consultation = _load_active_diagnosis(
-        session, diagnosis_id, lock_parent=True
-    )
-    _require_editable_parent(consultation)
+    diagnosis = _load_active_diagnosis(session, diagnosis_id, lock_parent=True)
     diagnosis = soft_delete_entity(
         session,
         diagnosis,

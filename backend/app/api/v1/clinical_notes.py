@@ -14,9 +14,8 @@ from fastapi import APIRouter, Query, status
 from sqlmodel import Session, select
 
 from backend.app.api.resource_actions import (
-    api_error,
     create_entity,
-    get_or_404,
+    get_active_or_404,
     paginate_resource,
     patch_entity,
     serialize,
@@ -49,24 +48,6 @@ _CONSULTATION_NOT_FOUND = "Consulta no encontrada"
 _CONFLICT = "No se pudo guardar la nota clínica"
 
 
-def _get_active_note(session: Session, note_id: UUID) -> ClinicalNote:
-    note = get_or_404(session, ClinicalNote, note_id, _NOT_FOUND)
-    if note.deleted_at is not None:
-        api_error(status.HTTP_404_NOT_FOUND, "resource_not_found", _NOT_FOUND)
-    return note
-
-
-def _get_active_consultation(session: Session, consultation_id: UUID) -> Consultation:
-    consultation = get_or_404(
-        session, Consultation, consultation_id, _CONSULTATION_NOT_FOUND
-    )
-    if consultation.deleted_at is not None:
-        api_error(
-            status.HTTP_404_NOT_FOUND, "resource_not_found", _CONSULTATION_NOT_FOUND
-        )
-    return consultation
-
-
 @router.get("", response_model=OffsetPage[ClinicalNoteListItem])
 def list_clinical_notes(
     session: SessionDep,
@@ -84,7 +65,7 @@ def get_clinical_note(
     session: SessionDep,
     _: ClinicalNotePermissions.READ.requiere,
 ) -> ClinicalNoteRead:
-    return serialize(ClinicalNoteRead, _get_active_note(session, note_id))
+    return serialize(ClinicalNoteRead, get_active_or_404(session, ClinicalNote, note_id, _NOT_FOUND))
 
 
 @router.post("", response_model=ClinicalNoteRead, status_code=status.HTTP_201_CREATED)
@@ -95,7 +76,7 @@ def create_clinical_note(
     _: ClinicalNotePermissions.CREATE.requiere,
 ) -> ClinicalNoteRead:
     # El paciente se DERIVA de la consulta (fuente única); la nota nace como borrador.
-    consultation = _get_active_consultation(session, payload.consultation_id)
+    consultation = get_active_or_404(session, Consultation, payload.consultation_id, _CONSULTATION_NOT_FOUND)
     note = create_entity(
         session,
         ClinicalNote,
@@ -141,7 +122,7 @@ def create_medical_certificate(
     _: ClinicalNotePermissions.CREATE.requiere,
 ) -> ClinicalNoteRead:
     """Crea una CONSTANCIA/justificante de asistencia EN BORRADOR, compuesta de la consulta."""
-    consultation = _get_active_consultation(session, payload.consultation_id)
+    consultation = get_active_or_404(session, Consultation, payload.consultation_id, _CONSULTATION_NOT_FOUND)
     details = _consultation_snapshot(session, consultation)
     details["motivo"] = payload.motivo
     note = ClinicalNote(
@@ -175,7 +156,7 @@ def create_sick_leave(
     El número de días de reposo es decisión médica EXPLÍCITA (``rest_days`` obligatorio, ≥1 por
     schema): nunca se asume ni se inventa.
     """
-    consultation = _get_active_consultation(session, payload.consultation_id)
+    consultation = get_active_or_404(session, Consultation, payload.consultation_id, _CONSULTATION_NOT_FOUND)
     details = _consultation_snapshot(session, consultation)
     details.update(
         {
@@ -215,7 +196,7 @@ def create_referral(
     El destino de una referencia es decisión médica explícita (lo valida el schema): no se
     inventa. El servidor toma de la consulta el paciente y el médico + cédula.
     """
-    consultation = _get_active_consultation(session, payload.consultation_id)
+    consultation = get_active_or_404(session, Consultation, payload.consultation_id, _CONSULTATION_NOT_FOUND)
     details = _consultation_snapshot(session, consultation)
     if payload.kind == "referencia":
         details.update(
@@ -256,7 +237,7 @@ def update_clinical_note(
     current_user: CurrentUser,
     _: ClinicalNotePermissions.UPDATE.requiere,
 ) -> ClinicalNoteRead:
-    note = _get_active_note(session, note_id)
+    note = get_active_or_404(session, ClinicalNote, note_id, _NOT_FOUND)
     note = patch_entity(
         session,
         note,
@@ -274,7 +255,7 @@ def delete_clinical_note(
     current_user: CurrentUser,
     _: ClinicalNotePermissions.DELETE.requiere,
 ) -> ClinicalNoteRead:
-    note = _get_active_note(session, note_id)
+    note = get_active_or_404(session, ClinicalNote, note_id, _NOT_FOUND)
     note = soft_delete_entity(
         session,
         note,

@@ -12,12 +12,11 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Query, status
-from sqlmodel import Session, select
+from sqlmodel import select
 
 from backend.app.api.resource_actions import (
-    api_error,
     create_entity,
-    get_or_404,
+    get_active_or_404,
     paginate_resource,
     patch_entity,
     serialize,
@@ -46,22 +45,6 @@ _DOCTOR_NOT_FOUND = "Médico no encontrado"
 _CONFLICT = "Ya existe una plantilla con ese medicamento y presentación para el médico"
 
 
-def _get_active_template(session: Session, template_id: UUID) -> MedicationTemplate:
-    """Obtiene una plantilla no eliminada; una con baja lógica responde 404."""
-    template = get_or_404(session, MedicationTemplate, template_id, _NOT_FOUND)
-    if template.deleted_at is not None:
-        api_error(status.HTTP_404_NOT_FOUND, "resource_not_found", _NOT_FOUND)
-    return template
-
-
-def _ensure_doctor_exists(session: Session, doctor_id: UUID) -> Doctor:
-    """El médico propietario debe existir y no estar eliminado (404 genérico)."""
-    doctor = get_or_404(session, Doctor, doctor_id, _DOCTOR_NOT_FOUND)
-    if doctor.deleted_at is not None:
-        api_error(status.HTTP_404_NOT_FOUND, "resource_not_found", _DOCTOR_NOT_FOUND)
-    return doctor
-
-
 @router.get("", response_model=OffsetPage[MedicationTemplateListItem])
 def list_medication_templates(
     session: SessionDep,
@@ -79,7 +62,7 @@ def get_medication_template(
     session: SessionDep,
     _: MedicationTemplatePermissions.READ.requiere,
 ) -> MedicationTemplateRead:
-    return serialize(MedicationTemplateRead, _get_active_template(session, template_id))
+    return serialize(MedicationTemplateRead, get_active_or_404(session, MedicationTemplate, template_id, _NOT_FOUND))
 
 
 @router.post(
@@ -91,7 +74,7 @@ def create_medication_template(
     current_user: CurrentUser,
     _: MedicationTemplatePermissions.CREATE.requiere,
 ) -> MedicationTemplateRead:
-    _ensure_doctor_exists(session, payload.doctor_id)
+    get_active_or_404(session, Doctor, payload.doctor_id, _DOCTOR_NOT_FOUND)
     template = create_entity(
         session,
         MedicationTemplate,
@@ -110,7 +93,7 @@ def update_medication_template(
     current_user: CurrentUser,
     _: MedicationTemplatePermissions.UPDATE.requiere,
 ) -> MedicationTemplateRead:
-    template = _get_active_template(session, template_id)
+    template = get_active_or_404(session, MedicationTemplate, template_id, _NOT_FOUND)
     template = patch_entity(
         session,
         template,
@@ -128,7 +111,7 @@ def delete_medication_template(
     current_user: CurrentUser,
     _: MedicationTemplatePermissions.DELETE.requiere,
 ) -> MedicationTemplateRead:
-    template = _get_active_template(session, template_id)
+    template = get_active_or_404(session, MedicationTemplate, template_id, _NOT_FOUND)
     template = soft_delete_entity(
         session,
         template,

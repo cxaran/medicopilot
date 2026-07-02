@@ -30,22 +30,10 @@ from backend.app.security.rate_limit import (
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-def _require_registration_enabled() -> None:
-    if not settings.registration_enabled:
-        api_error(
-            status.HTTP_403_FORBIDDEN,
-            "registration_disabled",
-            "El registro de cuentas no está disponible.",
-        )
-
-
-def _require_password_reset_enabled() -> None:
-    if not settings.password_reset_enabled:
-        api_error(
-            status.HTTP_403_FORBIDDEN,
-            "password_reset_disabled",
-            "La recuperación de contraseña no está disponible.",
-        )
+def _require_enabled(enabled: bool, code: str, message: str) -> None:
+    """403 estable cuando la función de auth está deshabilitada por settings."""
+    if not enabled:
+        api_error(status.HTTP_403_FORBIDDEN, code, message)
 
 
 @router.get("/policy", response_model=AuthPolicyRead)
@@ -97,7 +85,11 @@ async def request_registration(
     request: Request,
     session: SessionDep,
 ) -> MessageResponse:
-    _require_registration_enabled()
+    _require_enabled(
+        settings.registration_enabled,
+        "registration_disabled",
+        "El registro de cuentas no está disponible.",
+    )
     limit_register_request(request, str(payload.email))
     await send_registration_token(session, payload.email)
     return MessageResponse(message="Si el email es válido, se enviará un token de registro")
@@ -109,7 +101,11 @@ def complete_registration(
     request: Request,
     session: SessionDep,
 ) -> MessageResponse:
-    _require_registration_enabled()
+    _require_enabled(
+        settings.registration_enabled,
+        "registration_disabled",
+        "El registro de cuentas no está disponible.",
+    )
     limit_register_complete(request)
     user = create_user(session, payload)
     if user is None:
@@ -140,7 +136,11 @@ async def request_password_reset(
     request: Request,
     session: SessionDep,
 ) -> MessageResponse:
-    _require_password_reset_enabled()
+    _require_enabled(
+        settings.password_reset_enabled,
+        "password_reset_disabled",
+        "La recuperación de contraseña no está disponible.",
+    )
     limit_forgot_password(request, str(payload.email))
     await send_password_reset_token(session, payload.email)
     return MessageResponse(message="Si el email es válido, se enviará un token de recuperación")
@@ -152,7 +152,11 @@ def complete_password_reset(
     request: Request,
     session: SessionDep,
 ) -> MessageResponse:
-    _require_password_reset_enabled()
+    _require_enabled(
+        settings.password_reset_enabled,
+        "password_reset_disabled",
+        "La recuperación de contraseña no está disponible.",
+    )
     limit_reset_password(request, payload.token)
     user = reset_password(session, payload.email, payload.token, payload.password)
     if user is None:

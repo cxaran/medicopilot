@@ -10,12 +10,11 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Query, status
-from sqlmodel import Session, select
+from sqlmodel import select
 
 from backend.app.api.resource_actions import (
-    api_error,
     create_entity,
-    get_or_404,
+    get_active_or_404,
     paginate_resource,
     patch_entity,
     serialize,
@@ -42,19 +41,6 @@ _PATIENT_NOT_FOUND = "Paciente no encontrado"
 _CONFLICT = "No se pudo guardar la tarea clínica"
 
 
-def _get_active_task(session: Session, task_id: UUID) -> ClinicalTask:
-    task = get_or_404(session, ClinicalTask, task_id, _NOT_FOUND)
-    if task.deleted_at is not None:
-        api_error(status.HTTP_404_NOT_FOUND, "resource_not_found", _NOT_FOUND)
-    return task
-
-
-def _ensure_active_patient(session: Session, patient_id: UUID) -> None:
-    patient = get_or_404(session, Patient, patient_id, _PATIENT_NOT_FOUND)
-    if patient.deleted_at is not None:
-        api_error(status.HTTP_404_NOT_FOUND, "resource_not_found", _PATIENT_NOT_FOUND)
-
-
 @router.get("", response_model=OffsetPage[ClinicalTaskListItem])
 def list_clinical_tasks(
     session: SessionDep,
@@ -73,7 +59,7 @@ def get_clinical_task(
     session: SessionDep,
     _: ClinicalTaskPermissions.READ.requiere,
 ) -> ClinicalTaskRead:
-    return serialize(ClinicalTaskRead, _get_active_task(session, task_id))
+    return serialize(ClinicalTaskRead, get_active_or_404(session, ClinicalTask, task_id, _NOT_FOUND))
 
 
 @router.post("", response_model=ClinicalTaskRead, status_code=status.HTTP_201_CREATED)
@@ -84,7 +70,7 @@ def create_clinical_task(
     _: ClinicalTaskPermissions.CREATE.requiere,
 ) -> ClinicalTaskRead:
     if payload.patient_id is not None:
-        _ensure_active_patient(session, payload.patient_id)
+        get_active_or_404(session, Patient, payload.patient_id, _PATIENT_NOT_FOUND)
     # ``owner_id`` por defecto: el usuario actual si no se especifica.
     owner_id = payload.owner_id or current_user.id
     task = create_entity(
@@ -109,9 +95,9 @@ def update_clinical_task(
     current_user: CurrentUser,
     _: ClinicalTaskPermissions.UPDATE.requiere,
 ) -> ClinicalTaskRead:
-    task = _get_active_task(session, task_id)
+    task = get_active_or_404(session, ClinicalTask, task_id, _NOT_FOUND)
     if payload.patient_id is not None:
-        _ensure_active_patient(session, payload.patient_id)
+        get_active_or_404(session, Patient, payload.patient_id, _PATIENT_NOT_FOUND)
     task = patch_entity(
         session,
         task,
@@ -129,7 +115,7 @@ def delete_clinical_task(
     current_user: CurrentUser,
     _: ClinicalTaskPermissions.DELETE.requiere,
 ) -> ClinicalTaskRead:
-    task = _get_active_task(session, task_id)
+    task = get_active_or_404(session, ClinicalTask, task_id, _NOT_FOUND)
     task = soft_delete_entity(
         session,
         task,

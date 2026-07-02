@@ -10,12 +10,11 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Query, status
-from sqlmodel import Session, select
+from sqlmodel import select
 
 from backend.app.api.resource_actions import (
-    api_error,
     create_entity,
-    get_or_404,
+    get_active_or_404,
     paginate_resource,
     patch_entity,
     serialize,
@@ -43,21 +42,6 @@ _PATIENT_NOT_FOUND = "Paciente no encontrado"
 _CONFLICT = "No se pudo guardar el evento clínico"
 
 
-def _get_active_event(session: Session, event_id: UUID) -> ClinicalEvent:
-    """Obtiene un evento no eliminado; uno con baja lógica responde 404."""
-    event = get_or_404(session, ClinicalEvent, event_id, _NOT_FOUND)
-    if event.deleted_at is not None:
-        api_error(status.HTTP_404_NOT_FOUND, "resource_not_found", _NOT_FOUND)
-    return event
-
-
-def _ensure_active_patient(session: Session, patient_id: UUID) -> None:
-    """El evento requiere un paciente vigente; ausente o eliminado -> 404."""
-    patient = get_or_404(session, Patient, patient_id, _PATIENT_NOT_FOUND)
-    if patient.deleted_at is not None:
-        api_error(status.HTTP_404_NOT_FOUND, "resource_not_found", _PATIENT_NOT_FOUND)
-
-
 @router.get("", response_model=OffsetPage[ClinicalEventListItem])
 def list_clinical_events(
     session: SessionDep,
@@ -76,7 +60,7 @@ def get_clinical_event(
     session: SessionDep,
     _: ClinicalEventPermissions.READ.requiere,
 ) -> ClinicalEventRead:
-    return serialize(ClinicalEventRead, _get_active_event(session, event_id))
+    return serialize(ClinicalEventRead, get_active_or_404(session, ClinicalEvent, event_id, _NOT_FOUND))
 
 
 @router.post("", response_model=ClinicalEventRead, status_code=status.HTTP_201_CREATED)
@@ -86,7 +70,7 @@ def create_clinical_event(
     current_user: CurrentUser,
     _: ClinicalEventPermissions.CREATE.requiere,
 ) -> ClinicalEventRead:
-    _ensure_active_patient(session, payload.patient_id)
+    get_active_or_404(session, Patient, payload.patient_id, _PATIENT_NOT_FOUND)
     event = create_entity(
         session,
         ClinicalEvent,
@@ -109,7 +93,7 @@ def update_clinical_event(
     current_user: CurrentUser,
     _: ClinicalEventPermissions.UPDATE.requiere,
 ) -> ClinicalEventRead:
-    event = _get_active_event(session, event_id)
+    event = get_active_or_404(session, ClinicalEvent, event_id, _NOT_FOUND)
     event = patch_entity(
         session,
         event,
@@ -127,7 +111,7 @@ def delete_clinical_event(
     current_user: CurrentUser,
     _: ClinicalEventPermissions.DELETE.requiere,
 ) -> ClinicalEventRead:
-    event = _get_active_event(session, event_id)
+    event = get_active_or_404(session, ClinicalEvent, event_id, _NOT_FOUND)
     event = soft_delete_entity(
         session,
         event,

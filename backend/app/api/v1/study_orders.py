@@ -10,12 +10,11 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Query, status
-from sqlmodel import Session, select
+from sqlmodel import select
 
 from backend.app.api.resource_actions import (
-    api_error,
     create_entity,
-    get_or_404,
+    get_active_or_404,
     paginate_resource,
     patch_entity,
     serialize,
@@ -45,25 +44,6 @@ _DOCTOR_NOT_FOUND = "Médico no encontrado"
 _CONFLICT = "No se pudo guardar la orden de estudio"
 
 
-def _get_active_order(session: Session, order_id: UUID) -> StudyOrder:
-    order = get_or_404(session, StudyOrder, order_id, _NOT_FOUND)
-    if order.deleted_at is not None:
-        api_error(status.HTTP_404_NOT_FOUND, "resource_not_found", _NOT_FOUND)
-    return order
-
-
-def _ensure_active_patient(session: Session, patient_id: UUID) -> None:
-    patient = get_or_404(session, Patient, patient_id, _PATIENT_NOT_FOUND)
-    if patient.deleted_at is not None:
-        api_error(status.HTTP_404_NOT_FOUND, "resource_not_found", _PATIENT_NOT_FOUND)
-
-
-def _ensure_active_doctor(session: Session, doctor_id: UUID) -> None:
-    doctor = get_or_404(session, Doctor, doctor_id, _DOCTOR_NOT_FOUND)
-    if doctor.deleted_at is not None:
-        api_error(status.HTTP_404_NOT_FOUND, "resource_not_found", _DOCTOR_NOT_FOUND)
-
-
 @router.get("", response_model=OffsetPage[StudyOrderListItem])
 def list_study_orders(
     session: SessionDep,
@@ -80,7 +60,7 @@ def get_study_order(
     session: SessionDep,
     _: StudyOrderPermissions.READ.requiere,
 ) -> StudyOrderRead:
-    return serialize(StudyOrderRead, _get_active_order(session, order_id))
+    return serialize(StudyOrderRead, get_active_or_404(session, StudyOrder, order_id, _NOT_FOUND))
 
 
 @router.post("", response_model=StudyOrderRead, status_code=status.HTTP_201_CREATED)
@@ -90,8 +70,8 @@ def create_study_order(
     current_user: CurrentUser,
     _: StudyOrderPermissions.CREATE.requiere,
 ) -> StudyOrderRead:
-    _ensure_active_patient(session, payload.patient_id)
-    _ensure_active_doctor(session, payload.ordered_by)
+    get_active_or_404(session, Patient, payload.patient_id, _PATIENT_NOT_FOUND)
+    get_active_or_404(session, Doctor, payload.ordered_by, _DOCTOR_NOT_FOUND)
     order = create_entity(
         session,
         StudyOrder,
@@ -114,7 +94,7 @@ def update_study_order(
     current_user: CurrentUser,
     _: StudyOrderPermissions.UPDATE.requiere,
 ) -> StudyOrderRead:
-    order = _get_active_order(session, order_id)
+    order = get_active_or_404(session, StudyOrder, order_id, _NOT_FOUND)
     order = patch_entity(
         session,
         order,
@@ -132,7 +112,7 @@ def delete_study_order(
     current_user: CurrentUser,
     _: StudyOrderPermissions.DELETE.requiere,
 ) -> StudyOrderRead:
-    order = _get_active_order(session, order_id)
+    order = get_active_or_404(session, StudyOrder, order_id, _NOT_FOUND)
     order = soft_delete_entity(
         session,
         order,

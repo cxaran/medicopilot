@@ -9,10 +9,10 @@ no inventa. Valida que el paciente exista y no esté eliminado (404).
 
 from uuid import UUID
 
-from fastapi import APIRouter, status
-from sqlmodel import Session, select
+from fastapi import APIRouter
+from sqlmodel import select
 
-from backend.app.api.resource_actions import api_error, get_or_404
+from backend.app.api.resource_actions import get_active_or_404
 from backend.app.core.database import SessionDep
 from backend.app.models.consultation import Consultation
 from backend.app.models.enums import (
@@ -42,53 +42,6 @@ router = APIRouter(prefix="/patients", tags=["medication-reconciliation"])
 _PATIENT_NOT_FOUND = "Paciente no encontrado"
 
 
-def _get_active_patient(session: Session, patient_id: UUID) -> Patient:
-    patient = get_or_404(session, Patient, patient_id, _PATIENT_NOT_FOUND)
-    if patient.deleted_at is not None:
-        api_error(status.HTTP_404_NOT_FOUND, "resource_not_found", _PATIENT_NOT_FOUND)
-    return patient
-
-
-def _prescribed_items(session: Session, patient_id: UUID) -> list[PrescriptionItem]:
-    """Medicamentos de recetas ACTIVAS (no anuladas ni eliminadas) del paciente."""
-    ids = list(
-        session.execute(
-            select(Prescription.id)
-            .join(Consultation, Consultation.id == Prescription.consultation_id)
-            .where(
-                Consultation.patient_id == patient_id,
-                Consultation.deleted_at.is_(None),
-                Prescription.status != PrescriptionStatus.VOIDED,
-                Prescription.deleted_at.is_(None),
-            )
-        ).scalars().all()
-    )
-    if not ids:
-        return []
-    return list(
-        session.execute(
-            select(PrescriptionItem).where(
-                PrescriptionItem.prescription_id.in_(ids),
-                PrescriptionItem.deleted_at.is_(None),
-            )
-        ).scalars().all()
-    )
-
-
-def _reported_items(session: Session, patient_id: UUID) -> list[PatientClinicalItem]:
-    """Medicamentos que el paciente REPORTA tomar (dato clínico 'medicamento actual' activo)."""
-    return list(
-        session.execute(
-            select(PatientClinicalItem).where(
-                PatientClinicalItem.patient_id == patient_id,
-                PatientClinicalItem.item_type == PatientClinicalItemType.CURRENT_MEDICATION,
-                PatientClinicalItem.status == ClinicalItemStatus.ACTIVE,
-                PatientClinicalItem.deleted_at.is_(None),
-            )
-        ).scalars().all()
-    )
-
-
 @router.get(
     "/{patient_id}/medication-reconciliation",
     response_model=MedicationReconciliationResponse,
@@ -99,10 +52,43 @@ def reconcile_patient_medications(
     _: MedicationReconciliationPermissions.READ.requiere,
 ) -> MedicationReconciliationResponse:
     """Concilia la medicación del paciente. Sólo lectura; no muta nada."""
-    patient = _get_active_patient(session, patient_id)
+    patient = get_active_or_404(session, Patient, patient_id, _PATIENT_NOT_FOUND)
 
-    prescribed = _prescribed_items(session, patient.id)
-    reported = _reported_items(session, patient.id)
+    # PRESCRITO: medicamentos de recetas ACTIVAS (no anuladas ni eliminadas) del paciente.
+    prescription_ids = list(
+        session.execute(
+            select(Prescription.id)
+            .join(Consultation, Consultation.id == Prescription.consultation_id)
+            .where(
+                Consultation.patient_id == patient.id,
+                Consultation.deleted_at.is_(None),
+                Prescription.status != PrescriptionStatus.VOIDED,
+                Prescription.deleted_at.is_(None),
+            )
+        ).scalars().all()
+    )
+    prescribed: list[PrescriptionItem] = []
+    if prescription_ids:
+        prescribed = list(
+            session.execute(
+                select(PrescriptionItem).where(
+                    PrescriptionItem.prescription_id.in_(prescription_ids),
+                    PrescriptionItem.deleted_at.is_(None),
+                )
+            ).scalars().all()
+        )
+
+    # REPORTADO: medicamentos que el paciente reporta tomar ('medicamento actual' activo).
+    reported = list(
+        session.execute(
+            select(PatientClinicalItem).where(
+                PatientClinicalItem.patient_id == patient.id,
+                PatientClinicalItem.item_type == PatientClinicalItemType.CURRENT_MEDICATION,
+                PatientClinicalItem.status == ClinicalItemStatus.ACTIVE,
+                PatientClinicalItem.deleted_at.is_(None),
+            )
+        ).scalars().all()
+    )
 
     configured = pharmacology_source_available()
     responded = False

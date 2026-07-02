@@ -14,12 +14,14 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Query, status
-from sqlmodel import Session, select
+from sqlmodel import select
 
 from backend.app.api.resource_actions import (
     api_error,
     commit_or_conflict,
+    get_active_or_404,
     get_or_404,
+    lock_active_or_404,
     paginate_resource,
     patch_entity,
     serialize,
@@ -59,80 +61,7 @@ _PATIENT_NOT_FOUND = "Paciente no encontrado"
 _DOCTOR_NOT_FOUND = "Médico no encontrado"
 _CONFLICT = "No se pudo guardar la consulta"
 _NOT_DRAFT = "Sólo se puede modificar o eliminar una consulta en borrador"
-
-
-def _get_active_consultation(session: Session, consultation_id: UUID) -> Consultation:
-    """Obtiene una consulta no eliminada; una con baja lógica responde 404."""
-    consultation = get_or_404(session, Consultation, consultation_id, _NOT_FOUND)
-    if consultation.deleted_at is not None:
-        api_error(status.HTTP_404_NOT_FOUND, "resource_not_found", _NOT_FOUND)
-    return consultation
-
-
-def _require_draft(consultation: Consultation) -> None:
-    if consultation.status != ConsultationStatus.DRAFT:
-        api_error(status.HTTP_409_CONFLICT, "resource_state_conflict", _NOT_DRAFT)
-
-
-def _ensure_active_patient(session: Session, patient_id: UUID) -> Patient:
-    """El paciente debe existir, no estar eliminado y estar activo para atenderse."""
-    patient = get_or_404(session, Patient, patient_id, _PATIENT_NOT_FOUND)
-    if patient.deleted_at is not None:
-        api_error(status.HTTP_404_NOT_FOUND, "resource_not_found", _PATIENT_NOT_FOUND)
-    if patient.status != PatientStatus.ACTIVE:
-        api_error(
-            status.HTTP_409_CONFLICT,
-            "resource_state_conflict",
-            "El paciente no está activo",
-        )
-    return patient
-
-
-def _lock_attendable_appointment(
-    session: Session, appointment_id: UUID, patient_id: UUID, doctor_id: UUID
-) -> Appointment:
-    """Cita que puede originar la consulta: bloqueada, vigente, coincidente y sin atender.
-
-    Bloquea la fila con FOR UPDATE para serializar la atención frente a una
-    cancelación o reprogramación concurrente. Debe estar ``pending`` o ``confirmed``
-    (no eliminada) y coincidir con el paciente y el médico tratante de la consulta.
-    La unicidad de ``consultations.appointment_id`` respalda contra una segunda
-    consulta para la misma cita."""
-    appointment = session.exec(
-        select(Appointment).where(Appointment.id == appointment_id).with_for_update()
-    ).first()
-    if appointment is None or appointment.deleted_at is not None:
-        api_error(status.HTTP_404_NOT_FOUND, "resource_not_found", "Cita no encontrada")
-    if appointment.status not in (
-        AppointmentStatus.PENDING,
-        AppointmentStatus.CONFIRMED,
-    ):
-        api_error(
-            status.HTTP_409_CONFLICT,
-            "resource_state_conflict",
-            "La cita no está disponible para originar una consulta",
-        )
-    if appointment.patient_id != patient_id or appointment.doctor_id != doctor_id:
-        api_error(
-            status.HTTP_409_CONFLICT,
-            "appointment_mismatch",
-            "La cita no corresponde al paciente y médico de la consulta",
-        )
-    return appointment
-
-
-def _ensure_active_doctor(session: Session, doctor_id: UUID) -> Doctor:
-    """El médico tratante debe existir, no estar eliminado y estar activo."""
-    doctor = get_or_404(session, Doctor, doctor_id, _DOCTOR_NOT_FOUND)
-    if doctor.deleted_at is not None:
-        api_error(status.HTTP_404_NOT_FOUND, "resource_not_found", _DOCTOR_NOT_FOUND)
-    if doctor.status != RecordStatus.ACTIVE:
-        api_error(
-            status.HTTP_409_CONFLICT,
-            "resource_state_conflict",
-            "El médico tratante no está activo",
-        )
-    return doctor
+_DOCTOR_INACTIVE = "El médico tratante no está activo"
 
 
 @router.get("", response_model=OffsetPage[ConsultationListItem])
@@ -153,7 +82,7 @@ def get_consultation(
     session: SessionDep,
     _: ConsultationPermissions.READ.requiere,
 ) -> ConsultationRead:
-    return serialize(ConsultationRead, _get_active_consultation(session, consultation_id))
+    return serialize(ConsultationRead, get_active_or_404(session, Consultation, consultation_id, _NOT_FOUND))
 
 
 @router.post("", response_model=ConsultationRead, status_code=status.HTTP_201_CREATED)
@@ -163,19 +92,36 @@ def create_consultation(
     current_user: CurrentUser,
     _: ConsultationPermissions.CREATE.requiere,
 ) -> ConsultationRead:
-    _ensure_active_patient(session, payload.patient_id)
-    _ensure_active_doctor(session, payload.attending_doctor_id)
+    get_active_or_404(
+        session, Patient, payload.patient_id, _PATIENT_NOT_FOUND,
+        allowed_status=(PatientStatus.ACTIVE,), status_message="El paciente no está activo",
+    )
+    get_active_or_404(
+        session, Doctor, payload.attending_doctor_id, _DOCTOR_NOT_FOUND,
+        allowed_status=(RecordStatus.ACTIVE,), status_message=_DOCTOR_INACTIVE,
+    )
 
     # Vínculo opcional con una cita: si llega appointment_id, se valida y se marca la
-    # cita como atendida en la misma transacción que crea la consulta.
+    # cita como atendida en la misma transacción que crea la consulta. Se bloquea con
+    # FOR UPDATE (serializa frente a cancelar/reprogramar); debe estar pendiente o
+    # confirmada y coincidir con el paciente y el médico tratante. La unicidad de
+    # ``consultations.appointment_id`` respalda contra una segunda consulta.
     appointment: Appointment | None = None
     if payload.appointment_id is not None:
-        appointment = _lock_attendable_appointment(
-            session,
-            payload.appointment_id,
-            payload.patient_id,
-            payload.attending_doctor_id,
+        appointment = lock_active_or_404(
+            session, Appointment, payload.appointment_id, "Cita no encontrada",
+            allowed_status=(AppointmentStatus.PENDING, AppointmentStatus.CONFIRMED),
+            status_message="La cita no está disponible para originar una consulta",
         )
+        if (
+            appointment.patient_id != payload.patient_id
+            or appointment.doctor_id != payload.attending_doctor_id
+        ):
+            api_error(
+                status.HTTP_409_CONFLICT,
+                "appointment_mismatch",
+                "La cita no corresponde al paciente y médico de la consulta",
+            )
 
     data = payload.model_dump()
     data.update(
@@ -204,11 +150,16 @@ def update_consultation(
     current_user: CurrentUser,
     _: ConsultationPermissions.UPDATE.requiere,
 ) -> ConsultationRead:
-    consultation = _get_active_consultation(session, consultation_id)
-    _require_draft(consultation)
+    consultation = get_active_or_404(
+        session, Consultation, consultation_id, _NOT_FOUND,
+        allowed_status=(ConsultationStatus.DRAFT,), status_message=_NOT_DRAFT,
+    )
     data = payload.model_dump(exclude_unset=True)
     if "attending_doctor_id" in data and data["attending_doctor_id"] is not None:
-        _ensure_active_doctor(session, data["attending_doctor_id"])
+        get_active_or_404(
+            session, Doctor, data["attending_doctor_id"], _DOCTOR_NOT_FOUND,
+            allowed_status=(RecordStatus.ACTIVE,), status_message=_DOCTOR_INACTIVE,
+        )
     consultation = patch_entity(
         session,
         consultation,
@@ -226,8 +177,10 @@ def delete_consultation(
     current_user: CurrentUser,
     _: ConsultationPermissions.DELETE.requiere,
 ) -> ConsultationRead:
-    consultation = _get_active_consultation(session, consultation_id)
-    _require_draft(consultation)
+    consultation = get_active_or_404(
+        session, Consultation, consultation_id, _NOT_FOUND,
+        allowed_status=(ConsultationStatus.DRAFT,), status_message=_NOT_DRAFT,
+    )
     consultation = soft_delete_entity(
         session,
         consultation,
@@ -246,12 +199,10 @@ def finalize_consultation(
     _: ConsultationPermissions.FINALIZE.requiere,
 ) -> ConsultationRead:
     # Bloquea la consulta para que la transición draft -> finalized sea atómica.
-    consultation = session.exec(
-        select(Consultation).where(Consultation.id == consultation_id).with_for_update()
-    ).first()
-    if consultation is None or consultation.deleted_at is not None:
-        api_error(status.HTTP_404_NOT_FOUND, "resource_not_found", _NOT_FOUND)
-    _require_draft(consultation)
+    consultation = lock_active_or_404(
+        session, Consultation, consultation_id, _NOT_FOUND,
+        allowed_status=(ConsultationStatus.DRAFT,), status_message=_NOT_DRAFT,
+    )
 
     patient = get_or_404(session, Patient, consultation.patient_id, _PATIENT_NOT_FOUND)
     if patient.deleted_at is not None:

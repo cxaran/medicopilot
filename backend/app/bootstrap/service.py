@@ -3,7 +3,6 @@ from uuid import UUID
 
 from pydantic import SecretStr
 from sqlalchemy import func
-from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from backend.app.auth.security import generate_token, get_password_hash

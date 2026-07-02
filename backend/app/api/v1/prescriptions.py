@@ -11,7 +11,7 @@ Concurrencia: toda mutación toma primero la fila de la consulta padre con
 lecturas no toman bloqueo.
 """
 
-from typing import Annotated, Any
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Query, status
@@ -21,9 +21,11 @@ from backend.app.api.resource_actions import (
     api_error,
     commit_or_conflict,
     create_entity,
-    get_or_404,
+    get_active_or_404,
+    lock_active_or_404,
     paginate_resource,
     patch_entity,
+    require_status,
     serialize,
     soft_delete_entity,
     touch_entity,
@@ -73,62 +75,26 @@ _SNAPSHOT_FIELDS = (
 )
 
 
-def _lock_consultation(session: Session, consultation_id: UUID) -> Consultation | None:
-    """Toma la fila de la consulta con FOR UPDATE (serializa con finalize)."""
-    return session.exec(
-        select(Consultation).where(Consultation.id == consultation_id).with_for_update()
-    ).first()
-
-
-def _lock_prescription(session: Session, prescription_id: UUID) -> Prescription | None:
-    """Toma la fila de la receta con FOR UPDATE (segundo nivel del orden de bloqueo)."""
-    return session.exec(
-        select(Prescription).where(Prescription.id == prescription_id).with_for_update()
-    ).first()
-
-
-def _get_writable_consultation(session: Session, consultation_id: UUID) -> Consultation:
-    """Consulta destino de una receta nueva: bloqueada, existente, no eliminada ni finalizada."""
-    consultation = _lock_consultation(session, consultation_id)
-    if consultation is None or consultation.deleted_at is not None:
-        api_error(
-            status.HTTP_404_NOT_FOUND, "resource_not_found", _CONSULTATION_NOT_FOUND
-        )
-    if consultation.status != ConsultationStatus.DRAFT:
-        api_error(status.HTTP_409_CONFLICT, "resource_state_conflict", _SEALED)
-    return consultation
-
-
 def _load_active_prescription(
     session: Session, prescription_id: UUID, *, lock: bool = False
 ) -> tuple[Prescription, Consultation]:
     """Carga una receta disponible: ni ella ni su consulta padre eliminadas (-> 404).
 
-    ``lock`` toma las filas con FOR UPDATE en el orden consulta → receta: las
-    mutaciones lo activan; las lecturas no."""
-    prescription = get_or_404(session, Prescription, prescription_id, _NOT_FOUND)
-    if prescription.deleted_at is not None:
-        api_error(status.HTTP_404_NOT_FOUND, "resource_not_found", _NOT_FOUND)
+    ``lock`` toma las filas con FOR UPDATE en el orden consulta → receta (serializa
+    con ``consultations.finalize``): las mutaciones lo activan; las lecturas no."""
+    prescription = get_active_or_404(session, Prescription, prescription_id, _NOT_FOUND)
     if lock:
-        # Orden de bloqueo: primero la consulta, luego la receta.
-        consultation = _lock_consultation(session, prescription.consultation_id)
-        locked = _lock_prescription(session, prescription_id)
-        if locked is None or locked.deleted_at is not None:
-            api_error(status.HTTP_404_NOT_FOUND, "resource_not_found", _NOT_FOUND)
-        prescription = locked
-    else:
-        consultation = get_or_404(
+        # Orden de bloqueo: primero la consulta, luego la receta. La consulta padre
+        # eliminada hace que sus recetas no estén disponibles (-> 404).
+        consultation = lock_active_or_404(
             session, Consultation, prescription.consultation_id, _NOT_FOUND
         )
-    if consultation is None or consultation.deleted_at is not None:
-        # La consulta padre eliminada hace que sus recetas no estén disponibles.
-        api_error(status.HTTP_404_NOT_FOUND, "resource_not_found", _NOT_FOUND)
+        prescription = lock_active_or_404(session, Prescription, prescription_id, _NOT_FOUND)
+    else:
+        consultation = get_active_or_404(
+            session, Consultation, prescription.consultation_id, _NOT_FOUND
+        )
     return prescription, consultation
-
-
-def _require_draft_prescription(prescription: Prescription) -> None:
-    if prescription.status != PrescriptionStatus.DRAFT:
-        api_error(status.HTTP_409_CONFLICT, "resource_state_conflict", _NOT_DRAFT)
 
 
 def _validate_related_diagnosis(
@@ -172,11 +138,6 @@ def _require_attending_doctor(
     return doctor
 
 
-def _build_doctor_snapshot(doctor: Doctor) -> dict[str, Any]:
-    """Captura inmutable de los datos profesionales del médico al aprobar."""
-    return {field: getattr(doctor, field) for field in _SNAPSHOT_FIELDS}
-
-
 @router.get("", response_model=OffsetPage[PrescriptionListItem])
 def list_prescriptions(
     session: SessionDep,
@@ -210,7 +171,11 @@ def create_prescription(
     current_user: CurrentUser,
     _: PrescriptionPermissions.CREATE.requiere,
 ) -> PrescriptionRead:
-    _get_writable_consultation(session, payload.consultation_id)
+    # Consulta destino: bloqueada (serializa con finalize), vigente y aún en borrador.
+    lock_active_or_404(
+        session, Consultation, payload.consultation_id, _CONSULTATION_NOT_FOUND,
+        allowed_status=(ConsultationStatus.DRAFT,), status_message=_SEALED,
+    )
     if payload.related_diagnosis_id is not None:
         _validate_related_diagnosis(
             session, payload.related_diagnosis_id, payload.consultation_id
@@ -240,9 +205,8 @@ def update_prescription(
     prescription, consultation = _load_active_prescription(
         session, prescription_id, lock=True
     )
-    if consultation.status != ConsultationStatus.DRAFT:
-        api_error(status.HTTP_409_CONFLICT, "resource_state_conflict", _SEALED)
-    _require_draft_prescription(prescription)
+    require_status(consultation, (ConsultationStatus.DRAFT,), _SEALED)
+    require_status(prescription, (PrescriptionStatus.DRAFT,), _NOT_DRAFT)
     data = payload.model_dump(exclude_unset=True)
     if data.get("related_diagnosis_id") is not None:
         _validate_related_diagnosis(
@@ -268,9 +232,8 @@ def delete_prescription(
     prescription, consultation = _load_active_prescription(
         session, prescription_id, lock=True
     )
-    if consultation.status != ConsultationStatus.DRAFT:
-        api_error(status.HTTP_409_CONFLICT, "resource_state_conflict", _SEALED)
-    _require_draft_prescription(prescription)
+    require_status(consultation, (ConsultationStatus.DRAFT,), _SEALED)
+    require_status(prescription, (PrescriptionStatus.DRAFT,), _NOT_DRAFT)
     prescription = soft_delete_entity(
         session,
         prescription,
@@ -291,13 +254,12 @@ def approve_prescription(
     prescription, consultation = _load_active_prescription(
         session, prescription_id, lock=True
     )
-    _require_draft_prescription(prescription)
-    if consultation.status != ConsultationStatus.DRAFT:
-        api_error(
-            status.HTTP_409_CONFLICT,
-            "resource_state_conflict",
-            "No se puede aprobar: la consulta ya está finalizada",
-        )
+    require_status(prescription, (PrescriptionStatus.DRAFT,), _NOT_DRAFT)
+    require_status(
+        consultation,
+        (ConsultationStatus.DRAFT,),
+        "No se puede aprobar: la consulta ya está finalizada",
+    )
     doctor = _require_attending_doctor(session, current_user, consultation)
 
     items = session.exec(
@@ -325,7 +287,10 @@ def approve_prescription(
     prescription.status = PrescriptionStatus.APPROVED
     prescription.approved_by_doctor_id = doctor.id
     prescription.approved_at = utc_now()
-    prescription.doctor_snapshot = _build_doctor_snapshot(doctor)
+    # Captura inmutable de los datos profesionales del médico al aprobar.
+    prescription.doctor_snapshot = {
+        field: getattr(doctor, field) for field in _SNAPSHOT_FIELDS
+    }
     touch_entity(prescription, current_user.id)
     commit_or_conflict(session, _CONFLICT)
     session.refresh(prescription)
@@ -345,12 +310,11 @@ def void_prescription(
     prescription, consultation = _load_active_prescription(
         session, prescription_id, lock=True
     )
-    if prescription.status != PrescriptionStatus.APPROVED:
-        api_error(
-            status.HTTP_409_CONFLICT,
-            "resource_state_conflict",
-            "Sólo se puede anular una receta aprobada",
-        )
+    require_status(
+        prescription,
+        (PrescriptionStatus.APPROVED,),
+        "Sólo se puede anular una receta aprobada",
+    )
     doctor = _require_attending_doctor(session, current_user, consultation)
 
     prescription.status = PrescriptionStatus.VOIDED

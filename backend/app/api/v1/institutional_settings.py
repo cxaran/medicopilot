@@ -9,12 +9,11 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Query, status
-from sqlmodel import Session, select
+from sqlmodel import select
 
 from backend.app.api.resource_actions import (
-    api_error,
     create_entity,
-    get_or_404,
+    get_active_or_404,
     paginate_resource,
     patch_entity,
     serialize,
@@ -41,13 +40,6 @@ _NOT_FOUND = "Configuración institucional no encontrada"
 _CONFLICT = "Ya existe una configuración con esa clave"
 
 
-def _get_active_setting(session: Session, setting_id: UUID) -> InstitutionalSetting:
-    setting = get_or_404(session, InstitutionalSetting, setting_id, _NOT_FOUND)
-    if setting.deleted_at is not None:
-        api_error(status.HTTP_404_NOT_FOUND, "resource_not_found", _NOT_FOUND)
-    return setting
-
-
 @router.get("", response_model=OffsetPage[InstitutionalSettingListItem])
 def list_institutional_settings(
     session: SessionDep,
@@ -64,7 +56,7 @@ def get_institutional_setting(
     session: SessionDep,
     _: InstitutionalSettingPermissions.READ.requiere,
 ) -> InstitutionalSettingRead:
-    return serialize(InstitutionalSettingRead, _get_active_setting(session, setting_id))
+    return serialize(InstitutionalSettingRead, get_active_or_404(session, InstitutionalSetting, setting_id, _NOT_FOUND))
 
 
 @router.post(
@@ -94,7 +86,7 @@ def update_institutional_setting(
     current_user: CurrentUser,
     _: InstitutionalSettingPermissions.UPDATE.requiere,
 ) -> InstitutionalSettingRead:
-    setting = _get_active_setting(session, setting_id)
+    setting = get_active_or_404(session, InstitutionalSetting, setting_id, _NOT_FOUND)
     setting = patch_entity(
         session,
         setting,
@@ -112,7 +104,7 @@ def delete_institutional_setting(
     current_user: CurrentUser,
     _: InstitutionalSettingPermissions.DELETE.requiere,
 ) -> InstitutionalSettingRead:
-    setting = _get_active_setting(session, setting_id)
+    setting = get_active_or_404(session, InstitutionalSetting, setting_id, _NOT_FOUND)
     setting = soft_delete_entity(
         session,
         setting,

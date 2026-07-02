@@ -31,33 +31,32 @@ router = APIRouter(prefix="/clinical-scales", tags=["clinical_scales"])
 _NOT_FOUND = "Escala clínica no encontrada"
 
 
-def _to_read(scale) -> ScaleDefinitionRead:  # type: ignore[no-untyped-def]
-    return ScaleDefinitionRead(
-        id=scale.id,
-        name=scale.name,
-        description=scale.description,
-        source=scale.source,
-        inputs=[
-            ScaleInputSpecRead(
-                key=spec.key,
-                label=spec.label,
-                type=spec.type,
-                description=spec.description,
-                allowed_values=list(spec.allowed_values) if spec.allowed_values else None,
-                min=spec.min,
-                max=spec.max,
-            )
-            for spec in scale.inputs
-        ],
-    )
-
-
 @router.get("", response_model=list[ScaleDefinitionRead])
 def list_clinical_scales(
     _: ClinicalScalePermissions.READ.requiere,
 ) -> list[ScaleDefinitionRead]:
     """Lista las escalas registradas con sus insumos requeridos y fuente citada."""
-    return [_to_read(scale) for scale in list_scales()]
+    return [
+        ScaleDefinitionRead(
+            id=scale.id,
+            name=scale.name,
+            description=scale.description,
+            source=scale.source,
+            inputs=[
+                ScaleInputSpecRead(
+                    key=spec.key,
+                    label=spec.label,
+                    type=spec.type,
+                    description=spec.description,
+                    allowed_values=list(spec.allowed_values) if spec.allowed_values else None,
+                    min=spec.min,
+                    max=spec.max,
+                )
+                for spec in scale.inputs
+            ],
+        )
+        for scale in list_scales()
+    ]
 
 
 @router.post("/{scale_id}/compute", response_model=ScaleComputeResponse)

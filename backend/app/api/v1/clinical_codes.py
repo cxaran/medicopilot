@@ -10,12 +10,11 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Query, status
-from sqlmodel import Session, select
+from sqlmodel import select
 
 from backend.app.api.resource_actions import (
-    api_error,
     create_entity,
-    get_or_404,
+    get_active_or_404,
     paginate_resource,
     patch_entity,
     serialize,
@@ -40,13 +39,6 @@ _NOT_FOUND = "Código clínico no encontrado"
 _CONFLICT = "Ya existe un código con ese sistema y código"
 
 
-def _get_active_code(session: Session, code_id: UUID) -> ClinicalCode:
-    code = get_or_404(session, ClinicalCode, code_id, _NOT_FOUND)
-    if code.deleted_at is not None:
-        api_error(status.HTTP_404_NOT_FOUND, "resource_not_found", _NOT_FOUND)
-    return code
-
-
 @router.get("", response_model=OffsetPage[ClinicalCodeListItem])
 def list_clinical_codes(
     session: SessionDep,
@@ -63,7 +55,7 @@ def get_clinical_code(
     session: SessionDep,
     _: ClinicalCodePermissions.READ.requiere,
 ) -> ClinicalCodeRead:
-    return serialize(ClinicalCodeRead, _get_active_code(session, code_id))
+    return serialize(ClinicalCodeRead, get_active_or_404(session, ClinicalCode, code_id, _NOT_FOUND))
 
 
 @router.post("", response_model=ClinicalCodeRead, status_code=status.HTTP_201_CREATED)
@@ -91,7 +83,7 @@ def update_clinical_code(
     current_user: CurrentUser,
     _: ClinicalCodePermissions.UPDATE.requiere,
 ) -> ClinicalCodeRead:
-    code = _get_active_code(session, code_id)
+    code = get_active_or_404(session, ClinicalCode, code_id, _NOT_FOUND)
     code = patch_entity(
         session,
         code,
@@ -109,7 +101,7 @@ def delete_clinical_code(
     current_user: CurrentUser,
     _: ClinicalCodePermissions.DELETE.requiere,
 ) -> ClinicalCodeRead:
-    code = _get_active_code(session, code_id)
+    code = get_active_or_404(session, ClinicalCode, code_id, _NOT_FOUND)
     code = soft_delete_entity(
         session,
         code,

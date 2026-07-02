@@ -12,12 +12,12 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Query, status
-from sqlmodel import Session, select
+from sqlmodel import select
 
 from backend.app.api.resource_actions import (
     api_error,
     create_entity,
-    get_or_404,
+    get_active_or_404,
     paginate_resource,
     serialize,
     soft_delete_entity,
@@ -53,29 +53,6 @@ _PATIENT_NOT_FOUND = "Paciente no encontrado"
 _CONSULTATION_NOT_FOUND = "Consulta no encontrada"
 _CONFLICT = "No se pudo guardar el resultado de la escala"
 _INVALID = "Insumos de la escala faltantes o inválidos."
-
-
-def _get_active_result(session: Session, result_id: UUID) -> ScaleResult:
-    result = get_or_404(session, ScaleResult, result_id, _NOT_FOUND)
-    if result.deleted_at is not None:
-        api_error(status.HTTP_404_NOT_FOUND, "resource_not_found", _NOT_FOUND)
-    return result
-
-
-def _ensure_active_patient(session: Session, patient_id: UUID) -> None:
-    patient = get_or_404(session, Patient, patient_id, _PATIENT_NOT_FOUND)
-    if patient.deleted_at is not None:
-        api_error(status.HTTP_404_NOT_FOUND, "resource_not_found", _PATIENT_NOT_FOUND)
-
-
-def _ensure_active_consultation(session: Session, consultation_id: UUID) -> None:
-    consultation = get_or_404(
-        session, Consultation, consultation_id, _CONSULTATION_NOT_FOUND
-    )
-    if consultation.deleted_at is not None:
-        api_error(
-            status.HTTP_404_NOT_FOUND, "resource_not_found", _CONSULTATION_NOT_FOUND
-        )
 
 
 def _recompute(scale_id: str, raw_inputs: dict) -> ScaleComputeResult:
@@ -120,7 +97,7 @@ def get_scale_result(
     session: SessionDep,
     _: ScaleResultPermissions.READ.requiere,
 ) -> ScaleResultRead:
-    return serialize(ScaleResultRead, _get_active_result(session, result_id))
+    return serialize(ScaleResultRead, get_active_or_404(session, ScaleResult, result_id, _NOT_FOUND))
 
 
 @router.post("", response_model=ScaleResultRead, status_code=status.HTTP_201_CREATED)
@@ -130,9 +107,9 @@ def create_scale_result(
     current_user: CurrentUser,
     _: ScaleResultPermissions.CREATE.requiere,
 ) -> ScaleResultRead:
-    _ensure_active_patient(session, payload.patient_id)
+    get_active_or_404(session, Patient, payload.patient_id, _PATIENT_NOT_FOUND)
     if payload.consultation_id is not None:
-        _ensure_active_consultation(session, payload.consultation_id)
+        get_active_or_404(session, Consultation, payload.consultation_id, _CONSULTATION_NOT_FOUND)
 
     # Re-cómputo autoritativo: el puntaje guardado SIEMPRE proviene del motor determinista.
     result = _recompute(payload.scale_id, payload.inputs)
@@ -162,11 +139,11 @@ def update_scale_result(
     current_user: CurrentUser,
     _: ScaleResultPermissions.UPDATE.requiere,
 ) -> ScaleResultRead:
-    entity = _get_active_result(session, result_id)
+    entity = get_active_or_404(session, ScaleResult, result_id, _NOT_FOUND)
     data = payload.model_dump(exclude_unset=True)
 
     if "consultation_id" in data and data["consultation_id"] is not None:
-        _ensure_active_consultation(session, data["consultation_id"])
+        get_active_or_404(session, Consultation, data["consultation_id"], _CONSULTATION_NOT_FOUND)
 
     values: dict = {}
     if "consultation_id" in data:
@@ -202,7 +179,7 @@ def delete_scale_result(
     current_user: CurrentUser,
     _: ScaleResultPermissions.DELETE.requiere,
 ) -> ScaleResultRead:
-    entity = _get_active_result(session, result_id)
+    entity = get_active_or_404(session, ScaleResult, result_id, _NOT_FOUND)
     entity = soft_delete_entity(
         session,
         entity,
