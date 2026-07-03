@@ -498,6 +498,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/login/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Verify Login
+         * @description Canjea el secreto del reto (código o token del enlace) por la sesión.
+         *
+         *     Exige la cookie del reto del MISMO navegador que inició el login: un enlace
+         *     reenviado a otro dispositivo no crea sesión ahí. Consumo único y tope de
+         *     intentos por reto; el error es genérico (no distingue causa).
+         */
+        post: operations["verify_login_api_v1_auth_login_verify_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/logout": {
         parameters: {
             query?: never;
@@ -5811,6 +5835,29 @@ export interface components {
             password: string;
         };
         /**
+         * LoginResponse
+         * @description Desenlace del login: sesión creada o reto de verificación por correo.
+         */
+        LoginResponse: {
+            /** Message */
+            message: string;
+            /**
+             * Verification Required
+             * @default false
+             */
+            verification_required: boolean;
+            /** Verification Mode */
+            verification_mode?: string | null;
+        };
+        /**
+         * LoginVerifyRequest
+         * @description Secreto del reto: el código de 6 dígitos o el token del enlace.
+         */
+        LoginVerifyRequest: {
+            /** Code */
+            code: string;
+        };
+        /**
          * MedicalCertificateCreate
          * @description Alta de una constancia/justificante de asistencia (borrador P1).
          *
@@ -9130,6 +9177,8 @@ export interface components {
             app_base_url_verified_at?: string | null;
             /** Institution Name */
             institution_name?: string | null;
+            /** Login Verification Mode */
+            login_verification_mode: string;
             /** Password Reset Enabled */
             password_reset_enabled: boolean;
             /** Email Mode */
@@ -9189,6 +9238,11 @@ export interface components {
              * @description Nombre del consultorio para membretes y encabezados.
              */
             institution_name?: string | null;
+            /**
+             * Verificación de inicio de sesión
+             * @description Segundo paso por correo en cada login: código de un solo uso o enlace. Requiere transporte de correo utilizable. Los administradores con cobertura completa quedan exentos siempre (garantía anti-bloqueo).
+             */
+            login_verification_mode?: ("disabled" | "code" | "link") | null;
             /**
              * Recuperación de contraseña
              * @description Permitir restablecer contraseña por correo. AVISO: apagarla con el registro cerrado y un solo administrador puede dejar la instalación sin acceso (la salida es el seed del servidor).
@@ -10866,7 +10920,40 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["MessageResponse"];
+                    "application/json": components["schemas"]["LoginResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    verify_login_api_v1_auth_login_verify_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LoginVerifyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoginResponse"];
                 };
             };
             /** @description Validation Error */

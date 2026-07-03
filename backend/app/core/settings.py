@@ -107,6 +107,7 @@ class Settings(BaseSettings):
     rate_limit_reset_ip: str = "10/900"
     rate_limit_reset_token: str = "5/900"
     rate_limit_bootstrap_ip: str = "5/900"
+    rate_limit_login_verify_ip: str = "10/900"
     # Arriendo interno de credencial (server-to-server): límite por IP del llamador.
     rate_limit_internal_lease_ip: str = "60/60"
 
