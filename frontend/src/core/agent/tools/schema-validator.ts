@@ -34,6 +34,41 @@ export interface ValidationResult {
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 
+// UUID "nil" (todo ceros): un placeholder ALUCINADO que algunos modelos envían para un campo
+// UUID opcional que en realidad no aplica (p. ej. related_diagnosis_id sin diagnóstico). No es
+// un id real, así que el backend lo rechaza (422). Se trata como AUSENTE, nunca como valor.
+const NIL_UUID = "00000000-0000-0000-0000-000000000000";
+
+function isPlaceholderUuid(value: unknown): boolean {
+  return typeof value === "string" && (value.trim() === "" || value.toLowerCase() === NIL_UUID);
+}
+
+/**
+ * Sanea los argumentos ANTES de validar/ejecutar: elimina los valores PLACEHOLDER (UUID nil
+ * "00000000-…" o cadena vacía) en campos ``format:"uuid"`` OPCIONALES (no requeridos). El modelo
+ * a veces rellena un UUID opcional ausente con el nil-UUID; enviarlo hace que el backend rechace
+ * la acción (422 "no pertenece a la consulta") en lugar de omitir el campo. Tratarlo como ausente
+ * es lo correcto: el campo es opcional. NO toca los requeridos (ahí un placeholder debe fallar la
+ * validación para que el modelo lo corrija) ni ningún campo que no sea UUID. Devuelve una COPIA;
+ * no muta la entrada. Es idempotente y no-op cuando no hay placeholders.
+ */
+export function normalizeToolArgs(schema: ObjectSchema, value: unknown): unknown {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return value;
+  }
+  const required = new Set(schema.required ?? []);
+  const obj = value as Record<string, unknown>;
+  const cleaned: Record<string, unknown> = {};
+  for (const [key, raw] of Object.entries(obj)) {
+    const prop = schema.properties[key];
+    if (prop?.type === "string" && prop.format === "uuid" && !required.has(key) && isPlaceholderUuid(raw)) {
+      continue; // se omite el placeholder: el campo opcional queda ausente.
+    }
+    cleaned[key] = raw;
+  }
+  return cleaned;
+}
+
 function checkProp(key: string, prop: PropSchema, value: unknown): string | null {
   if (prop.type === "integer" || prop.type === "number") {
     if (typeof value !== "number" || Number.isNaN(value)) {

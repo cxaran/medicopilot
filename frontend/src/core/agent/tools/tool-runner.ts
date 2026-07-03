@@ -7,7 +7,7 @@ import {
   type ToolDefinition,
   type ToolExecutionContext,
 } from "./registry";
-import { validateArgs } from "./schema-validator";
+import { normalizeToolArgs, validateArgs } from "./schema-validator";
 
 // Resultado que se devuelve al gateway en turn.tool_result (forma de cable de B6).
 export type ToolResultPayload =
@@ -48,7 +48,9 @@ export function resolveToolCall(
     };
   }
 
-  const argsObject = asArgsObject(args);
+  // Sanea placeholders alucinados (UUID nil / cadena vacía en campos UUID opcionales) ANTES de
+  // validar y ejecutar: un id opcional inventado por el modelo se trata como ausente, no se manda.
+  const argsObject = asArgsObject(normalizeToolArgs(tool.inputSchema, asArgsObject(args)));
   const validation = validateArgs(tool.inputSchema, argsObject);
   if (!validation.valid) {
     return {

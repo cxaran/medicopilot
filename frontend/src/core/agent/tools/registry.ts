@@ -1365,7 +1365,10 @@ const TOOLS: ToolDefinition[] = [
       "Crea una receta médica EN BORRADOR ligada a una consulta. Acción de escritura: " +
       "requiere confirmación explícita del médico antes de ejecutarse. La receta nace en " +
       "borrador para que el médico la revise, agregue medicamentos y la apruebe; no se " +
-      "aprueba ni imprime de forma autónoma.",
+      "aprueba ni imprime de forma autónoma. La consulta puede estar en borrador o " +
+      "finalizada. IMPORTANTE: 'related_diagnosis_id' es OPCIONAL; OMÍTELO por completo si " +
+      "no hay un diagnóstico real de esa consulta. NUNCA inventes un UUID ni uses ceros " +
+      "(00000000-…) como marcador de posición.",
     kind: "write",
     inputSchema: {
       type: "object",
@@ -1373,7 +1376,9 @@ const TOOLS: ToolDefinition[] = [
         consultation_id: { type: "string", description: "Id (UUID) de la consulta origen.", format: "uuid" },
         related_diagnosis_id: {
           type: "string",
-          description: "Id (UUID) de un diagnóstico de la misma consulta (opcional).",
+          description:
+            "Id (UUID) REAL de un diagnóstico de la MISMA consulta. Opcional: si no hay " +
+            "diagnóstico, OMITE el campo (no lo incluyas). Nunca uses un UUID inventado ni ceros.",
           format: "uuid",
         },
         observations: { type: "string", description: "Observaciones de la receta (opcional)." },

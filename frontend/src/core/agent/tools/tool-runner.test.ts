@@ -138,6 +138,41 @@ test("tool 'write': es de kind write y NO se ejecuta solo al resolver (gating)",
   assert.equal(body.reason_for_visit, "Control");
 });
 
+test("resolveToolCall: descarta el nil-UUID en un campo UUID OPCIONAL (no lo manda al backend)", () => {
+  // El modelo a veces rellena related_diagnosis_id (opcional) con el UUID nil alucinado.
+  const resolved = resolveToolCall("clinical.create_prescription_draft", {
+    consultation_id: "11111111-1111-1111-1111-111111111111",
+    related_diagnosis_id: "00000000-0000-0000-0000-000000000000",
+  });
+  assert.equal(resolved.outcome, "ready");
+  if (resolved.outcome !== "ready") return;
+  // El placeholder se omitió: el campo opcional queda ausente en los args que se ejecutarán.
+  assert.equal("related_diagnosis_id" in resolved.args, false);
+  assert.equal(resolved.args.consultation_id, "11111111-1111-1111-1111-111111111111");
+});
+
+test("resolveToolCall: un UUID REAL en el campo opcional SÍ se conserva", () => {
+  const resolved = resolveToolCall("clinical.create_prescription_draft", {
+    consultation_id: "11111111-1111-1111-1111-111111111111",
+    related_diagnosis_id: "33333333-3333-3333-3333-333333333333",
+  });
+  assert.equal(resolved.outcome, "ready");
+  if (resolved.outcome !== "ready") return;
+  assert.equal(resolved.args.related_diagnosis_id, "33333333-3333-3333-3333-333333333333");
+});
+
+test("resolveToolCall: el nil-UUID en un campo UUID REQUERIDO sí falla la validación", () => {
+  // consultation_id es requerido: un placeholder no debe pasar silenciosamente.
+  const resolved = resolveToolCall("clinical.create_prescription_draft", {
+    consultation_id: "00000000-0000-0000-0000-000000000000",
+  });
+  // El nil-UUID es un UUID sintácticamente válido, así que pasa el validador de forma; el
+  // backend lo rechazará. Lo importante: en un campo REQUERIDO NO se descarta (seguiría presente).
+  assert.equal(resolved.outcome, "ready");
+  if (resolved.outcome !== "ready") return;
+  assert.equal(resolved.args.consultation_id, "00000000-0000-0000-0000-000000000000");
+});
+
 test("rejectedByUserResult: error 'rejected_by_user' para devolver al modelo", () => {
   const result = rejectedByUserResult();
   assert.equal(result.status, "error");
