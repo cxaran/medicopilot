@@ -92,6 +92,9 @@ export type RolePermissionsRead = components["schemas"]["RolePermissionsRead"];
 // Resumen clínico compacto del paciente para el contexto del copiloto.
 export type PatientSummaryRead = components["schemas"]["PatientSummaryRead"];
 
+// Perfil de médico del usuario autenticado (GET /doctors/me) para el contexto del copiloto.
+export type DoctorRead = components["schemas"]["DoctorRead"];
+
 export type BootstrapStatusRead = components["schemas"]["BootstrapStatusRead"];
 export type BootstrapCatalogRead = components["schemas"]["BootstrapCatalogRead"];
 export type BootstrapInitializeRequest = components["schemas"]["BootstrapInitializeRequest"];

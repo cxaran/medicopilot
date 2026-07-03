@@ -114,6 +114,8 @@ import {
 } from "@/core/agent/usage-cost";
 import { listAgentMemories } from "@/core/agent-memories/agent-memories-client";
 import { getAgentPersona } from "@/core/agent-persona/agent-persona-client";
+import { buildDoctorProfileMessage } from "@/core/agent/doctor-profile";
+import { getMyDoctor } from "@/core/agent/doctor-profile-client";
 import { composeLeadingLayers, type PersonaFields } from "@/core/agent/persona";
 import { buildPatientSummaryMessage } from "@/core/agent/patient-summary";
 import { getPatientSummary } from "@/core/agent/patient-summary-client";
@@ -469,6 +471,9 @@ export function CopilotPanel({
   // PERSONA (P4): capa configurable del médico (tono/especialidad/idioma/estilo). La capa de
   // SEGURIDAD clínica es fija y la posee el código (persona.ts); no se almacena ni se edita.
   const personaRef = useRef<PersonaFields | null>(null);
+  // PERFIL DEL MÉDICO (capa ESTABLE): mensaje de cable ya formateado del perfil del usuario si es
+  // doctor. Se carga UNA vez (no cambia durante la sesión); null si el usuario no tiene perfil.
+  const doctorProfileMsgRef = useRef<WireMessage | null>(null);
 
   const clientRef = useRef<AgentClient | null>(null);
   // Reconexión: estado de la máquina (fuente de verdad para callbacks), temporizadores del
@@ -780,6 +785,22 @@ export function CopilotPanel({
       })
       .catch(() => {
         if (active) personaRef.current = null;
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Carga el PERFIL DE MÉDICO del usuario (si lo tiene) para anclarlo al contexto. Una sola vez: es
+  // identidad estable. Si el usuario no es doctor (null) o falla, simplemente no se inyecta la capa.
+  useEffect(() => {
+    let active = true;
+    getMyDoctor()
+      .then((doctor) => {
+        if (active) doctorProfileMsgRef.current = buildDoctorProfileMessage(doctor);
+      })
+      .catch(() => {
+        if (active) doctorProfileMsgRef.current = null;
       });
     return () => {
       active = false;
@@ -1373,17 +1394,19 @@ export function CopilotPanel({
     );
     const toolsWire = toWireToolDefinitions(declared);
 
-    // PERSONA (P4) + CONTEXTO ACTIVO + RESUMEN DEL PACIENTE: capas LÍDER en orden fijo
-    // [SEGURIDAD] -> [OPERATIVA] -> [PERSONA] -> [CONTEXTO ACTIVO] -> [RESUMEN DEL PACIENTE] ->
-    // [MEMORIAS] (ver composeLeadingLayers). La seguridad es fija (código), SIEMPRE primera; el
-    // contexto activo (ámbito del paciente) y el resumen del expediente son de confianza y van antes
-    // de las memorias (datos no confiables). La conversación (compactada) va al final.
+    // PERSONA (P4) + MÉDICO A CARGO + CONTEXTO ACTIVO + RESUMEN DEL PACIENTE: capas LÍDER en orden
+    // fijo [SEGURIDAD] -> [OPERATIVA] -> [PERSONA] -> [MÉDICO A CARGO] -> [CONTEXTO ACTIVO] ->
+    // [RESUMEN DEL PACIENTE] -> [MEMORIAS] (ver composeLeadingLayers). La seguridad es fija (código),
+    // SIEMPRE primera; persona y perfil del médico son ESTABLES (cacheables); el contexto activo y el
+    // resumen del expediente son de confianza y van antes de las memorias (datos no confiables). La
+    // conversación (compactada) va al final.
     const activeContextMessage = buildActiveContextMessage(activeContextRef.current);
     const leadingLayers = composeLeadingLayers(
       personaRef.current,
       recall,
       activeContextMessage,
       patientSummaryMsgRef.current,
+      doctorProfileMsgRef.current,
     );
 
     // CONTEXTO (P3): el overhead fijo (esquema de tools + capas líder) no se compacta; los

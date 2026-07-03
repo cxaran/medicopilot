@@ -8,7 +8,7 @@ listados excluyen los perfiles eliminados.
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, HTTPException, Query, status
 from sqlmodel import select
 
 from backend.app.api.resource_actions import (
@@ -47,6 +47,32 @@ def list_doctors(
     # Scope base: solo perfiles vigentes (excluye los eliminados lógicamente).
     stmt = select(Doctor).where(Doctor.deleted_at.is_(None))
     return paginate_resource(DOCTORS, session, query, stmt=stmt)
+
+
+@router.get("/me", response_model=DoctorRead)
+def get_my_doctor(
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> DoctorRead:
+    """Perfil de médico del usuario AUTENTICADO (o 404 si no tiene).
+
+    SIN permiso de recurso: es el perfil PROPIO del usuario (no un dato de otro médico). Lo consume
+    el copiloto para anclar el contexto inicial (quién atiende) y firmar los borradores. Definido
+    antes de ``/{doctor_id}`` para que 'me' no se interprete como UUID.
+    """
+    doctor = (
+        session.execute(
+            select(Doctor).where(
+                Doctor.user_id == current_user.id,
+                Doctor.deleted_at.is_(None),
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if doctor is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=_NOT_FOUND)
+    return serialize(DoctorRead, doctor)
 
 
 @router.get("/{doctor_id}", response_model=DoctorRead)

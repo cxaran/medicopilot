@@ -6,8 +6,8 @@ import type { WireMessage } from "@/core/agent/protocol";
  * turno en este orden FIJO (ver ``composeLeadingLayers``):
  *
  *   [SEGURIDAD CLÍNICA (fija)] -> [OPERATIVA (fija)] -> [PERSONA (configurable)] ->
- *   [CONTEXTO ACTIVO] -> [RESUMEN DEL PACIENTE (referencia)] -> [MEMORIAS (P2, no confiables)] ->
- *   [conversación]
+ *   [MÉDICO A CARGO (perfil del usuario)] -> [CONTEXTO ACTIVO] ->
+ *   [RESUMEN DEL PACIENTE (referencia)] -> [MEMORIAS (P2, no confiables)] -> [conversación]
  *
  * La capa de SEGURIDAD es propiedad del CÓDIGO: siempre va primera, siempre presente, y el
  * médico NO puede editarla ni desactivarla. La PERSONA es editable por el médico (tono,
@@ -155,21 +155,27 @@ export function personaLayerMessage(persona: PersonaFields | null | undefined): 
  * [SEGURIDAD] -> [OPERATIVA] -> [PERSONA] -> [CONTEXTO ACTIVO] -> [RESUMEN DEL PACIENTE] ->
  * [MEMORIAS]. La seguridad SIEMPRE está y SIEMPRE es la primera. La capa OPERATIVA (guía de
  * herramientas, instrucción nuestra de confianza) va justo después, antes de la persona
- * configurable. El contexto clínico activo (paciente/consulta) y el RESUMEN del paciente (datos de
- * referencia del expediente) van ANTES de las memorias (datos no confiables). El resumen se sitúa
- * tras las capas ESTABLES (seguridad/operativa/persona) para que, cuando cambie, invalide lo mínimo
- * del prefijo cacheado por el proveedor. El llamador antepone esto a la conversación (ya compactada).
+ * configurable. El PERFIL DEL MÉDICO (identidad del usuario que atiende) es también ESTABLE y va con
+ * las capas cacheables, tras la persona. El contexto clínico activo (paciente/consulta) y el RESUMEN
+ * del paciente (datos de referencia del expediente) van ANTES de las memorias (datos no confiables).
+ * Lo volátil se sitúa tras lo ESTABLE (seguridad/operativa/persona/médico) para que, al cambiar,
+ * invalide lo mínimo del prefijo cacheado por el proveedor. El llamador antepone esto a la
+ * conversación (ya compactada).
  */
 export function composeLeadingLayers(
   persona: PersonaFields | null | undefined,
   memory: WireMessage | null,
   activeContext: WireMessage | null = null,
   patientSummary: WireMessage | null = null,
+  doctorProfile: WireMessage | null = null,
 ): WireMessage[] {
   const layers: WireMessage[] = [safetyLayerMessage(), operationalLayerMessage()];
   const personaMessage = personaLayerMessage(persona);
   if (personaMessage) {
     layers.push(personaMessage);
+  }
+  if (doctorProfile) {
+    layers.push(doctorProfile);
   }
   if (activeContext) {
     layers.push(activeContext);
