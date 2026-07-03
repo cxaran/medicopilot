@@ -2758,25 +2758,75 @@ const TOOLS: ToolDefinition[] = [
   {
     name: "ui.render_chart",
     description:
-      "Genera un gráfico de barras simple. Recibe { chart_type: 'bar', title?, data: " +
-      "[{label, value}] }. Solo visualización; los datos los provee el modelo.",
+      "Muestra un gráfico en el chat (sólo visualización read-only; los datos los provees tú). " +
+      "chart_type: 'line'/'area' para TENDENCIAS en el tiempo (vitales, labs, peso), 'bar' para " +
+      "comparar categorías, 'pie'/'doughnut' para PROPORCIONES (distribución de una categoría), " +
+      "'gantt' para LÍNEAS DE TIEMPO (plan de cuidados, cursos de tratamiento, órdenes). " +
+      "Para bar/line/area/pie/doughnut: serie única data:[{label,value}] o varias series (line/area) " +
+      "series:[{name,data:[{label,value}]}] (máx. 4). Añade unit ('mmHg','mg/dL',…) y, para " +
+      "labs/vitales, reference_range {low?,high?,label?}: sombrea el rango normal y RESALTA en rojo " +
+      "los puntos fuera de él. Para 'gantt' usa tasks:[{label,start,end,status?}] con fechas ISO " +
+      "(status: done|active|planned). Alinea los labels de las series en el mismo orden del eje X.",
     kind: "read",
     inputSchema: PASSTHROUGH_SCHEMA,
     wireSchema: {
       type: "object",
       properties: {
-        chart_type: { type: "string", enum: ["bar"] },
+        chart_type: { type: "string", enum: ["bar", "line", "area", "pie", "doughnut", "gantt"] },
         title: { type: "string" },
+        unit: { type: "string", description: "Unidad de los valores, p. ej. 'mmHg' o 'mg/dL'." },
+        reference_range: {
+          type: "object",
+          description: "Banda normal para labs/vitales (bar/line/area); los fuera se marcan en rojo.",
+          properties: {
+            low: { type: "number" },
+            high: { type: "number" },
+            label: { type: "string" },
+          },
+        },
         data: {
           type: "array",
+          description: "Serie única (bar/line/area/pie/doughnut). Usa 'series' si hay más de una.",
           items: {
             type: "object",
             properties: { label: { type: "string" }, value: { type: "number" } },
             required: ["label", "value"],
           },
         },
+        series: {
+          type: "array",
+          description: "Varias series comparativas para line/area (máx. 4). Cada una: { name, data }.",
+          items: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              data: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: { label: { type: "string" }, value: { type: "number" } },
+                  required: ["label", "value"],
+                },
+              },
+            },
+            required: ["data"],
+          },
+        },
+        tasks: {
+          type: "array",
+          description: "Filas de la línea de tiempo (chart_type 'gantt'). Fechas ISO.",
+          items: {
+            type: "object",
+            properties: {
+              label: { type: "string" },
+              start: { type: "string", description: "Fecha ISO de inicio, p. ej. '2026-01-05'." },
+              end: { type: "string", description: "Fecha ISO de fin (≥ start)." },
+              status: { type: "string", enum: ["done", "active", "planned"] },
+            },
+            required: ["label", "start", "end"],
+          },
+        },
       },
-      required: ["data"],
     },
     execute: async (args) => {
       const parsed = parseChartSpec(args);

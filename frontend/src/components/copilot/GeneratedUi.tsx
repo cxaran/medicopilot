@@ -15,6 +15,9 @@ import {
   buttonActionToMessage,
   type ButtonsSpec,
   type ChartSpec,
+  type ChartSeries,
+  type ChartReferenceRange,
+  type GanttTask,
   type FormSpec,
   type ResourceFormSpec,
   type SuggestedRepliesSpec,
@@ -336,70 +339,398 @@ function ResourceFormView({
   );
 }
 
-// Gráfica de barras VERTICAL en tarjeta (fiel a ``chartPanel`` de MediCopilot.dc.html): barras con
-// degradado accent→accent-tx, etiqueta de valor arriba y de categoría abajo. Para muchas categorías
-// (>12) cae a barras horizontales legibles (mismo degradado) para no apretar el eje.
+// Gráficas en tarjeta (fiel a ``chartPanel`` de MediCopilot.dc.html). Soporta BARRAS (comparar
+// categorías) y LÍNEAS (tendencias en el tiempo: vitales/labs/peso). Multi-serie para líneas
+// comparativas (p. ej. sistólica/diastólica). Rango de referencia clínico: sombrea la banda normal
+// y RESALTA en rojo los puntos fuera de ella. --danger se reserva para el fuera-de-rango, así que
+// no entra en la paleta de series.
 const CHART_BAR_AREA = 132; // alto del área de barras (px)
+const SERIES_COLORS = ["var(--accent)", "var(--ok)", "var(--warn)", "var(--accent-bd)"] as const;
+// Paleta amplia para SECTORES de pie/doughnut (necesita más matices distintos que las series).
+const SLICE_COLORS = [
+  "var(--accent)", "var(--ok)", "var(--warn)", "var(--accent-bd)",
+  "#0ea5e9", "#a855f7", "#ec4899", "#64748b",
+] as const;
+// Colores del estado de una tarea del gantt.
+const GANTT_STATUS_COLOR: Record<NonNullable<GanttTask["status"]>, string> = {
+  done: "var(--ok)",
+  active: "var(--accent)",
+  planned: "var(--tx3)",
+};
+
+/** Normaliza el spec a lista de series (retrocompat: ``data`` de serie única → una serie). */
+function chartSeriesOf(spec: ChartSpec): ChartSeries[] {
+  if (spec.series && spec.series.length > 0) {
+    return spec.series;
+  }
+  return spec.data && spec.data.length > 0 ? [{ data: spec.data }] : [];
+}
+
+function isOutOfRange(value: number, range: ChartReferenceRange | undefined): boolean {
+  if (!range) return false;
+  if (range.low !== undefined && value < range.low) return true;
+  if (range.high !== undefined && value > range.high) return true;
+  return false;
+}
+
+/** Número de eje compacto (entero o 1 decimal). */
+function fmtAxis(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
+/** Etiqueta legible de la banda de referencia a partir de low/high (si no vino una explícita). */
+function refRangeLabel(range: ChartReferenceRange, unit?: string): string {
+  const u = unit ? ` ${unit}` : "";
+  if (range.label) return range.label;
+  if (range.low !== undefined && range.high !== undefined) return `Rango normal ${range.low}–${range.high}${u}`;
+  if (range.high !== undefined) return `Normal ≤ ${range.high}${u}`;
+  if (range.low !== undefined) return `Normal ≥ ${range.low}${u}`;
+  return "Rango normal";
+}
 
 function ChartView({ spec }: Readonly<{ spec: ChartSpec }>) {
-  const max = Math.max(1, ...spec.data.map((datum) => Math.abs(datum.value)));
-  const vertical = spec.data.length <= 12;
+  const isGantt = spec.chart_type === "gantt";
+  const isPie = spec.chart_type === "pie" || spec.chart_type === "doughnut";
+  const isTrend = spec.chart_type === "line" || spec.chart_type === "area";
+  const series = isGantt ? [] : chartSeriesOf(spec);
+
+  if (isGantt) {
+    if (!spec.tasks || spec.tasks.length === 0) {
+      return null;
+    }
+  } else if (series.length === 0) {
+    return null;
+  }
+
+  const showSeriesLegend = isTrend && series.length > 1 && series.some((s) => s.name);
+  const showRefNote = spec.reference_range && (isTrend || spec.chart_type === "bar");
 
   return (
     <div className="w-full rounded-[16px] border border-[var(--border2)] bg-[var(--panel)] p-4 shadow-[var(--soft)]">
-      {spec.title && (
-        <div className="mb-3 text-[14px] font-semibold tracking-tight text-[var(--tx)]">
-          {spec.title}
+      {(spec.title || spec.unit) && (
+        <div className="mb-3 flex items-baseline gap-2">
+          {spec.title && (
+            <div className="text-[14px] font-semibold tracking-tight text-[var(--tx)]">{spec.title}</div>
+          )}
+          {spec.unit && !isGantt && <span className="text-[11px] text-[var(--tx3)]">({spec.unit})</span>}
         </div>
       )}
-      {vertical ? (
-        <div
-          className="flex items-end gap-2 border-t border-[var(--border)] pt-3.5"
-          style={{ height: CHART_BAR_AREA + 44 }}
-          role="img"
-          aria-label={spec.title ?? "Gráfico de barras"}
-        >
-          {spec.data.map((datum, index) => (
-            <div
-              key={`${datum.label}-${index}`}
-              className="flex h-full flex-1 flex-col items-center justify-end gap-1.5"
+      {showSeriesLegend && (
+        <div className="mb-2.5 flex flex-wrap gap-x-3 gap-y-1">
+          {series.map((s, index) => (
+            <span
+              key={`${s.name ?? "serie"}-${index}`}
+              className="flex items-center gap-1.5 text-[11px] text-[var(--tx2)]"
             >
-              <span className="text-[11px] font-bold tabular-nums text-[var(--tx2)]">
-                {datum.value}
-              </span>
-              <div
-                className="w-full max-w-[34px] rounded-t-[7px]"
-                style={{
-                  height: `${Math.max(6, (Math.abs(datum.value) / max) * CHART_BAR_AREA)}px`,
-                  background: "linear-gradient(180deg, var(--accent), var(--accent-tx))",
-                }}
+              <span
+                className="h-2.5 w-2.5 rounded-full"
+                style={{ background: SERIES_COLORS[index % SERIES_COLORS.length] }}
               />
-              <span className="max-w-full truncate text-[11px] text-[var(--tx3)]" title={datum.label}>
-                {datum.label}
-              </span>
-            </div>
+              {s.name ?? `Serie ${index + 1}`}
+            </span>
           ))}
         </div>
+      )}
+      {showRefNote && spec.reference_range && (
+        <div className="mb-2 flex items-center gap-1.5 text-[11px] text-[var(--tx3)]">
+          <span className="h-2.5 w-4 rounded-[3px]" style={{ background: "var(--ok)", opacity: 0.18 }} />
+          {refRangeLabel(spec.reference_range, spec.unit)}
+        </div>
+      )}
+      {isGantt ? (
+        <GanttView tasks={spec.tasks ?? []} title={spec.title} />
+      ) : isPie ? (
+        <PieChartView data={series[0].data} unit={spec.unit} doughnut={spec.chart_type === "doughnut"} title={spec.title} />
+      ) : isTrend ? (
+        <LineChartView series={series} range={spec.reference_range} area={spec.chart_type === "area"} title={spec.title} />
       ) : (
-        <div className="flex flex-col gap-2" role="img" aria-label={spec.title ?? "Gráfico de barras"}>
-          {spec.data.map((datum, index) => (
-            <div key={`${datum.label}-${index}`} className="flex items-center gap-2">
-              <span className="w-[110px] shrink-0 truncate text-[11.5px] text-[var(--tx2)]" title={datum.label}>
-                {datum.label}
-              </span>
-              <div className="h-3.5 min-w-[2px] flex-1">
-                <div
-                  className="h-full rounded-[4px]"
-                  style={{
-                    width: `${Math.max(2, (Math.abs(datum.value) / max) * 100)}%`,
-                    background: "linear-gradient(90deg, var(--accent), var(--accent-tx))",
-                  }}
-                />
-              </div>
-              <span className="w-[42px] shrink-0 text-right text-[11.5px] font-semibold tabular-nums text-[var(--tx)]">
-                {datum.value}
-              </span>
+        <BarChartView data={series[0].data} range={spec.reference_range} unit={spec.unit} title={spec.title} />
+      )}
+    </div>
+  );
+}
+
+// Gráfica de LÍNEAS en SVG (responsive por viewBox). Banda de referencia sombreada, gridlines con
+// etiquetas del eje Y, una polilínea por serie y puntos (rojos si caen fuera del rango). Eje X con
+// un subconjunto de fechas cuando hay muchos puntos.
+function LineChartView({
+  series,
+  range,
+  area,
+  title,
+}: Readonly<{ series: ChartSeries[]; range?: ChartReferenceRange; area?: boolean; title?: string }>) {
+  const W = 560;
+  const H = 220;
+  const [mL, mR, mT, mB] = [42, 14, 14, 28];
+  const n = Math.max(...series.map((s) => s.data.length));
+
+  const values = series.flatMap((s) => s.data.map((d) => d.value));
+  if (range?.low !== undefined) values.push(range.low);
+  if (range?.high !== undefined) values.push(range.high);
+  let yMin = Math.min(...values);
+  let yMax = Math.max(...values);
+  if (yMin === yMax) {
+    yMin -= 1;
+    yMax += 1;
+  }
+  const padY = (yMax - yMin) * 0.08;
+  yMin -= padY;
+  yMax += padY;
+
+  const [px0, px1, py0, py1] = [mL, W - mR, mT, H - mB];
+  const xFor = (i: number) => (n <= 1 ? (px0 + px1) / 2 : px0 + (i / (n - 1)) * (px1 - px0));
+  const yFor = (v: number) => py1 - ((v - yMin) / (yMax - yMin)) * (py1 - py0);
+
+  const gridVals = [yMax, (yMax + yMin) / 2, yMin];
+  const axisLabels = series.reduce((a, b) => (b.data.length >= a.data.length ? b : a)).data;
+  const step = Math.max(1, Math.ceil(n / 8));
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label={title ?? "Gráfico de tendencia"}>
+      {range && (range.low !== undefined || range.high !== undefined) && (
+        <rect
+          x={px0}
+          width={px1 - px0}
+          y={yFor(range.high ?? yMax)}
+          height={Math.max(0, yFor(range.low ?? yMin) - yFor(range.high ?? yMax))}
+          fill="var(--ok)"
+          opacity={0.12}
+        />
+      )}
+      {gridVals.map((v, index) => (
+        <g key={`grid-${index}`}>
+          <line x1={px0} x2={px1} y1={yFor(v)} y2={yFor(v)} stroke="var(--border)" strokeWidth={1} />
+          <text x={px0 - 6} y={yFor(v) + 3} textAnchor="end" fontSize={10} fill="var(--tx3)">
+            {fmtAxis(v)}
+          </text>
+        </g>
+      ))}
+      {series.map((s, si) => {
+        const color = SERIES_COLORS[si % SERIES_COLORS.length];
+        const points = s.data.map((d, i) => `${xFor(i)},${yFor(d.value)}`).join(" ");
+        // Área: polígono cerrado hasta la base del área de trazado, con relleno tenue.
+        const areaPoints =
+          s.data.length > 0
+            ? `${xFor(0)},${py1} ${points} ${xFor(s.data.length - 1)},${py1}`
+            : "";
+        return (
+          <g key={`serie-${si}`}>
+            {area && areaPoints && (
+              <polygon points={areaPoints} fill={color} opacity={0.14} stroke="none" />
+            )}
+            <polyline
+              points={points}
+              fill="none"
+              stroke={color}
+              strokeWidth={2}
+              strokeLinejoin="round"
+              strokeLinecap="round"
+            />
+            {s.data.map((d, i) => {
+              const out = isOutOfRange(d.value, range);
+              return (
+                <circle
+                  key={`p-${si}-${i}`}
+                  cx={xFor(i)}
+                  cy={yFor(d.value)}
+                  r={out ? 4 : 3}
+                  fill={out ? "var(--danger)" : color}
+                  stroke="var(--panel)"
+                  strokeWidth={1}
+                >
+                  <title>{`${d.label}: ${d.value}`}</title>
+                </circle>
+              );
+            })}
+          </g>
+        );
+      })}
+      {axisLabels.map((d, i) =>
+        i % step === 0 || i === n - 1 ? (
+          <text key={`x-${i}`} x={xFor(i)} y={H - 9} textAnchor="middle" fontSize={10} fill="var(--tx3)">
+            {d.label.length > 8 ? `${d.label.slice(0, 8)}…` : d.label}
+          </text>
+        ) : null,
+      )}
+    </svg>
+  );
+}
+
+// Gráfica de BARRAS (serie única). Vertical hasta 12 categorías; para más cae a horizontales
+// legibles. Con rango de referencia, las barras fuera de rango se pintan en rojo (--danger).
+function BarChartView({
+  data,
+  range,
+  unit,
+  title,
+}: Readonly<{ data: ChartSeries["data"]; range?: ChartReferenceRange; unit?: string; title?: string }>) {
+  const max = Math.max(1, ...data.map((datum) => Math.abs(datum.value)));
+  const vertical = data.length <= 12;
+  const suffix = unit ? ` ${unit}` : "";
+  const barColor = (value: number, dir: "v" | "h") =>
+    isOutOfRange(value, range)
+      ? "var(--danger)"
+      : `linear-gradient(${dir === "v" ? "180deg" : "90deg"}, var(--accent), var(--accent-tx))`;
+
+  return vertical ? (
+    <div
+      className="flex items-end gap-2 border-t border-[var(--border)] pt-3.5"
+      style={{ height: CHART_BAR_AREA + 44 }}
+      role="img"
+      aria-label={title ?? "Gráfico de barras"}
+    >
+      {data.map((datum, index) => (
+        <div key={`${datum.label}-${index}`} className="flex h-full flex-1 flex-col items-center justify-end gap-1.5">
+          <span className="text-[11px] font-bold tabular-nums text-[var(--tx2)]" title={`${datum.value}${suffix}`}>
+            {datum.value}
+          </span>
+          <div
+            className="w-full max-w-[34px] rounded-t-[7px]"
+            style={{
+              height: `${Math.max(6, (Math.abs(datum.value) / max) * CHART_BAR_AREA)}px`,
+              background: barColor(datum.value, "v"),
+            }}
+          />
+          <span className="max-w-full truncate text-[11px] text-[var(--tx3)]" title={datum.label}>
+            {datum.label}
+          </span>
+        </div>
+      ))}
+    </div>
+  ) : (
+    <div className="flex flex-col gap-2" role="img" aria-label={title ?? "Gráfico de barras"}>
+      {data.map((datum, index) => (
+        <div key={`${datum.label}-${index}`} className="flex items-center gap-2">
+          <span className="w-[110px] shrink-0 truncate text-[11.5px] text-[var(--tx2)]" title={datum.label}>
+            {datum.label}
+          </span>
+          <div className="h-3.5 min-w-[2px] flex-1">
+            <div
+              className="h-full rounded-[4px]"
+              style={{
+                width: `${Math.max(2, (Math.abs(datum.value) / max) * 100)}%`,
+                background: barColor(datum.value, "h"),
+              }}
+            />
+          </div>
+          <span className="w-[42px] shrink-0 text-right text-[11.5px] font-semibold tabular-nums text-[var(--tx)]" title={`${datum.value}${suffix}`}>
+            {datum.value}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Coordenada polar (0° arriba) para los sectores del pie/doughnut.
+function polarPoint(cx: number, cy: number, r: number, deg: number): { x: number; y: number } {
+  const angle = ((deg - 90) * Math.PI) / 180;
+  return { x: cx + r * Math.cos(angle), y: cy + r * Math.sin(angle) };
+}
+
+// Gráfica de PROPORCIONES (pie/doughnut) de una sola serie. Sectores con % y leyenda a un lado.
+function PieChartView({
+  data,
+  unit,
+  doughnut,
+  title,
+}: Readonly<{ data: ChartSeries["data"]; unit?: string; doughnut?: boolean; title?: string }>) {
+  const slices = data.map((d) => ({ label: d.label, value: Math.abs(d.value) }));
+  const total = slices.reduce((sum, s) => sum + s.value, 0);
+  if (total <= 0) {
+    return null;
+  }
+  const [cx, cy, r] = [80, 80, 74];
+  const suffix = unit ? ` ${unit}` : "";
+  let acc = 0;
+
+  return (
+    <div className="flex flex-wrap items-center gap-4">
+      <svg viewBox="0 0 160 160" className="h-[160px] w-[160px] shrink-0" role="img" aria-label={title ?? "Gráfico de proporciones"}>
+        {slices.map((s, index) => {
+          const startDeg = (acc / total) * 360;
+          acc += s.value;
+          const endDeg = (acc / total) * 360;
+          const color = SLICE_COLORS[index % SLICE_COLORS.length];
+          // Un único sector que abarca el total: círculo completo (el arco degeneraría).
+          if (slices.length === 1) {
+            return <circle key={`${s.label}-${index}`} cx={cx} cy={cy} r={r} fill={color} />;
+          }
+          const p1 = polarPoint(cx, cy, r, startDeg);
+          const p2 = polarPoint(cx, cy, r, endDeg);
+          const large = endDeg - startDeg > 180 ? 1 : 0;
+          const path = `M ${cx} ${cy} L ${p1.x} ${p1.y} A ${r} ${r} 0 ${large} 1 ${p2.x} ${p2.y} Z`;
+          return <path key={`${s.label}-${index}`} d={path} fill={color} stroke="var(--panel)" strokeWidth={1.5} />;
+        })}
+        {doughnut && <circle cx={cx} cy={cy} r={r * 0.56} fill="var(--panel)" />}
+      </svg>
+      <div className="flex min-w-[130px] flex-1 flex-col gap-1.5">
+        {slices.map((s, index) => (
+          <div key={`leg-${s.label}-${index}`} className="flex items-center gap-2 text-[11.5px]">
+            <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: SLICE_COLORS[index % SLICE_COLORS.length] }} />
+            <span className="flex-1 truncate text-[var(--tx2)]" title={s.label}>{s.label}</span>
+            <span className="shrink-0 font-semibold tabular-nums text-[var(--tx)]" title={`${s.value}${suffix}`}>
+              {Math.round((s.value / total) * 100)}%
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Fecha ISO -> "MM-DD" para las marcas del eje temporal del gantt.
+function ganttTick(ms: number): string {
+  return new Date(ms).toISOString().slice(5, 10);
+}
+
+// LÍNEA DE TIEMPO (gantt): una fila por tarea, barra posicionada por fechas start/end sobre un eje
+// temporal común. El color codifica el estado (done/active/planned). Layout con divs (responsive).
+function GanttView({ tasks, title }: Readonly<{ tasks: GanttTask[]; title?: string }>) {
+  const spans = tasks.map((t) => ({ ...t, s: Date.parse(t.start), e: Date.parse(t.end) }));
+  const min = Math.min(...spans.map((t) => t.s));
+  const maxRaw = Math.max(...spans.map((t) => t.e));
+  const max = maxRaw > min ? maxRaw : min + 86_400_000; // ≥ 1 día para evitar división por cero
+  const span = max - min;
+  const hasStatus = tasks.some((t) => t.status);
+
+  return (
+    <div className="flex flex-col gap-1.5" role="img" aria-label={title ?? "Línea de tiempo"}>
+      {/* marcas del eje temporal */}
+      <div className="flex items-center gap-2 pb-1">
+        <span className="w-[120px] shrink-0" />
+        <div className="flex flex-1 justify-between text-[10px] text-[var(--tx3)]">
+          <span>{ganttTick(min)}</span>
+          <span>{ganttTick(min + span / 2)}</span>
+          <span>{ganttTick(max)}</span>
+        </div>
+      </div>
+      {spans.map((t, index) => {
+        const left = ((t.s - min) / span) * 100;
+        const width = Math.max(2, ((t.e - t.s) / span) * 100);
+        const color = t.status ? GANTT_STATUS_COLOR[t.status] : "var(--accent)";
+        return (
+          <div key={`${t.label}-${index}`} className="flex items-center gap-2">
+            <span className="w-[120px] shrink-0 truncate text-[11.5px] text-[var(--tx2)]" title={t.label}>
+              {t.label}
+            </span>
+            <div className="relative h-4 flex-1 rounded-[4px] bg-[var(--bg2)]">
+              <div
+                className="absolute top-0 h-full rounded-[4px]"
+                style={{ left: `${left}%`, width: `${width}%`, background: color }}
+                title={`${t.start} → ${t.end}${t.status ? ` (${t.status})` : ""}`}
+              />
             </div>
+          </div>
+        );
+      })}
+      {hasStatus && (
+        <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 pl-[128px] text-[10.5px] text-[var(--tx3)]">
+          {(["done", "active", "planned"] as const).map((st) => (
+            <span key={st} className="flex items-center gap-1.5">
+              <span className="h-2.5 w-2.5 rounded-[3px]" style={{ background: GANTT_STATUS_COLOR[st] }} />
+              {st === "done" ? "Completado" : st === "active" ? "En curso" : "Planeado"}
+            </span>
           ))}
         </div>
       )}

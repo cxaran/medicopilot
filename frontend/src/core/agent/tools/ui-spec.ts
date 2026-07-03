@@ -49,11 +49,58 @@ export interface ChartDatum {
   value: number;
 }
 
+/** Serie de datos (multi-serie: p. ej. sistólica vs diastólica sobre el mismo eje temporal). */
+export interface ChartSeries {
+  /** Nombre de la serie para la leyenda; opcional en serie única. */
+  name?: string;
+  data: ChartDatum[];
+}
+
+/**
+ * Rango de referencia CLÍNICO (banda normal). El renderer sombrea la banda y RESALTA en rojo los
+ * puntos que caen fuera de ella. Sirve para labs/vitales (p. ej. glucosa 70–100 mg/dL).
+ */
+export interface ChartReferenceRange {
+  low?: number;
+  high?: number;
+  /** Etiqueta de la banda (si falta, el renderer arma una a partir de low/high). */
+  label?: string;
+}
+
+/**
+ * Tipos de gráfico soportados:
+ *  - ``bar``/``line``/``area``: comparación o TENDENCIA numérica (usan data/series {label,value}).
+ *  - ``pie``/``doughnut``: PROPORCIONES de una sola serie (distribución de categorías).
+ *  - ``gantt``: LÍNEA DE TIEMPO por filas (usan ``tasks`` con start/end); p. ej. plan de cuidados,
+ *    cursos de tratamiento, órdenes programadas.
+ */
+export type ChartType = "bar" | "line" | "area" | "pie" | "doughnut" | "gantt";
+
+/** Fila de una línea de tiempo (chart_type "gantt"): una barra entre dos fechas. */
+export interface GanttTask {
+  label: string;
+  /** Fecha de inicio (ISO, p. ej. "2026-01-05"). */
+  start: string;
+  /** Fecha de fin (ISO); no puede ser anterior a ``start``. */
+  end: string;
+  /** Estado que colorea la barra (opcional). */
+  status?: "done" | "active" | "planned";
+}
+
 export interface ChartSpec {
   kind: "chart";
-  chart_type: "bar";
+  chart_type: ChartType;
   title?: string;
-  data: ChartDatum[];
+  /** Unidad de los valores (p. ej. "mmHg", "mg/dL", "kg"); se muestra junto al título y el eje. */
+  unit?: string;
+  /** Banda de referencia clínica (bar/line/area): sombrea el rango normal y marca los fuera de él. */
+  reference_range?: ChartReferenceRange;
+  /** Serie ÚNICA (retrocompat + azúcar). Si viene ``series``, ésta manda. Base de pie/doughnut. */
+  data?: ChartDatum[];
+  /** MULTI-serie (o serie única con nombre). Canónico para líneas/áreas comparativas. */
+  series?: ChartSeries[];
+  /** Filas de la línea de tiempo cuando chart_type === "gantt". */
+  tasks?: GanttTask[];
 }
 
 export type ButtonAction =
@@ -176,6 +223,7 @@ export function isUiSpec(value: unknown): value is UiSpec {
 
 const MAX_FIELDS = 30;
 const MAX_DATA_POINTS = 60;
+const MAX_SERIES = 4;
 const MAX_REPLIES = 6;
 const MAX_REPLY_LENGTH = 140;
 const ALLOWED_FIELD_TYPES: FormFieldType[] = ["text", "number", "textarea", "select"];
@@ -291,41 +339,164 @@ export function parseResourceFormSpec(input: unknown): ParseResult<ResourceFormS
   return { ok: true, spec };
 }
 
-export function parseChartSpec(input: unknown): ParseResult<ChartSpec> {
-  if (!isObject(input)) {
-    return { ok: false, error: "La especificación del gráfico debe ser un objeto." };
+function asFiniteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+/** Valida el arreglo de puntos de una serie ({label, value} numérico, con tope). */
+function parseChartData(raw: unknown): ParseResult<ChartDatum[]> {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return { ok: false, error: "La serie requiere 'data' con al menos un punto." };
   }
-  const chartType = asString(input.chart_type) ?? "bar";
-  if (chartType !== "bar") {
-    return { ok: false, error: "Solo se soporta chart_type 'bar'." };
-  }
-  if (!Array.isArray(input.data) || input.data.length === 0) {
-    return { ok: false, error: "El gráfico requiere 'data' con al menos un punto." };
-  }
-  if (input.data.length > MAX_DATA_POINTS) {
+  if (raw.length > MAX_DATA_POINTS) {
     return { ok: false, error: `Demasiados puntos (máximo ${MAX_DATA_POINTS}).` };
   }
-
   const data: ChartDatum[] = [];
-  for (const raw of input.data) {
-    if (!isObject(raw)) {
+  for (const point of raw) {
+    if (!isObject(point)) {
       return { ok: false, error: "Cada punto del gráfico debe ser un objeto." };
     }
-    const label = asString(raw.label);
-    const value = raw.value;
+    const label = asString(point.label);
     if (label === undefined) {
       return { ok: false, error: "Cada punto requiere 'label'." };
     }
-    if (typeof value !== "number" || Number.isNaN(value)) {
+    const value = asFiniteNumber(point.value);
+    if (value === undefined) {
       return { ok: false, error: `El punto '${label}' requiere un 'value' numérico.` };
     }
     data.push({ label, value });
   }
+  return { ok: true, spec: data };
+}
 
-  return {
-    ok: true,
-    spec: { kind: "chart", chart_type: "bar", ...(asString(input.title) ? { title: asString(input.title) } : {}), data },
-  };
+/** Valida el rango de referencia opcional (al menos low o high; low ≤ high si ambos). */
+function parseReferenceRange(raw: unknown): ParseResult<ChartReferenceRange | undefined> {
+  if (raw === undefined || raw === null) {
+    return { ok: true, spec: undefined };
+  }
+  if (!isObject(raw)) {
+    return { ok: false, error: "'reference_range' debe ser un objeto { low?, high?, label? }." };
+  }
+  const low = asFiniteNumber(raw.low);
+  const high = asFiniteNumber(raw.high);
+  if (low === undefined && high === undefined) {
+    return { ok: false, error: "'reference_range' requiere 'low' y/o 'high' numéricos." };
+  }
+  if (low !== undefined && high !== undefined && low > high) {
+    return { ok: false, error: "'reference_range': 'low' no puede ser mayor que 'high'." };
+  }
+  const range: ChartReferenceRange = {};
+  if (low !== undefined) range.low = low;
+  if (high !== undefined) range.high = high;
+  const label = asString(raw.label);
+  if (label) range.label = label;
+  return { ok: true, spec: range };
+}
+
+const CHART_TYPES: ChartType[] = ["bar", "line", "area", "pie", "doughnut", "gantt"];
+const GANTT_STATUSES: NonNullable<GanttTask["status"]>[] = ["done", "active", "planned"];
+
+/** Valida las filas de una línea de tiempo (gantt): label + fechas start ≤ end + estado opcional. */
+function parseGanttTasks(raw: unknown): ParseResult<GanttTask[]> {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return { ok: false, error: "El gantt requiere 'tasks' con al menos una fila." };
+  }
+  if (raw.length > MAX_DATA_POINTS) {
+    return { ok: false, error: `Demasiadas tareas (máximo ${MAX_DATA_POINTS}).` };
+  }
+  const tasks: GanttTask[] = [];
+  for (const raw_task of raw) {
+    if (!isObject(raw_task)) {
+      return { ok: false, error: "Cada tarea del gantt debe ser un objeto." };
+    }
+    const label = asString(raw_task.label);
+    const start = asString(raw_task.start);
+    const end = asString(raw_task.end);
+    if (label === undefined) {
+      return { ok: false, error: "Cada tarea requiere 'label'." };
+    }
+    if (start === undefined || Number.isNaN(Date.parse(start))) {
+      return { ok: false, error: `La tarea '${label}' requiere 'start' con fecha válida (ISO).` };
+    }
+    if (end === undefined || Number.isNaN(Date.parse(end))) {
+      return { ok: false, error: `La tarea '${label}' requiere 'end' con fecha válida (ISO).` };
+    }
+    if (Date.parse(end) < Date.parse(start)) {
+      return { ok: false, error: `La tarea '${label}': 'end' no puede ser anterior a 'start'.` };
+    }
+    const task: GanttTask = { label, start, end };
+    const status = asString(raw_task.status);
+    if (status !== undefined) {
+      if (!GANTT_STATUSES.includes(status as GanttTask["status"] & string)) {
+        return { ok: false, error: `Estado inválido en '${label}' (done | active | planned).` };
+      }
+      task.status = status as GanttTask["status"];
+    }
+    tasks.push(task);
+  }
+  return { ok: true, spec: tasks };
+}
+
+export function parseChartSpec(input: unknown): ParseResult<ChartSpec> {
+  if (!isObject(input)) {
+    return { ok: false, error: "La especificación del gráfico debe ser un objeto." };
+  }
+  const chartType = (asString(input.chart_type) ?? "bar") as ChartType;
+  if (!CHART_TYPES.includes(chartType)) {
+    return { ok: false, error: "chart_type debe ser bar | line | area | pie | doughnut | gantt." };
+  }
+
+  const reference = parseReferenceRange(input.reference_range);
+  if (!reference.ok) {
+    return reference;
+  }
+
+  const base: ChartSpec = { kind: "chart", chart_type: chartType };
+  const title = asString(input.title);
+  if (title) base.title = title;
+  const unit = asString(input.unit);
+  if (unit) base.unit = unit;
+  if (reference.spec) base.reference_range = reference.spec;
+
+  // LÍNEA DE TIEMPO: gantt usa 'tasks' (fechas), no data/series.
+  if (chartType === "gantt") {
+    const parsed = parseGanttTasks(input.tasks);
+    if (!parsed.ok) {
+      return parsed;
+    }
+    return { ok: true, spec: { ...base, tasks: parsed.spec } };
+  }
+
+  // MULTI-serie: si viene 'series', manda; si no, cae a 'data' (serie única, retrocompat).
+  if (input.series !== undefined) {
+    if (!Array.isArray(input.series) || input.series.length === 0) {
+      return { ok: false, error: "'series' debe ser un arreglo con al menos una serie." };
+    }
+    if (input.series.length > MAX_SERIES) {
+      return { ok: false, error: `Demasiadas series (máximo ${MAX_SERIES}).` };
+    }
+    const series: ChartSeries[] = [];
+    for (const rawSeries of input.series) {
+      if (!isObject(rawSeries)) {
+        return { ok: false, error: "Cada serie debe ser un objeto { name?, data }." };
+      }
+      const parsed = parseChartData(rawSeries.data);
+      if (!parsed.ok) {
+        return parsed;
+      }
+      const one: ChartSeries = { data: parsed.spec };
+      const name = asString(rawSeries.name);
+      if (name) one.name = name;
+      series.push(one);
+    }
+    return { ok: true, spec: { ...base, series } };
+  }
+
+  const parsed = parseChartData(input.data);
+  if (!parsed.ok) {
+    return parsed;
+  }
+  return { ok: true, spec: { ...base, data: parsed.spec } };
 }
 
 // La validación de botones (estructura + gobernanza) vive en button-actions.ts

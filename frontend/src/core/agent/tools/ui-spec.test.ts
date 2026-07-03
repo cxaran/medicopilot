@@ -116,17 +116,120 @@ test("parseFormSpec: select sin options es inválido", () => {
   assert.equal(parsed.ok, false);
 });
 
-test("parseChartSpec: acepta barras con datos numéricos", () => {
+test("parseChartSpec: acepta barras con datos numéricos (serie única retrocompat)", () => {
   const parsed = parseChartSpec({ title: "T", data: [{ label: "Ene", value: 3 }] });
   assert.equal(parsed.ok, true);
   if (!parsed.ok) return;
   assert.equal(parsed.spec.kind, "chart");
-  assert.equal(parsed.spec.data[0].value, 3);
+  assert.equal(parsed.spec.chart_type, "bar");
+  assert.equal(parsed.spec.data?.[0].value, 3);
 });
 
 test("parseChartSpec: rechaza value no numérico", () => {
   const parsed = parseChartSpec({ data: [{ label: "Ene", value: "x" }] });
   assert.equal(parsed.ok, false);
+});
+
+test("parseChartSpec: acepta líneas con unidad y rango de referencia", () => {
+  const parsed = parseChartSpec({
+    chart_type: "line",
+    title: "Glucosa",
+    unit: "mg/dL",
+    reference_range: { low: 70, high: 100, label: "Normal" },
+    data: [
+      { label: "01-01", value: 95 },
+      { label: "01-08", value: 180 },
+    ],
+  });
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  assert.equal(parsed.spec.chart_type, "line");
+  assert.equal(parsed.spec.unit, "mg/dL");
+  assert.equal(parsed.spec.reference_range?.high, 100);
+  assert.equal(parsed.spec.data?.length, 2);
+});
+
+test("parseChartSpec: acepta multi-serie (series manda sobre data)", () => {
+  const parsed = parseChartSpec({
+    chart_type: "line",
+    unit: "mmHg",
+    series: [
+      { name: "Sistólica", data: [{ label: "L", value: 140 }, { label: "M", value: 135 }] },
+      { name: "Diastólica", data: [{ label: "L", value: 90 }, { label: "M", value: 85 }] },
+    ],
+  });
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  assert.equal(parsed.spec.series?.length, 2);
+  assert.equal(parsed.spec.series?.[0].name, "Sistólica");
+  assert.equal(parsed.spec.data, undefined);
+});
+
+test("parseChartSpec: rechaza chart_type desconocido", () => {
+  assert.equal(parseChartSpec({ chart_type: "scatter", data: [{ label: "A", value: 1 }] }).ok, false);
+});
+
+test("parseChartSpec: rechaza reference_range invertido y vacío", () => {
+  assert.equal(
+    parseChartSpec({ data: [{ label: "A", value: 1 }], reference_range: { low: 100, high: 10 } }).ok,
+    false,
+  );
+  assert.equal(
+    parseChartSpec({ data: [{ label: "A", value: 1 }], reference_range: {} }).ok,
+    false,
+  );
+});
+
+test("parseChartSpec: rechaza más de 4 series", () => {
+  const many = Array.from({ length: 5 }, (_, i) => ({ name: `S${i}`, data: [{ label: "A", value: i }] }));
+  assert.equal(parseChartSpec({ chart_type: "line", series: many }).ok, false);
+});
+
+test("parseChartSpec: acepta pie, doughnut y area", () => {
+  for (const chart_type of ["pie", "doughnut", "area"]) {
+    const parsed = parseChartSpec({ chart_type, data: [{ label: "A", value: 3 }, { label: "B", value: 7 }] });
+    assert.equal(parsed.ok, true, `esperaba ok para ${chart_type}`);
+    if (parsed.ok) assert.equal(parsed.spec.chart_type, chart_type);
+  }
+});
+
+test("parseChartSpec: gantt acepta tareas con fechas válidas", () => {
+  const parsed = parseChartSpec({
+    chart_type: "gantt",
+    title: "Plan de cuidados",
+    tasks: [
+      { label: "Antibiótico", start: "2026-01-05", end: "2026-01-12", status: "done" },
+      { label: "Control", start: "2026-01-12", end: "2026-01-20", status: "planned" },
+    ],
+  });
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  assert.equal(parsed.spec.chart_type, "gantt");
+  assert.equal(parsed.spec.tasks?.length, 2);
+  assert.equal(parsed.spec.tasks?.[0].status, "done");
+});
+
+test("parseChartSpec: gantt rechaza fecha inválida, fin<inicio y estado desconocido", () => {
+  assert.equal(
+    parseChartSpec({ chart_type: "gantt", tasks: [{ label: "X", start: "no-fecha", end: "2026-01-10" }] }).ok,
+    false,
+  );
+  assert.equal(
+    parseChartSpec({ chart_type: "gantt", tasks: [{ label: "X", start: "2026-01-10", end: "2026-01-01" }] }).ok,
+    false,
+  );
+  assert.equal(
+    parseChartSpec({
+      chart_type: "gantt",
+      tasks: [{ label: "X", start: "2026-01-01", end: "2026-01-10", status: "urgente" }],
+    }).ok,
+    false,
+  );
+  assert.equal(parseChartSpec({ chart_type: "gantt", tasks: [] }).ok, false);
+});
+
+test("parseChartSpec: rechaza chart_type fuera del conjunto", () => {
+  assert.equal(parseChartSpec({ chart_type: "radar", data: [{ label: "A", value: 1 }] }).ok, false);
 });
 
 test("buttonActionToMessage: traduce la acción configurada del botón", () => {
