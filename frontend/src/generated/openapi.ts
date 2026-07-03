@@ -8027,22 +8027,6 @@ export interface components {
             /** Required */
             required: boolean;
         };
-        /** ResourceFilterCapability */
-        ResourceFilterCapability: {
-            /** Field */
-            field: string;
-            /** Parameter */
-            parameter: string;
-            operator: components["schemas"]["FilterOperator"];
-            /** Label */
-            label: string;
-            /** Description */
-            description?: string | null;
-            type: components["schemas"]["FieldValueType"];
-            widget: components["schemas"]["WidgetType"];
-            /** Options */
-            options?: components["schemas"]["ResourceFilterOption"][] | null;
-        };
         /** ResourceFilterOption */
         ResourceFilterOption: {
             /** Value */
@@ -8090,11 +8074,6 @@ export interface components {
         ResourceListCapability: {
             /** Fields */
             fields: components["schemas"]["ResourceFieldCapability"][];
-            /**
-             * Filters
-             * @default []
-             */
-            filters: components["schemas"]["ResourceFilterCapability"][];
             /**
              * Filterable Fields
              * @default []

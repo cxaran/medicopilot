@@ -36,7 +36,6 @@ export type AgentPersonaUpdate = components["schemas"]["AgentPersonaUpdate"];
 export type ResourceCapability = components["schemas"]["ResourceCapability"];
 export type ResourceListCapability = components["schemas"]["ResourceListCapability"];
 export type ResourceFieldCapability = components["schemas"]["ResourceFieldCapability"];
-export type ResourceFilterCapability = components["schemas"]["ResourceFilterCapability"];
 export type ResourceFilterOption = components["schemas"]["ResourceFilterOption"];
 export type FilterableFieldCapability = components["schemas"]["FilterableFieldCapability"];
 export type FilterableOperatorCapability =

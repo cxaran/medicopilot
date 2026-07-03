@@ -40,7 +40,6 @@ function listCap(overrides: Partial<ResourceListCapability> = {}): ResourceListC
       fieldCap("created_at", { sortable: true }),
       fieldCap("status", { sortable: false }),
     ],
-    filters: [],
     filterable_fields: [],
     pagination: { default_limit: 20, max_limit: 100 },
     search: { enabled: true, min_length: 2, max_length: 50 },

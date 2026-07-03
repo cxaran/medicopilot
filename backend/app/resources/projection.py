@@ -47,7 +47,6 @@ from backend.app.schemas.capabilities import (
     ResourceCapability,
     ResourceFileDownloadCapability,
     ResourceFieldCapability,
-    ResourceFilterCapability,
     ResourceFilterOption,
     ResourceFormCapability,
     ResourceFormFieldCapability,
@@ -233,85 +232,6 @@ def _filter_options(
         # Los widgets sin opciones (futuros) no las llevan en este alcance.
         return None
     return _declared_options(field_name, raw)
-
-
-def _filter_capabilities(
-    plan: CompiledQueryPlan,
-    query_schema: type[Any],
-    list_schema: type[BaseModel],
-    field_caps: dict[str, ResourceFieldCapability],
-) -> list[ResourceFilterCapability]:
-    param_index = {
-        (parameter.field_name, parameter.operator): parameter.parameter_name
-        for parameter in plan.filter_parameters
-    }
-    filters: list[ResourceFilterCapability] = []
-    seen_parameters: set[str] = set()
-
-    for name, field_info in list_schema.model_fields.items():
-        declaration = _ui(field_info).get("filter")
-        if not isinstance(declaration, dict):
-            continue
-
-        field_cap = field_caps.get(name)
-        if field_cap is None:
-            raise CapabilityConfigError(
-                f"El filtro '{name}' no referencia un campo emitido en list.fields."
-            )
-
-        try:
-            operator = Operator(declaration.get("operator"))
-        except ValueError as error:
-            raise CapabilityConfigError(
-                f"El filtro '{name}' declara un operador inválido: {declaration.get('operator')!r}."
-            ) from error
-
-        parameter = param_index.get((name, operator))
-        if parameter is None:
-            raise CapabilityConfigError(
-                f"El filtro '{name}' usa el operador '{operator.value}' ausente en el plan del campo."
-            )
-        if parameter not in query_schema.model_fields:
-            raise CapabilityConfigError(
-                f"El parámetro '{parameter}' del filtro '{name}' no existe en el query schema."
-            )
-        if parameter in seen_parameters:
-            raise CapabilityConfigError(
-                f"El parámetro de filtro '{parameter}' está duplicado entre filtros visibles."
-            )
-        seen_parameters.add(parameter)
-
-        public_operator = FilterOperator(operator.value)
-        if public_operator not in field_cap.filter_operators:
-            raise CapabilityConfigError(
-                f"El operador '{operator.value}' no está en filter_operators de '{name}'."
-            )
-
-        label = declaration.get("label")
-        if not isinstance(label, str) or label.strip() == "":
-            raise CapabilityConfigError(f"El filtro '{name}' requiere un label explícito.")
-
-        try:
-            widget = WidgetType(declaration.get("widget"))
-        except ValueError as error:
-            raise CapabilityConfigError(
-                f"El filtro '{name}' declara un widget inválido: {declaration.get('widget')!r}."
-            ) from error
-
-        filters.append(
-            ResourceFilterCapability(
-                field=name,
-                parameter=parameter,
-                operator=public_operator,
-                label=label,
-                description=field_info.description,
-                type=field_cap.type,
-                widget=widget,
-                options=_filter_options(name, widget, declaration.get("options")),
-            )
-        )
-
-    return filters
 
 
 # --- Filtros declarativos visibles (filterable_fields, C1) ---
@@ -598,7 +518,6 @@ def _list_capability(definition: ResourceDefinition) -> ResourceListCapability:
         fields.append(cap)
         field_caps[name] = cap
 
-    filters = _filter_capabilities(plan, query_schema, list_schema, field_caps)
     filterable_fields = _filterable_fields(plan, list_schema, field_caps)
 
     limit_field = query_schema.model_fields["limit"]
@@ -620,7 +539,6 @@ def _list_capability(definition: ResourceDefinition) -> ResourceListCapability:
     sort = _sort_capability(plan, _constraint(query_schema.model_fields["sort"], "max_length"))
     return ResourceListCapability(
         fields=fields,
-        filters=filters,
         filterable_fields=filterable_fields,
         pagination=pagination,
         search=search,

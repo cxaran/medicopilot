@@ -126,17 +126,6 @@ class ResourceFilterOption(ApiReadSchema):
     label: str
 
 
-class ResourceFilterCapability(ApiReadSchema):
-    field: str
-    parameter: str
-    operator: FilterOperator
-    label: str
-    description: Optional[str] = None
-    type: FieldValueType
-    widget: WidgetType
-    options: Optional[list[ResourceFilterOption]] = None
-
-
 class FilterableRangeParameters(ApiReadSchema):
     """Nombres de parámetro de los dos extremos de un operador de rango (``between``)."""
 
@@ -202,11 +191,10 @@ class SortCapability(ApiReadSchema):
 
 class ResourceListCapability(ApiReadSchema):
     fields: list[ResourceFieldCapability]
-    # Filtros visibles heredados (un control por campo). Se conserva por compatibilidad;
-    # el contrato completo y declarativo de filtros vive en ``filterable_fields``.
-    filters: list[ResourceFilterCapability] = []
-    # Contrato aditivo de filtros declarativos (C1): por campo, los operadores que
-    # expone con su forma de valor, widget y parámetros.
+    # Contrato declarativo ÚNICO de filtros: por campo, los operadores que expone con
+    # su forma de valor, widget y parámetros. (El contrato legacy ``filters`` se
+    # retiró: derivaba solo de ui.filter manual y dejaba al copiloto sin los
+    # operadores automáticos del plan.)
     filterable_fields: list[FilterableFieldCapability] = []
     pagination: PaginationCapability
     search: SearchCapability

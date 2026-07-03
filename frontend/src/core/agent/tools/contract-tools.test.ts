@@ -28,15 +28,45 @@ const CATALOG = [
     detail: { method: "GET", url_template: "/api/v1/appointments/{appointment_id}" },
     list: {
       fields: [],
-      filters: [
+      // Contrato declarativo ÚNICO: los parámetros de las tools de listado se
+      // derivan de filterable_fields (incluye eq con opciones y el rango
+      // automático gte/lte de fechas, que el legacy jamás publicaba).
+      filterable_fields: [
         {
-          field: "status",
-          parameter: "status",
-          operator: "eq",
+          key: "status",
           label: "Estado",
-          type: "enum",
-          widget: "select",
-          options: [{ value: "pending", label: "Pendiente" }],
+          value_type: "enum",
+          operators: [
+            {
+              key: "eq",
+              label: "Igual a",
+              value_shape: "single",
+              widget: "select",
+              parameter_name: "status",
+              options: [{ value: "pending", label: "Pendiente" }],
+            },
+          ],
+        },
+        {
+          key: "scheduled_date",
+          label: "Fecha",
+          value_type: "date",
+          operators: [
+            {
+              key: "gte",
+              label: "Desde",
+              value_shape: "single",
+              widget: "date",
+              parameter_name: "scheduled_date_gte",
+            },
+            {
+              key: "lte",
+              label: "Hasta",
+              value_shape: "single",
+              widget: "date",
+              parameter_name: "scheduled_date_lte",
+            },
+          ],
         },
       ],
     },
@@ -158,6 +188,15 @@ test("list deriva filtros del contrato; get usa el detalle por id", async () => 
   const list = byName(tools, "resource.list_appointments")!;
   assert.equal(list.kind, "read");
   assert.ok((list.inputSchema.properties as Record<string, unknown>).status, "filtro status");
+  // Los rangos automáticos del plan ahora llegan al copiloto (antes invisibles).
+  assert.ok(
+    (list.inputSchema.properties as Record<string, unknown>).scheduled_date_gte,
+    "rango gte automático",
+  );
+  assert.ok(
+    (list.inputSchema.properties as Record<string, unknown>).scheduled_date_lte,
+    "rango lte automático",
+  );
   const rec: { path?: string } = {};
   await list.execute({ status: "pending", limit: 10 }, fakeCtx(rec));
   assert.match(rec.path!, /\/api\/v1\/appointments\?/);

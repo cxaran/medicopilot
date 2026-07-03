@@ -271,6 +271,62 @@ function getTool(cap: ResourceCapability): ToolDefinition | null {
   };
 }
 
+// Un parámetro de query derivado del contrato declarativo de filtros.
+type FilterParam = { name: string; description: string; valueType: string; options?: string[] };
+
+// Deriva TODOS los parámetros de filtro de ``filterable_fields`` (la fuente única del
+// plan compilado): por campo, cada operador publica su parameter_name (un valor) o su
+// par from/to (rango). Antes las tools leían el contrato legacy ``filters`` (solo los
+// declarados a mano con ui.filter), así que el copiloto no veía los rangos gte/lte
+// automáticos ni los operadores de calendario que la UI sí ofrece.
+function filterParams(list: NonNullable<ResourceCapability["list"]>): FilterParam[] {
+  const params: FilterParam[] = [];
+  for (const field of list.filterable_fields) {
+    const base = field.description ?? field.label;
+    for (const operator of field.operators) {
+      const options =
+        operator.options && operator.options.length > 0
+          ? operator.options.map((option) => option.value)
+          : undefined;
+      const describe = (suffix: string) =>
+        operator.key === "eq" ? base : `${base} — ${operator.label}${suffix}`;
+      if (operator.parameter_name) {
+        params.push({
+          name: operator.parameter_name,
+          description: describe(""),
+          valueType: field.value_type,
+          options,
+        });
+      } else if (operator.parameters) {
+        params.push({
+          name: operator.parameters.from,
+          description: describe(" (desde)"),
+          valueType: field.value_type,
+          options,
+        });
+        params.push({
+          name: operator.parameters.to,
+          description: describe(" (hasta)"),
+          valueType: field.value_type,
+          options,
+        });
+      }
+    }
+  }
+  return params;
+}
+
+function filterProp(param: FilterParam): PropSchema {
+  if (param.options) {
+    return { type: "string", enum: param.options, description: param.description };
+  }
+  if (param.valueType === "integer") return { type: "integer", description: param.description };
+  if (param.valueType === "decimal") return { type: "number", description: param.description };
+  if (param.valueType === "boolean") return { type: "boolean", description: param.description };
+  // date/datetime/uuid/enum-sin-options/string viajan como string (ISO para fechas).
+  return { type: "string", description: param.description };
+}
+
 function listTool(cap: ResourceCapability): ToolDefinition | null {
   const list = cap.list;
   if (!list) return null;
@@ -282,25 +338,13 @@ function listTool(cap: ResourceCapability): ToolDefinition | null {
     limit: { type: "integer", description: "Máximo de elementos (1-100)." },
     offset: { type: "integer", description: "Desplazamiento para paginar." },
   };
-  for (const filter of list.filters) {
-    const description = filter.description ?? filter.label;
-    if (filter.type === "enum" && filter.options && filter.options.length > 0) {
-      const values = filter.options.map((option) => option.value);
-      localProps[filter.parameter] = { type: "string", enum: values, description };
-      wireProps[filter.parameter] = { type: "string", enum: values, description };
-    } else if (filter.type === "integer" || filter.type === "decimal") {
-      const numeric: PropSchema = { type: filter.type === "integer" ? "integer" : "number", description };
-      localProps[filter.parameter] = numeric;
-      wireProps[filter.parameter] = { type: numeric.type, description };
-    } else if (filter.type === "boolean") {
-      localProps[filter.parameter] = { type: "boolean", description };
-      wireProps[filter.parameter] = { type: "boolean", description };
-    } else {
-      localProps[filter.parameter] = { type: "string", description };
-      wireProps[filter.parameter] = { type: "string", description };
-    }
+  const params = filterParams(list);
+  for (const param of params) {
+    const prop = filterProp(param);
+    localProps[param.name] = prop;
+    wireProps[param.name] = { ...prop };
   }
-  const paramNames = list.filters.map((filter) => filter.parameter);
+  const paramNames = params.map((param) => param.name);
   return {
     name: `resource.list_${cap.name}`,
     description: `Lista ${cap.label} con filtros del contrato (lectura).`,

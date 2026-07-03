@@ -418,9 +418,12 @@ class DoctorsCapabilityTest(unittest.TestCase):
         self.assertEqual(labels["status"], "Estado")
 
         # El filtro de status publica opciones en español desde el contrato.
-        status_filter = next(f for f in cap["list"]["filters"] if f["field"] == "status")
-        self.assertEqual(status_filter["widget"], "select")
-        values = {o["value"] for o in status_filter["options"]}
+        status_field = next(
+            f for f in cap["list"]["filterable_fields"] if f["key"] == "status"
+        )
+        eq = next(o for o in status_field["operators"] if o["key"] == "eq")
+        self.assertEqual(eq["widget"], "select")
+        values = {o["value"] for o in (eq["options"] or [])}
         self.assertEqual(values, {"active", "inactive", "suspended"})
 
         self.assertEqual(cap["forms"]["create"]["method"], "POST")
@@ -495,11 +498,14 @@ class ClinicalSummaryCapabilityTest(unittest.TestCase):
             cap = client.get("/api/v1/resources/patient_clinical_items").json()
         self.assertEqual(cap["name"], "patient_clinical_items")
         self.assertEqual(cap["api_path"], "/api/v1/patient-clinical-items")
-        filter_fields = {f["field"] for f in cap["list"]["filters"]}
-        self.assertEqual(filter_fields, {"item_type", "severity", "status"})
+        filterable_keys = {f["key"] for f in cap["list"]["filterable_fields"]}
+        self.assertLessEqual({"item_type", "severity", "status"}, filterable_keys)
         # Un solo recurso reutilizable; las opciones de tipo vienen del contrato.
-        type_filter = next(f for f in cap["list"]["filters"] if f["field"] == "item_type")
-        self.assertIn("allergy", {o["value"] for o in type_filter["options"]})
+        type_field = next(
+            f for f in cap["list"]["filterable_fields"] if f["key"] == "item_type"
+        )
+        type_eq = next(o for o in type_field["operators"] if o["key"] == "eq")
+        self.assertIn("allergy", {o["value"] for o in (type_eq["options"] or [])})
         self.assertEqual({a["name"] for a in cap["actions"]}, {"delete"})
 
     def test_vital_signs_contract_excludes_bmi_from_forms_and_columns(self) -> None:
@@ -516,10 +522,11 @@ class ClinicalSummaryCapabilityTest(unittest.TestCase):
         with _As("consultation_diagnoses:read"):
             cap = client.get("/api/v1/resources/consultation_diagnoses").json()
         self.assertEqual(cap["name"], "consultation_diagnoses")
-        kind_filter = next(
-            f for f in cap["list"]["filters"] if f["field"] == "diagnosis_kind"
+        kind_field = next(
+            f for f in cap["list"]["filterable_fields"] if f["key"] == "diagnosis_kind"
         )
-        self.assertEqual(kind_filter["widget"], "select")
+        kind_eq = next(o for o in kind_field["operators"] if o["key"] == "eq")
+        self.assertEqual(kind_eq["widget"], "select")
         # Sin permisos de escritura: ni forms ni acciones.
         self.assertNotIn("forms", cap)
         self.assertEqual(cap["actions"], [])
@@ -850,11 +857,13 @@ class MedicationTemplatesCapabilityTest(unittest.TestCase):
             self.assertIn(expected, list_fields)
 
         # El filtro de status publica opciones en español con operador eq.
-        status_filter = next(f for f in cap["list"]["filters"] if f["field"] == "status")
-        self.assertEqual(status_filter["widget"], "select")
-        self.assertEqual(status_filter["operator"], "eq")
+        status_field = next(
+            f for f in cap["list"]["filterable_fields"] if f["key"] == "status"
+        )
+        status_eq = next(o for o in status_field["operators"] if o["key"] == "eq")
+        self.assertEqual(status_eq["widget"], "select")
         self.assertEqual(
-            {o["value"] for o in status_filter["options"]}, {"active", "inactive"}
+            {o["value"] for o in (status_eq["options"] or [])}, {"active", "inactive"}
         )
 
         self.assertEqual(cap["forms"]["create"]["method"], "POST")
