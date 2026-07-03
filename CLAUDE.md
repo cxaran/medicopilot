@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 MedicoPilot es un Expediente Clínico Electrónico local para consultorio médico con copiloto de IA. Ver `README.md` para el alcance funcional completo (en español). Principio rector del producto: **toda salida de IA es un borrador que el médico debe revisar y aprobar**; la IA nunca diagnostica, receta ni guarda información final de forma autónoma.
 
+Es un **fork de Platform Core** (la base administrativa reutilizable: auth/RBAC, motor de query, contrato de recursos, system_settings, auditoría, Taskiq, respaldos a Drive). Al mejorar una pieza GENÉRICA (no clínica ni del copiloto), considera retro-portarla a Platform Core para mantener ambos repos a la par; el mismo criterio aplica en sentido inverso.
+
 Monorepo con dos servicios independientes (distinto lenguaje y toolchain, sin código compartido):
 
 - `backend/` — Python. Modelos de datos (SQLAlchemy ORM) + migraciones Alembic sobre PostgreSQL. En estado baseline: solo capa de modelos y migración inicial, aún sin API/runtime.

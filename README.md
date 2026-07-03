@@ -9,6 +9,8 @@ Documento para definición de alcance, funciones incluidas, límites del proyect
 
 > Nota: La inteligencia artificial se plantea como herramienta de apoyo. Toda información clínica generada por IA deberá ser revisada y aprobada por el médico.
 
+> **Linaje:** MedicoPilot es un fork de **Platform Core** (base administrativa reutilizable y auto-hospedada: autenticación, RBAC, motor de query allowlist, contrato de recursos capability-driven, configuración del sistema, auditoría, Taskiq y respaldos a Google Drive). Sobre esa base, MedicoPilot añade el dominio clínico, el copiloto de IA y el `model-gateway`. Las mejoras genéricas (no clínicas) deben considerarse para retro-portarse a Platform Core, y viceversa, para mantener ambas plataformas a la par.
+
 ---
 
 ## Contenido
