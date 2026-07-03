@@ -116,6 +116,7 @@ import { listAgentMemories } from "@/core/agent-memories/agent-memories-client";
 import { getAgentPersona } from "@/core/agent-persona/agent-persona-client";
 import { buildDoctorProfileMessage } from "@/core/agent/doctor-profile";
 import { getMyDoctor } from "@/core/agent/doctor-profile-client";
+import { buildContextBreakdown, type ContextBreakdown } from "@/core/agent/context-breakdown";
 import { composeLeadingLayers, type PersonaFields } from "@/core/agent/persona";
 import { buildPatientSummaryMessage } from "@/core/agent/patient-summary";
 import { getPatientSummary } from "@/core/agent/patient-summary-client";
@@ -426,6 +427,10 @@ export function CopilotPanel({
   // ``usage`` se actualiza con la estimación local al enviar y con el usage REPORTADO por el
   // gateway al completar el turno. ``compaction`` describe la última compactación (si la hubo).
   const [contextStats, setContextStats] = useState<ContextUsage | null>(null);
+  // Desglose del contexto (capas líder + esquema de tools) para el diálogo; se recalcula en cada
+  // turno con lo REALMENTE enviado. Excluye el chat (los mensajes viven en su propia interfaz).
+  const [contextBreakdown, setContextBreakdown] = useState<ContextBreakdown | null>(null);
+  const [contextBreakdownOpen, setContextBreakdownOpen] = useState(false);
   const [compaction, setCompaction] = useState<{ dropped: number; preservedIds: string[] } | null>(
     null,
   );
@@ -1430,6 +1435,19 @@ export function CopilotPanel({
     const usedEstimate =
       overhead + result.messages.reduce((sum, message) => sum + estimateTokens(messageText(message)), 0);
     setContextStats(contextUsage(usedEstimate, budgetRef.current.window, "estimado"));
+    // Desglose para el diálogo: mismas entradas que las capas líder + el esquema de tools, con lo
+    // REALMENTE enviado en este turno. El chat (result.messages) se excluye a propósito.
+    setContextBreakdown(
+      buildContextBreakdown({
+        persona: personaRef.current,
+        doctorProfile: doctorProfileMsgRef.current,
+        activeContext: activeContextMessage,
+        patientSummary: patientSummaryMsgRef.current,
+        memory: recall,
+        toolsWire,
+        budgetWindow: budgetRef.current.window,
+      }),
+    );
     setCompaction(
       result.compacted ? { dropped: result.droppedSegments, preservedIds: result.preservedIds } : null,
     );
@@ -2260,9 +2278,13 @@ export function CopilotPanel({
             </div>
 
             {contextStats && !contextStats.unknownBudget && (
-              <div
-                title={`Contexto: ${contextStats.used.toLocaleString("es")} / ${contextStats.budget.toLocaleString("es")} tokens · ${contextStats.source}`}
-                className="flex items-center gap-2 rounded-[11px] border border-[var(--border)] bg-[var(--panel)] px-2.5 py-1.5"
+              <button
+                type="button"
+                onClick={() => contextBreakdown && setContextBreakdownOpen(true)}
+                disabled={!contextBreakdown}
+                title={`Contexto: ${contextStats.used.toLocaleString("es")} / ${contextStats.budget.toLocaleString("es")} tokens · ${contextStats.source}${contextBreakdown ? " · clic para ver el desglose" : ""}`}
+                aria-label="Ver el desglose del contexto del copiloto"
+                className="flex items-center gap-2 rounded-[11px] border border-[var(--border)] bg-[var(--panel)] px-2.5 py-1.5 transition enabled:hover:border-[var(--accent-bd)] enabled:hover:bg-[var(--accent-dim)] disabled:cursor-default"
               >
                 <svg
                   width="14"
@@ -2301,7 +2323,7 @@ export function CopilotPanel({
                 <span className="whitespace-nowrap text-[11.5px] font-medium text-[var(--tx2)]">
                   {contextStats.percent}%
                 </span>
-              </div>
+              </button>
             )}
 
               <div className="flex-1" />
@@ -2513,6 +2535,15 @@ export function CopilotPanel({
         />
       )}
 
+      {/* Modal del DESGLOSE del contexto: qué recibe el agente y cuánto ocupa cada elemento. */}
+      {contextBreakdownOpen && contextBreakdown && (
+        <ContextBreakdownModal
+          breakdown={contextBreakdown}
+          stats={contextStats}
+          onClose={() => setContextBreakdownOpen(false)}
+        />
+      )}
+
       {/* Confirmación de "Reiniciar desde aquí" (acción destructiva sobre el historial de chat):
           diálogo accesible del diseño, nunca window.confirm. */}
       {confirmResetFrom && (
@@ -2620,6 +2651,143 @@ function SafetyModal({
 
           <ToolCatalogPanel entries={toolCatalog} />
           {usageStats && <CostUsageBar stats={usageStats} />}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Paleta de segmentos del desglose de contexto (una por elemento).
+const CONTEXT_SEG_COLORS = [
+  "var(--accent)", "var(--ok)", "var(--warn)", "var(--accent-bd)",
+  "#0ea5e9", "#a855f7", "#ec4899", "#64748b",
+];
+
+/**
+ * Modal del DESGLOSE del contexto: lista cada instrucción/dato que recibe el agente (menos el chat,
+ * que vive en su interfaz), con su contenido y el % aproximado de la ventana del modelo que ocupa.
+ */
+function ContextBreakdownModal({
+  breakdown,
+  stats,
+  onClose,
+}: Readonly<{ breakdown: ContextBreakdown; stats: ContextUsage | null; onClose: () => void }>) {
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const window_ = breakdown.budgetWindow;
+  const fracOf = (tokens: number): number => (window_ > 0 ? (tokens / window_) * 100 : 0);
+  const fmt = (n: number): string => n.toLocaleString("es");
+
+  return (
+    <div
+      onClick={onClose}
+      className="fixed inset-0 z-[130] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Desglose del contexto del copiloto"
+        onClick={(event) => event.stopPropagation()}
+        className="flex max-h-[86vh] w-full max-w-[640px] flex-col overflow-hidden rounded-[22px] border border-[var(--border2)] bg-[var(--panel)] shadow-[var(--soft2)]"
+      >
+        <div className="flex items-start gap-3 border-b border-[var(--border)] px-5 py-4">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[11px] bg-[var(--accent-dim)] text-[var(--accent-tx)]">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M3 12h4l3 8 4-16 3 8h4" />
+            </svg>
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="text-[16px] font-semibold tracking-tight text-[var(--tx)]">
+              Contexto del copiloto
+            </div>
+            <div className="mt-0.5 text-[12.5px] text-[var(--tx3)]">
+              Qué instrucciones e información recibe el agente y cuánto ocupan (el chat no se incluye:
+              vive en la conversación)
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Cerrar"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[9px] border border-[var(--border)] bg-[var(--panel)] text-[var(--tx2)] transition hover:bg-[var(--panel2)] hover:text-[var(--tx)]"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="flex-1 space-y-4 overflow-y-auto p-5">
+          {/* Resumen + barra apilada de composición sobre la ventana del modelo. */}
+          <div className="rounded-[14px] border border-[var(--border2)] bg-[var(--panel2)] p-3.5">
+            <div className="mb-2 flex items-baseline justify-between gap-2 text-[13px]">
+              <span className="font-semibold text-[var(--tx)]">
+                Instrucciones + datos: {breakdown.totalPercent}% de la ventana
+              </span>
+              <span className="text-[12px] text-[var(--tx3)]">
+                ~{fmt(breakdown.totalTokens)} de {fmt(window_)} tokens
+              </span>
+            </div>
+            <div className="flex h-3 w-full overflow-hidden rounded-full bg-[var(--border2)]" role="img" aria-label="Composición del contexto">
+              {breakdown.items.map((item, index) => (
+                <span
+                  key={item.key}
+                  style={{ width: `${fracOf(item.tokens)}%`, background: CONTEXT_SEG_COLORS[index % CONTEXT_SEG_COLORS.length] }}
+                  title={`${item.label}: ${item.percent}%`}
+                />
+              ))}
+            </div>
+            <div className="mt-2 text-[11.5px] text-[var(--tx3)]">
+              El resto de la ventana queda para el chat y el espacio libre. Los % son aproximados
+              (estimación de tokens, no el conteo exacto del proveedor).
+            </div>
+          </div>
+
+          {/* Un elemento por capa: encabezado con % y contenido colapsable. */}
+          <div className="flex flex-col gap-2">
+            {breakdown.items.map((item, index) => (
+              <details key={item.key} className="group rounded-[12px] border border-[var(--border2)] bg-[var(--panel)]">
+                <summary className="flex cursor-pointer list-none items-center gap-3 px-3.5 py-3">
+                  <span
+                    className="h-2.5 w-2.5 shrink-0 rounded-full"
+                    style={{ background: CONTEXT_SEG_COLORS[index % CONTEXT_SEG_COLORS.length] }}
+                    aria-hidden="true"
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-center gap-2">
+                      <span className="truncate text-[13.5px] font-semibold text-[var(--tx)]">{item.label}</span>
+                      <span className={`shrink-0 rounded-[6px] px-1.5 py-0.5 text-[10px] font-medium ${item.trusted ? "bg-[var(--accent-dim)] text-[var(--accent-tx)]" : "bg-[var(--border2)] text-[var(--tx2)]"}`}>
+                        {item.trusted ? "instrucción" : "dato"}
+                      </span>
+                    </span>
+                    <span className="mt-0.5 block truncate text-[11.5px] text-[var(--tx3)]">{item.description}</span>
+                  </span>
+                  <span className="shrink-0 text-right">
+                    <span className="block text-[13px] font-semibold tabular-nums text-[var(--tx)]">{item.percent}%</span>
+                    <span className="block text-[11px] tabular-nums text-[var(--tx3)]">~{fmt(item.tokens)} tok</span>
+                  </span>
+                  <svg className="shrink-0 text-[var(--tx3)] transition group-open:rotate-90" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M9 6l6 6-6 6" />
+                  </svg>
+                </summary>
+                <pre className="max-h-[240px] overflow-auto whitespace-pre-wrap break-words border-t border-[var(--border)] px-3.5 py-3 text-[12px] leading-relaxed text-[var(--tx2)]">
+                  {item.content}
+                </pre>
+              </details>
+            ))}
+          </div>
+
+          {stats && (
+            <div className="text-[11.5px] text-[var(--tx3)]">
+              Uso total del contexto (con el chat): {stats.percent}% · {fmt(stats.used)} / {fmt(stats.budget)} tokens · {stats.source}.
+            </div>
+          )}
         </div>
       </div>
     </div>
