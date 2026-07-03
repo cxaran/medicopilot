@@ -249,6 +249,9 @@ export function ChatShell({
   // si es otro chat, sólo el backend (al abrirlo se sembrará ya vacío).
   const [resetGeneration, setResetGeneration] = useState(0);
   const lastResetIdRef = useRef(0);
+  // Aviso de error NO bloqueante del shell (p. ej. reinicio rechazado por el backend): banner
+  // con el diseño en vez de window.alert; se cierra manualmente o al disparar otro aviso.
+  const [shellNotice, setShellNotice] = useState<string | null>(null);
   useEffect(() => {
     const fresh = chatResets.filter((request) => request.id > lastResetIdRef.current);
     if (fresh.length === 0) return;
@@ -269,7 +272,7 @@ export function ChatShell({
             // El backend rechazó el reinicio (p. ej. sin ``conversations:reset``): el transcript
             // local ya quedó vacío, pero el historial persistido reaparecería al recargar. Un
             // fallo aquí NO es degradación limpia; se avisa en vez de fingir éxito.
-            window.alert(
+            setShellNotice(
               "No se pudo reiniciar la conversación en el servidor; el historial reaparecerá " +
                 "al recargar. Verifica que tu rol tenga el permiso 'conversations:reset'.",
             );
@@ -289,7 +292,7 @@ export function ChatShell({
             // Igual que en el chat activo: un rechazo del backend dejaría el historial intacto
             // (reaparecería al abrir ese chat); se avisa en vez de fingir éxito. Si no hay
             // conversación persistida, ``target`` es undefined y no se llega aquí.
-            window.alert(
+            setShellNotice(
               "No se pudo reiniciar la conversación en el servidor. Verifica que tu rol tenga " +
                 "el permiso 'conversations:reset'.",
             );
@@ -304,6 +307,36 @@ export function ChatShell({
     // sólo el contenido del chat activo. En el inicio (agente global) la superficie de aterrizaje es
     // el dashboard de resumen; debajo, el chat global. En un paciente, su expediente + su chat.
     <div className="flex min-h-full flex-col gap-5">
+      {/* Aviso de error del shell (reemplaza window.alert): flotante, con el diseño, role=alert. */}
+      {shellNotice && (
+        <div
+          role="alert"
+          className="fixed bottom-4 left-1/2 z-50 flex w-full max-w-[520px] -translate-x-1/2 items-start gap-3 rounded-[14px] border border-[var(--border)] bg-[var(--elev)] px-4 py-3 shadow-[var(--soft2)]"
+        >
+          <span className="min-w-0 flex-1 text-[13px] leading-relaxed text-[var(--danger)]">
+            {shellNotice}
+          </span>
+          <button
+            type="button"
+            onClick={() => setShellNotice(null)}
+            aria-label="Cerrar aviso"
+            className="shrink-0 rounded-full p-1 text-[var(--tx3)] transition hover:bg-[var(--panel2)] hover:text-[var(--tx)]"
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              aria-hidden="true"
+            >
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          </button>
+        </div>
+      )}
       {/* Aterrizaje chat-first: en el agente global, el dashboard se muestra SÓLO con el chat vacío;
           al primer mensaje el chat ocupa el área (fiel a la transición del diseño). */}
       {activeContext === null && dashboard && transcriptLength === 0 && (

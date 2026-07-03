@@ -5,6 +5,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type React
 import { AnimatedOrb } from "@/components/ui/AnimatedOrb";
 import { Markdown } from "@/components/copilot/Markdown";
 import { MessageActions } from "@/components/copilot/MessageActions";
+import { ResourceActionConfirmDialog } from "@/components/resources/ResourceActionConfirmDialog";
 import { ProviderIcon } from "@/components/copilot/ProviderIcon";
 import { avatarColor } from "@/components/ui/avatar-color";
 import { Badge, type BadgeTone } from "@/components/ui/Badge";
@@ -114,12 +115,14 @@ import {
 import { listAgentMemories } from "@/core/agent-memories/agent-memories-client";
 import { getAgentPersona } from "@/core/agent-persona/agent-persona-client";
 import { composeLeadingLayers, type PersonaFields } from "@/core/agent/persona";
+import { buildPatientSummaryMessage } from "@/core/agent/patient-summary";
+import { getPatientSummary } from "@/core/agent/patient-summary-client";
 import { browserApi } from "@/core/api/browser-client";
 import type { ResourceCatalog, SessionUser } from "@/core/api/contracts";
 import { isUiSpec, type UiSpec } from "@/core/agent/tools/ui-spec";
 import { GeneratedUi } from "@/components/copilot/GeneratedUi";
 import { parseComposerPalette, type ComposerCommand } from "@/core/chat-shell/composer-commands";
-import type { PersistedToolCall } from "@/core/chat-shell/chat-persistence";
+import { approvedPlanNotesOf, type PersistedToolCall } from "@/core/chat-shell/chat-persistence";
 import { useChatNavOptional } from "@/components/chat-shell/ChatNavProvider";
 import { deriveResourceTools } from "@/core/agent/tools/contract-tools";
 
@@ -431,7 +434,7 @@ export function CopilotPanel({
   // verbatim; las viejas, un bloque consolidado de identificadores): el costo de contexto de las
   // aprobaciones queda acotado aunque el hilo acumule cientos.
   const [seededPlanNotes] = useState<string[]>(() =>
-    (initialMessages ?? []).flatMap((message) => message.approvedPlanNotes ?? []),
+    approvedPlanNotesOf(initialMessages ?? []),
   );
   const approvedPlanNotesRef = useRef<string[]>(seededPlanNotes);
   // Notas de plan del turno EN VUELO, para anclarlas al mensaje del asistente al cerrar (y que
@@ -649,6 +652,34 @@ export function CopilotPanel({
     activeContextRef.current = activeContext;
   }, [activeContext]);
 
+  // RESUMEN DEL PACIENTE (contexto): mensaje de cable ya formateado del expediente del paciente
+  // activo. Se refresca al FIJAR el paciente y cuando el expediente CAMBIA (tras una escritura
+  // aprobada), NO en cada turno: entre refrescos el bloque es idéntico y el prefijo cacheado del
+  // proveedor sigue caliente. El fetch reusa datos del servidor (no recarga el historial local).
+  const patientSummaryMsgRef = useRef<WireMessage | null>(null);
+  const refreshPatientSummary = async (): Promise<void> => {
+    const patientId = activeContextRef.current?.patientId ?? null;
+    if (!patientId) {
+      patientSummaryMsgRef.current = null;
+      return;
+    }
+    try {
+      const summary = await getPatientSummary(patientId);
+      // El paciente pudo cambiar mientras se resolvía el fetch: sólo aplica si sigue vigente.
+      if (activeContextRef.current?.patientId === patientId) {
+        patientSummaryMsgRef.current = buildPatientSummaryMessage(summary);
+      }
+    } catch {
+      // No bloquea el turno: sin resumen simplemente no se inyecta ese bloque.
+      patientSummaryMsgRef.current = null;
+    }
+  };
+  // Al cambiar el paciente activo se refresca (o se limpia si no hay paciente).
+  useEffect(() => {
+    void refreshPatientSummary();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeContext?.patientId]);
+
   // Sugerencias de inicio DERIVADAS de las tools disponibles (RBAC) + muestreo aleatorio; si aún
   // no hay catálogo o ninguna elegible, caen a la lista fija. Derivación en render (useMemo), no
   // estado+efecto: con el catálogo vacío (SSR y primer render del cliente) ninguna sugerencia es
@@ -801,10 +832,20 @@ export function CopilotPanel({
           turnPlanNotesRef.current.delete(next.turnId);
           turnToolNotesRef.current.delete(next.turnId);
         }
+        // Truncamiento (Fix): el gateway avisa cuando la respuesta quedó INCOMPLETA (corte por
+        // longitud o stream cortado a media palabra). Se anexa un aviso claro para que el médico
+        // sepa que el mensaje no está completo y pueda pedir continuar, en vez de persistir el
+        // fragmento como una respuesta normal (p. ej. "Permítame retomar. U").
+        const wasTruncated = event.type === "turn.completed" && event.truncated === true;
+        const completedText = wasTruncated
+          ? `${next.assistantText}${next.assistantText.trim() ? "\n\n" : ""}` +
+            "_⚠️ La respuesta quedó incompleta: la generación se interrumpió. Pídeme que continúe._"
+          : next.assistantText;
         // El mensaje ancla se crea si hay texto O contenido que conservar (specs de UI, notas de
-        // plan/herramientas o tool calls); MessageBubble no muestra burbuja vacía.
+        // plan/herramientas o tool calls) o si hubo truncamiento; MessageBubble no muestra burbuja
+        // vacía.
         if (
-          next.assistantText.trim() ||
+          completedText.trim() ||
           turnUiSpecs.length > 0 ||
           turnPlanNotes.length > 0 ||
           turnToolNotes.length > 0 ||
@@ -815,7 +856,7 @@ export function CopilotPanel({
             {
               id: nextId(),
               role: "assistant",
-              text: next.assistantText,
+              text: completedText,
               // Ancla las tool calls de este turno al mensaje (se muestran contraídas encima).
               ...(next.turnId ? { turnId: next.turnId } : {}),
               // Conserva el razonamiento (si lo hubo) para mostrarlo colapsado bajo la respuesta.
@@ -847,6 +888,13 @@ export function CopilotPanel({
         turnRef.current = initialTurnState();
         setTurn(turnRef.current);
       } else if (event.type === "turn.failed") {
+        // Un turno puede fallar DESPUÉS de haber aprobado y ejecutado una escritura P1 (p. ej. el
+        // proveedor corta al reanudar). Sus notas de plan aprobado se anclan al mensaje de fallo
+        // (payload.approved_plans) para no perder, al recargar, el rastro del id creado; en vivo ya
+        // se conservan vía approvedPlanNotesRef. Mismo destino que sus tool notes/calls.
+        const failedPlanNotes = next.turnId
+          ? (turnPlanNotesRef.current.get(next.turnId) ?? [])
+          : [];
         // Las tools del turno fallido SÍ corrieron: sus notas se anclan al mensaje de fallo
         // (mismo destino que sus tool calls) para no perder el rastro.
         const failedToolNotes = next.turnId
@@ -861,6 +909,7 @@ export function CopilotPanel({
             )
           : [];
         if (next.turnId) {
+          turnPlanNotesRef.current.delete(next.turnId);
           turnToolNotesRef.current.delete(next.turnId);
         }
         setMessages((prev) => [
@@ -872,6 +921,7 @@ export function CopilotPanel({
             isError: true,
             // También el mensaje de fallo ancla las tool calls del turno (si las hubo).
             ...(next.turnId ? { turnId: next.turnId } : {}),
+            ...(failedPlanNotes.length > 0 ? { approvedPlanNotes: failedPlanNotes } : {}),
             ...(failedToolNotes.length > 0 ? { toolNotes: failedToolNotes } : {}),
             ...(failedToolCalls.length > 0 ? { toolCalls: failedToolCalls } : {}),
           },
@@ -1323,12 +1373,18 @@ export function CopilotPanel({
     );
     const toolsWire = toWireToolDefinitions(declared);
 
-    // PERSONA (P4) + CONTEXTO ACTIVO: capas LÍDER en orden fijo
-    // [SEGURIDAD] -> [PERSONA] -> [CONTEXTO ACTIVO] -> [MEMORIAS]. La seguridad es fija (código),
-    // SIEMPRE primera; el contexto activo (ámbito del paciente) es instrucción de confianza y va
-    // antes de las memorias (datos no confiables). La conversación (compactada) va al final.
+    // PERSONA (P4) + CONTEXTO ACTIVO + RESUMEN DEL PACIENTE: capas LÍDER en orden fijo
+    // [SEGURIDAD] -> [OPERATIVA] -> [PERSONA] -> [CONTEXTO ACTIVO] -> [RESUMEN DEL PACIENTE] ->
+    // [MEMORIAS] (ver composeLeadingLayers). La seguridad es fija (código), SIEMPRE primera; el
+    // contexto activo (ámbito del paciente) y el resumen del expediente son de confianza y van antes
+    // de las memorias (datos no confiables). La conversación (compactada) va al final.
     const activeContextMessage = buildActiveContextMessage(activeContextRef.current);
-    const leadingLayers = composeLeadingLayers(personaRef.current, recall, activeContextMessage);
+    const leadingLayers = composeLeadingLayers(
+      personaRef.current,
+      recall,
+      activeContextMessage,
+      patientSummaryMsgRef.current,
+    );
 
     // CONTEXTO (P3): el overhead fijo (esquema de tools + capas líder) no se compacta; los
     // planes APROBADOS se conservan verbatim y la charla vieja se resume si excede el
@@ -1450,7 +1506,12 @@ export function CopilotPanel({
   };
 
   // REINICIAR DESDE AQUÍ (acción de cualquier mensaje): recorta este mensaje y todo lo posterior;
-  // la conversación continúa desde el mensaje anterior. Pide confirmación (acción destructiva).
+  // la conversación continúa desde el mensaje anterior. Pide confirmación con el diálogo accesible
+  // del diseño (acción destructiva; nada de window.confirm).
+  const [confirmResetFrom, setConfirmResetFrom] = useState<{
+    messageId: string;
+    removedCount: number;
+  } | null>(null);
   const resetFromMessage = (messageId: string): void => {
     if (isBusy) {
       return;
@@ -1460,19 +1521,23 @@ export function CopilotPanel({
     if (idx < 0) {
       return;
     }
-    const removedCount = msgs.length - idx;
-    if (
-      !window.confirm(
-        `¿Reiniciar la conversación desde este punto? Se eliminarán ${removedCount} mensaje(s) ` +
-          "del historial de chat (los datos del expediente no se tocan).",
-      )
-    ) {
+    setConfirmResetFrom({ messageId, removedCount: msgs.length - idx });
+  };
+  const confirmedResetFrom = (): void => {
+    const target = confirmResetFrom;
+    setConfirmResetFrom(null);
+    if (!target || isBusy) {
+      return;
+    }
+    const msgs = messagesRef.current;
+    const idx = msgs.findIndex((message) => message.id === target.messageId);
+    if (idx < 0) {
       return;
     }
     const base = msgs.slice(0, idx);
     messagesRef.current = base;
     setMessages(base);
-    onTruncateFrom?.(messageId);
+    onTruncateFrom?.(target.messageId);
   };
 
   // Mantiene fresca la vía de envío para la cola del dictado (sendUserTurn cambia cada render).
@@ -1564,6 +1629,9 @@ export function CopilotPanel({
         // persiste (payload.approved_plans) para resembrar los preserve al recargar.
         const turnNotes = turnPlanNotesRef.current.get(pending.turnId) ?? [];
         turnPlanNotesRef.current.set(pending.turnId, [...turnNotes, note]);
+        // El expediente CAMBIÓ (escritura aprobada): marca el resumen como sucio y lo refresca en
+        // segundo plano. Al próximo turno ya va el resumen fresco; entre tanto no se recarga nada.
+        void refreshPatientSummary();
       }
       clientRef.current?.sendToolResult(pending.turnId, callId, result);
     });
@@ -2419,6 +2487,26 @@ export function CopilotPanel({
           onClose={() => setSafetyOpen(false)}
           toolCatalog={toolCatalog}
           usageStats={usageStats}
+        />
+      )}
+
+      {/* Confirmación de "Reiniciar desde aquí" (acción destructiva sobre el historial de chat):
+          diálogo accesible del diseño, nunca window.confirm. */}
+      {confirmResetFrom && (
+        <ResourceActionConfirmDialog
+          confirmation={{
+            required: true,
+            title: "Reiniciar desde este punto",
+            message:
+              `Se eliminarán ${confirmResetFrom.removedCount} mensaje(s) del historial de este ` +
+              "chat de forma permanente. Los datos del expediente no se tocan.",
+            confirm_label: "Reiniciar",
+            destructive: true,
+          }}
+          pending={false}
+          error={null}
+          onConfirm={() => confirmedResetFrom()}
+          onCancel={() => setConfirmResetFrom(null)}
         />
       )}
 

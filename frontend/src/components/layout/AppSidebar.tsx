@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 
 import { AccountMenu } from "@/components/layout/AccountMenu";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
+import { ResourceActionConfirmDialog } from "@/components/resources/ResourceActionConfirmDialog";
 import { AnimatedOrb } from "@/components/ui/AnimatedOrb";
 import { avatarColor, BRAND_AVATAR_GRADIENT } from "@/components/ui/avatar-color";
 import { useChatNav } from "@/components/chat-shell/ChatNavProvider";
@@ -408,17 +409,14 @@ export function AppSidebar({
   const [openMenuKey, setOpenMenuKey] = useState<string | null>(null);
 
   // Reinicio con confirmación (acción destructiva sobre el historial de chat, nunca sobre datos
-  // clínicos). Declara la intención en ChatNavProvider; el ChatShell la resuelve.
+  // clínicos): diálogo accesible del diseño, nunca window.confirm. Confirmar declara la intención
+  // en ChatNavProvider; el ChatShell la resuelve.
+  const [pendingReset, setPendingReset] = useState<{
+    patientId: string | null;
+    label: string;
+  } | null>(null);
   const confirmChatReset = (patientId: string | null, label: string): void => {
-    if (
-      !window.confirm(
-        `¿Reiniciar la conversación de ${label}? Se eliminará todo el historial de este chat ` +
-          "(los datos del expediente no se tocan).",
-      )
-    ) {
-      return;
-    }
-    requestChatReset(patientId);
+    setPendingReset({ patientId, label });
   };
 
   const available = new Set(availableResources);
@@ -628,6 +626,32 @@ export function AppSidebar({
           <AccountMenu />
         </div>
       </div>
+
+      {/* Confirmación de "Reiniciar chat" (acción destructiva sobre el historial, nunca sobre
+          datos clínicos): diálogo accesible del diseño. */}
+      {pendingReset && (
+        <ResourceActionConfirmDialog
+          confirmation={{
+            required: true,
+            title: "Reiniciar conversación",
+            message:
+              `Se eliminará de forma permanente todo el historial del chat de ` +
+              `${pendingReset.label}. Los datos del expediente no se tocan.`,
+            confirm_label: "Reiniciar",
+            destructive: true,
+          }}
+          pending={false}
+          error={null}
+          onConfirm={() => {
+            const target = pendingReset;
+            setPendingReset(null);
+            if (target) {
+              requestChatReset(target.patientId);
+            }
+          }}
+          onCancel={() => setPendingReset(null)}
+        />
+      )}
     </aside>
   );
 }
