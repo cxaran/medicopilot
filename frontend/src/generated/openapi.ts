@@ -3509,6 +3509,18 @@ export interface components {
             permission_groups: components["schemas"]["BootstrapPermissionGroupRead"][];
             limits: components["schemas"]["BootstrapLimitsRead"];
         };
+        /**
+         * BootstrapDoctorProfile
+         * @description Perfil de médico del usuario inicial (instalación admin=médico).
+         */
+        BootstrapDoctorProfile: {
+            /** Professional Name */
+            professional_name: string;
+            /** Professional License Number */
+            professional_license_number: string;
+            /** Specialty */
+            specialty?: string | null;
+        };
         /** BootstrapInitialUser */
         BootstrapInitialUser: {
             /** Name */
@@ -3553,6 +3565,8 @@ export interface components {
              * @description Nombre del consultorio/institución (opcional).
              */
             institution_name?: string | null;
+            /** @description Perfil de médico del usuario inicial (opcional): crea su registro clínico para poder atender consultas desde el primer día. */
+            doctor_profile?: components["schemas"]["BootstrapDoctorProfile"] | null;
         };
         /** BootstrapLimitsRead */
         BootstrapLimitsRead: {

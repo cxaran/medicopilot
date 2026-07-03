@@ -1434,6 +1434,7 @@ RESOURCE_REGISTRY: tuple[ResourceDefinition, ...] = (
         actions=(
             ActionDef(
                 name="connect_drive",
+                fixed_body={},
                 label="Conectar Google Drive",
                 method=HttpMethod.POST,
                 url_template="/api/v1/backup-settings/{id}/connect-drive",
@@ -1443,6 +1444,7 @@ RESOURCE_REGISTRY: tuple[ResourceDefinition, ...] = (
             ),
             ActionDef(
                 name="disconnect_drive",
+                fixed_body={},
                 label="Desconectar Google Drive",
                 method=HttpMethod.POST,
                 url_template="/api/v1/backup-settings/{id}/disconnect-drive",
@@ -1461,6 +1463,7 @@ RESOURCE_REGISTRY: tuple[ResourceDefinition, ...] = (
             ),
             ActionDef(
                 name="generate_encryption_key",
+                fixed_body={},
                 label="Generar clave de cifrado",
                 method=HttpMethod.POST,
                 url_template="/api/v1/backup-settings/{id}/generate-encryption-key",
@@ -1480,6 +1483,7 @@ RESOURCE_REGISTRY: tuple[ResourceDefinition, ...] = (
             ),
             ActionDef(
                 name="run_now",
+                fixed_body={},
                 label="Respaldar ahora",
                 method=HttpMethod.POST,
                 url_template="/api/v1/backup-settings/{id}/run-now",

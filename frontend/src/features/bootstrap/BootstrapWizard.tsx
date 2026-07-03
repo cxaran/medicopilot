@@ -337,6 +337,45 @@ function RolesStep({
           apagado en producción.
         </p>
       </section>
+      <section className="rounded-2xl border border-[var(--border2)] bg-[var(--bg2)] p-4">
+        <label className="flex items-center gap-3 text-lg font-semibold text-[var(--tx)]">
+          <input
+            type="checkbox"
+            checked={draft.is_doctor}
+            onChange={(event) => setDraft({ ...draft, is_doctor: event.target.checked })}
+            className="h-4 w-4 accent-[var(--accent)]"
+          />
+          Yo también atenderé consultas (soy el médico)
+        </label>
+        <p className="mt-1 text-sm text-[var(--tx2)]">
+          Crea tu perfil clínico para poder registrar consultas, citas y recetas desde
+          el primer día. Si administras para otros médicos, desmárcalo y regístralos
+          después en Administración → Médicos.
+        </p>
+        {draft.is_doctor ? (
+          <div className="mt-4 grid gap-4 sm:grid-cols-3">
+            <TextField
+              id="doctor-name"
+              label="Nombre profesional"
+              value={draft.doctor_professional_name}
+              onChange={(value) => setDraft({ ...draft, doctor_professional_name: value })}
+            />
+            <TextField
+              id="doctor-license"
+              label="Cédula profesional"
+              value={draft.doctor_license_number}
+              onChange={(value) => setDraft({ ...draft, doctor_license_number: value })}
+            />
+            <TextField
+              id="doctor-specialty"
+              label="Especialidad (opcional)"
+              value={draft.doctor_specialty}
+              required={false}
+              onChange={(value) => setDraft({ ...draft, doctor_specialty: value })}
+            />
+          </div>
+        ) : null}
+      </section>
       <section className="space-y-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>

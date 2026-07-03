@@ -175,7 +175,7 @@ class BootstrapRoutesTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertEqual(body["limits"], {"max_additional_roles": 10})
-        self.assertEqual([group["name"] for group in body["permission_groups"]], ["users", "roles", "doctors", "medication_templates", "patients", "patient_clinical_items", "patient_history_items", "patient_immunizations", "medical_history_versions", "consultations", "consultation_diagnoses", "conversations", "messages", "vital_signs", "lab_results", "clinical_events", "study_orders", "clinical_tasks", "prescriptions", "appointments", "clinical_documents", "population", "reports", "institutional_settings", "clinical_codes", "clinical_scales", "scale_results", "clinical_notes", "quality_checks", "medication_reconciliation", "follow_ups", "audit_events", "permissions"])
+        self.assertEqual([group["name"] for group in body["permission_groups"]], ["users", "roles", "doctors", "medication_templates", "patients", "patient_clinical_items", "patient_history_items", "patient_immunizations", "medical_history_versions", "consultations", "consultation_diagnoses", "conversations", "messages", "vital_signs", "lab_results", "clinical_events", "study_orders", "system_settings", "clinical_tasks", "prescriptions", "appointments", "clinical_documents", "population", "reports", "institutional_settings", "clinical_codes", "clinical_scales", "scale_results", "clinical_notes", "quality_checks", "medication_reconciliation", "follow_ups", "audit_events", "backups", "permissions"])
         self.assertIn("users:read", {item["access"] for group in body["permission_groups"] for item in group["permissions"]})
 
         with Session(self.engine) as session:
@@ -195,6 +195,7 @@ class BootstrapRoutesTest(unittest.TestCase):
 
         with Session(self.engine) as session:
             setup = session.get(PlatformSetup, 1)
+            assert setup is not None
             users = session.exec(select(User)).all()
             roles = session.exec(select(Role)).all()
             user_roles = session.exec(select(UserRole)).all()
@@ -206,7 +207,9 @@ class BootstrapRoutesTest(unittest.TestCase):
         self.assertEqual(setup.completion_origin, "bootstrap")
         self.assertEqual(len(users), 1)
         self.assertNotEqual(users[0].hashed_password, "admin-password-123")
-        self.assertEqual(len(roles), 2)
+        # 3 roles: sistema + adicional del payload + el rol clínico "Médico" que el
+        # bootstrap siembra siempre.
+        self.assertEqual(len(roles), 3)
         self.assertEqual(len(user_roles), 2)
         self.assertEqual(set(system_permissions), declared_permissions())
 
@@ -250,17 +253,32 @@ class BootstrapRoutesTest(unittest.TestCase):
         self.assertEqual(second.status_code, 409)
 
     def test_production_requires_valid_bootstrap_setup_token(self) -> None:
-        with self.assertRaises(ValidationError):
-            Settings(environment="production", **BASE_SETTINGS)
-        with self.assertRaises(ValidationError):
-            Settings(environment="production", bootstrap_setup_token="short", **BASE_SETTINGS)
+        # BaseSettings TAMBIÉN lee variables del proceso: sin aislar, un entorno de
+        # desarrollo con BOOTSTRAP_SETUP_TOKEN definido hacía pasar el constructor
+        # y el assertRaises nunca disparaba (fallo histórico de esta suite).
+        from unittest import mock
 
-        settings = Settings(
-            environment="production",
-            bootstrap_setup_token="valid-bootstrap-token-123",
-            **BASE_SETTINGS,
-        )
-        self.assertEqual(settings.bootstrap_setup_token.get_secret_value(), "valid-bootstrap-token-123")
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("BOOTSTRAP_SETUP_TOKEN", None)
+            with self.assertRaises(ValidationError):
+                Settings(environment="production", **BASE_SETTINGS)
+            with self.assertRaises(ValidationError):
+                Settings(
+                    environment="production",
+                    bootstrap_setup_token=SecretStr("short"),
+                    **BASE_SETTINGS,
+                )
+
+            configured = Settings(
+                environment="production",
+                bootstrap_setup_token=SecretStr("valid-bootstrap-token-123"),
+                **BASE_SETTINGS,
+            )
+            assert configured.bootstrap_setup_token is not None
+            self.assertEqual(
+                configured.bootstrap_setup_token.get_secret_value(),
+                "valid-bootstrap-token-123",
+            )
 
 
 if __name__ == "__main__":

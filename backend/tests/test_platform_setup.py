@@ -100,7 +100,11 @@ class PlatformSetupServiceTest(unittest.TestCase):
             system_accesses = session.exec(
                 select(RoleAccess.access).where(RoleAccess.role_id == result.system_admin_role.id)
             ).all()
-            extra_role = next(role for role in roles if role.id != result.system_admin_role.id)
+            extra_role = next(
+                role
+                for role in roles
+                if role.id != result.system_admin_role.id and role.name != "Médico"
+            )
             extra_accesses = session.exec(
                 select(RoleAccess.access).where(RoleAccess.role_id == extra_role.id)
             ).all()
@@ -114,10 +118,92 @@ class PlatformSetupServiceTest(unittest.TestCase):
         self.assertEqual(len(users), 1)
         self.assertTrue(users[0].is_active)
         self.assertTrue(verify_password(SecretStr("admin-password-123"), users[0].hashed_password))
-        self.assertEqual(len(roles), 2)
+        # 3 roles: el de sistema, el adicional del payload y el rol clínico
+        # "Médico" que el bootstrap SIEMBRA siempre (aunque nadie lo use el día 1).
+        self.assertEqual(len(roles), 3)
         self.assertEqual(set(system_accesses), permissions)
         self.assertEqual(extra_accesses, ["users:read"])
         self.assertEqual(len(user_roles), 2)
+
+    def test_initialize_seeds_clinical_role_with_curated_permissions(self) -> None:
+        from backend.app.security.role_profiles import (
+            CLINICAL_ROLE_NAME,
+            clinical_role_permissions,
+        )
+
+        engine = self._engine()
+        with Session(engine) as session:
+            initialize_platform(session, self._payload())
+            session.commit()
+            clinical = session.exec(
+                select(Role).where(Role.name == CLINICAL_ROLE_NAME)
+            ).one()
+            accesses = session.exec(
+                select(RoleAccess.access).where(RoleAccess.role_id == clinical.id)
+            ).all()
+            # Sembrado con el perfil curado y SIN asignarse al usuario inicial.
+            self.assertEqual(set(accesses), clinical_role_permissions())
+            assigned = session.exec(
+                select(UserRole).where(UserRole.role_id == clinical.id)
+            ).all()
+            self.assertEqual(assigned, [])
+
+    def test_initialize_respects_payload_role_named_medico(self) -> None:
+        payload = self._payload()
+        payload = BootstrapInitializeInput(
+            user=payload.user,
+            system_admin_role=payload.system_admin_role,
+            additional_roles=[
+                BootstrapAdditionalRoleInput(
+                    name="Médico",
+                    description="Rol clínico propio del asistente",
+                    permissions=["patients:read"],
+                    assign_to_initial_user=False,
+                )
+            ],
+        )
+        engine = self._engine()
+        with Session(engine) as session:
+            initialize_platform(session, payload)
+            session.commit()
+            medicos = session.exec(select(Role).where(Role.name == "Médico")).all()
+            # No se duplica: se respeta el rol definido en el asistente.
+            self.assertEqual(len(medicos), 1)
+
+    def test_initialize_creates_doctor_profile_for_initial_user(self) -> None:
+        from backend.app.bootstrap.service import BootstrapDoctorProfileInput
+        from backend.app.models.doctor import Doctor
+
+        payload = self._payload()
+        payload = BootstrapInitializeInput(
+            user=payload.user,
+            system_admin_role=payload.system_admin_role,
+            doctor_profile=BootstrapDoctorProfileInput(
+                professional_name="Dra. Admin Platform",
+                professional_license_number="1234567",
+                specialty="Medicina general",
+            ),
+        )
+        engine = self._engine()
+        with Session(engine) as session:
+            result = initialize_platform(session, payload)
+            session.commit()
+            doctor = session.exec(select(Doctor)).one()
+            # Tener todos los permisos NO te hace médico: la identidad clínica es
+            # esta fila, vinculada al usuario inicial.
+            self.assertEqual(doctor.user_id, result.user.id)
+            self.assertEqual(doctor.professional_name, "Dra. Admin Platform")
+            self.assertEqual(doctor.professional_license_number, "1234567")
+            self.assertEqual(doctor.created_by, result.user.id)
+
+    def test_initialize_without_doctor_profile_creates_no_doctor(self) -> None:
+        from backend.app.models.doctor import Doctor
+
+        engine = self._engine()
+        with Session(engine) as session:
+            initialize_platform(session, self._payload())
+            session.commit()
+            self.assertEqual(session.exec(select(Doctor)).all(), [])
 
     def test_sync_system_admin_role_adds_permissions_declared_after_setup(self) -> None:
         engine = self._engine()

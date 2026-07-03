@@ -34,6 +34,11 @@ export type BootstrapWizardDraft = {
   // Política inicial de plataforma (editable después en Configuración del sistema).
   public_registration_enabled: boolean;
   institution_name: string;
+  // Perfil de médico del usuario inicial (instalación admin=médico).
+  is_doctor: boolean;
+  doctor_professional_name: string;
+  doctor_license_number: string;
+  doctor_specialty: string;
 };
 
 export type WizardFieldErrors = Record<string, string[]>;
@@ -82,6 +87,10 @@ export function emptyBootstrapDraft(): BootstrapWizardDraft {
     additional_roles: [],
     public_registration_enabled: false,
     institution_name: "",
+    is_doctor: true,
+    doctor_professional_name: "",
+    doctor_license_number: "",
+    doctor_specialty: "",
   };
 }
 
@@ -108,6 +117,14 @@ export function buildBootstrapPayload(draft: BootstrapWizardDraft): BootstrapIni
       })),
     public_registration_enabled: draft.public_registration_enabled,
     institution_name: draft.institution_name.trim() || null,
+    doctor_profile:
+      draft.is_doctor && draft.doctor_professional_name.trim() && draft.doctor_license_number.trim()
+        ? {
+            professional_name: draft.doctor_professional_name.trim(),
+            professional_license_number: draft.doctor_license_number.trim(),
+            specialty: draft.doctor_specialty.trim() || null,
+          }
+        : null,
   };
 }
 

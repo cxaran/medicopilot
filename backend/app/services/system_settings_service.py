@@ -7,6 +7,7 @@ DERIVADO del estado real — nunca persiste progreso propio, así no puede
 desincronizarse de la configuración.
 """
 
+import uuid
 from dataclasses import dataclass
 from typing import Literal, Optional
 
@@ -15,6 +16,7 @@ from sqlmodel import Session, select
 from backend.app.core.settings import settings
 from backend.app.models.ai_provider_credential import AiProviderCredential
 from backend.app.models.backup import BackupSettings
+from backend.app.models.doctor import Doctor
 from backend.app.models.setup import PlatformSetup
 from backend.app.models.system_settings import SystemSettings
 
@@ -54,7 +56,9 @@ class ChecklistItem:
     detail: str
 
 
-def build_setup_checklist(session: Session) -> tuple[list[ChecklistItem], bool]:
+def build_setup_checklist(
+    session: Session, *, current_user_id: Optional[uuid.UUID] = None
+) -> tuple[list[ChecklistItem], bool]:
     """(ítems, dismissed). Cada estado se deriva de la configuración real."""
     system = get_system_settings(session)
 
@@ -147,6 +151,40 @@ def build_setup_checklist(session: Session) -> tuple[list[ChecklistItem], bool]:
                 if has_ai_credential
                 else "Agrega una credencial de proveedor en tu cuenta para usar el copiloto."
             ),
+        )
+    )
+
+    # Perfil de MÉDICO: los flujos clínicos (consultas/citas/finalizar) exigen una
+    # fila Doctor vinculada al usuario. En una instalación unipersonal admin=médico
+    # este es el requisito real de uso, no un permiso.
+    own_doctor = (
+        session.exec(
+            select(Doctor).where(
+                Doctor.user_id == current_user_id,
+                Doctor.deleted_at == None,  # noqa: E711
+            )
+        ).first()
+        if current_user_id is not None
+        else None
+    )
+    any_doctor = session.exec(
+        select(Doctor).where(Doctor.deleted_at == None)  # noqa: E711
+    ).first()
+    if own_doctor is not None:
+        doctor_status: ChecklistStatus = "complete"
+        doctor_detail = f"Tu perfil de médico está listo ({own_doctor.professional_name})."
+    elif any_doctor is not None:
+        doctor_status = "not_applicable"
+        doctor_detail = "Hay médicos registrados; tu usuario no tiene perfil clínico propio."
+    else:
+        doctor_status = "pending"
+        doctor_detail = "Registra el perfil de médico para poder atender consultas."
+    items.append(
+        ChecklistItem(
+            key="doctor_profile",
+            title="Perfil de médico",
+            status=doctor_status,
+            detail=doctor_detail,
         )
     )
 

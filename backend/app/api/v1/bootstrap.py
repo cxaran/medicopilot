@@ -10,6 +10,7 @@ from backend.app.bootstrap.security import (
 from backend.app.bootstrap.service import (
     BootstrapAdditionalRoleInput,
     BootstrapError,
+    BootstrapDoctorProfileInput,
     BootstrapInitializeInput,
     BootstrapRoleInput,
     BootstrapUserInput,
@@ -110,6 +111,15 @@ def initialize_bootstrap(
         ),
         public_registration_enabled=payload.public_registration_enabled,
         institution_name=payload.institution_name,
+        doctor_profile=(
+            BootstrapDoctorProfileInput(
+                professional_name=payload.doctor_profile.professional_name,
+                professional_license_number=payload.doctor_profile.professional_license_number,
+                specialty=payload.doctor_profile.specialty,
+            )
+            if payload.doctor_profile is not None
+            else None
+        ),
         additional_roles=[
             BootstrapAdditionalRoleInput(
                 name=role.name,

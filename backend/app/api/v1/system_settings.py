@@ -65,10 +65,13 @@ def list_system_settings(
 @router.get("/system-settings/setup-checklist", response_model=SetupChecklistRead)
 def get_setup_checklist(
     session: SessionDep,
+    current_user: CurrentUser,
     _: SystemSettingsPermissions.READ.requiere,
 ) -> SetupChecklistRead:
     """Checklist de puesta en marcha DERIVADO del estado real de la configuración."""
-    items, dismissed = system.build_setup_checklist(session)
+    items, dismissed = system.build_setup_checklist(
+        session, current_user_id=current_user.id
+    )
     serialized = [
         SetupChecklistItemRead(key=i.key, title=i.title, status=i.status, detail=i.detail)
         for i in items

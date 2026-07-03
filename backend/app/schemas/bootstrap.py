@@ -71,6 +71,14 @@ class BootstrapAdditionalRole(ApiWriteSchema):
     assign_to_initial_user: bool = False
 
 
+class BootstrapDoctorProfile(ApiWriteSchema):
+    """Perfil de médico del usuario inicial (instalación admin=médico)."""
+
+    professional_name: str = Field(min_length=1, max_length=255)
+    professional_license_number: str = Field(min_length=1, max_length=80)
+    specialty: str | None = Field(default=None, min_length=1, max_length=160)
+
+
 class BootstrapInitializeRequest(ApiWriteSchema):
     user: BootstrapInitialUser
     system_admin_role: BootstrapSystemAdminRole = Field(default_factory=BootstrapSystemAdminRole)
@@ -90,6 +98,13 @@ class BootstrapInitializeRequest(ApiWriteSchema):
         min_length=1,
         max_length=200,
         description="Nombre del consultorio/institución (opcional).",
+    )
+    doctor_profile: BootstrapDoctorProfile | None = Field(
+        default=None,
+        description=(
+            "Perfil de médico del usuario inicial (opcional): crea su registro "
+            "clínico para poder atender consultas desde el primer día."
+        ),
     )
 
 

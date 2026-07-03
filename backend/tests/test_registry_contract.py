@@ -121,7 +121,6 @@ from backend.app.schemas.capabilities import (  # noqa: E402
 )
 from backend.app.schemas.user import SessionUser  # noqa: E402
 from backend.app.security.catalog import declared_permissions  # noqa: E402
-from backend.app.security.security_control import WILDCARD_ACCESS  # noqa: E402
 from backend.app.security.security_group import SecurityGroup  # noqa: E402
 
 
@@ -617,12 +616,10 @@ class ActionConditionValidityTest(unittest.TestCase):
 # ``.permission`` ausente del catálogo, rompiendo el gating de autorización en
 # silencio. Este test ancla cada permiso citado al catálogo.
 #
-# Comodín/jerarquía: el modelo admite el comodín ``"*"`` (WILDCARD_ACCESS), pero su
-# semántica es del lado del USUARIO (un actor con ``"*"`` pasa cualquier check vía
-# CurrentUser.access_control); no es un permiso declarado en el catálogo. La
-# jerarquía se resuelve también en tiempo de check (usuario), no en la citación.
-# Para la EXISTENCIA del permiso citado basta el membership exacto contra el
-# catálogo; se acepta además ``"*"`` como patrón válido por si alguna vez se citara.
+# Sin comodines: el control de acceso es por MEMBERSHIP EXACTO (SessionUser.
+# access_control). Todo permiso citado debe existir literalmente en el catálogo;
+# tener todos los permisos es una propiedad del ROL (filas RoleAccess), nunca un
+# valor especial.
 
 
 def _cited_permissions():
@@ -682,7 +679,7 @@ class PermissionConsistencyTest(unittest.TestCase):
             perm = _permission_string(permission)
             with self.subTest(resource=resource_name, location=location, permission=perm):
                 self.assertTrue(
-                    perm in catalog or perm == WILDCARD_ACCESS,
+                    perm in catalog,
                     f"[permiso] {resource_name} / {location}: el permiso {perm!r} no "
                     "existe en el catálogo (security.catalog.declared_permissions); "
                     "permiso huérfano o mal escrito — el gating de autorización se "

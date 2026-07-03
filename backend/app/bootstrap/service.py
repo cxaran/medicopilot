@@ -57,6 +57,13 @@ class BootstrapAdditionalRoleInput:
 
 
 @dataclass(frozen=True)
+class BootstrapDoctorProfileInput:
+    professional_name: str
+    professional_license_number: str
+    specialty: str | None = None
+
+
+@dataclass(frozen=True)
 class BootstrapInitializeInput:
     user: BootstrapUserInput
     system_admin_role: BootstrapRoleInput = field(default_factory=BootstrapRoleInput)
@@ -64,6 +71,11 @@ class BootstrapInitializeInput:
     # Política inicial de plataforma (sin secretos de terceros).
     public_registration_enabled: bool = False
     institution_name: str | None = None
+    # Perfil de MÉDICO del usuario inicial (instalación unipersonal admin=médico):
+    # crea la fila Doctor vinculada, requisito real de los flujos clínicos
+    # (consultas/citas exigen doctor y finalizar resuelve Doctor.user_id).
+    doctor_profile: BootstrapDoctorProfileInput | None = None
+
 
 
 @dataclass(frozen=True)
@@ -139,6 +151,47 @@ def initialize_platform(session: Session, payload: BootstrapInitializeInput) -> 
     )
     session.add(user)
     session.flush()
+
+    # Rol clínico curado disponible desde el día 1 (paridad con el seed CLI): queda
+    # listo para futuros usuarios SIN asignarse al inicial (su rol de sistema ya
+    # tiene todos los permisos). Si el asistente creó un rol con ese nombre, se
+    # respeta el del asistente.
+    from backend.app.security.role_profiles import (
+        CLINICAL_ROLE_NAME,
+        clinical_role_permissions,
+    )
+
+    payload_role_names = {system_admin_role.name} | {role.name for role in additional_roles}
+    if CLINICAL_ROLE_NAME not in payload_role_names:
+        clinical_role = Role(
+            name=CLINICAL_ROLE_NAME,
+            description="Rol clínico con permisos curados para médicos.",
+            is_active=True,
+        )
+        session.add(clinical_role)
+        session.flush()
+        for permission in sorted(clinical_role_permissions()):
+            session.add(RoleAccess(role_id=clinical_role.id, access=permission, is_active=True))
+
+    # Perfil de médico del usuario inicial (opcional): habilita los flujos clínicos
+    # (crear consulta/cita, finalizar) sin alta administrativa posterior.
+    if payload.doctor_profile is not None:
+        from backend.app.models.doctor import Doctor
+
+        session.add(
+            Doctor(
+                user_id=user.id,
+                professional_name=_clean_required(
+                    payload.doctor_profile.professional_name, "doctor_profile.professional_name"
+                ),
+                professional_license_number=_clean_required(
+                    payload.doctor_profile.professional_license_number,
+                    "doctor_profile.professional_license_number",
+                ),
+                specialty=_clean_optional(payload.doctor_profile.specialty),
+                created_by=user.id,
+            )
+        )
 
     session.add(UserRole(user_id=user.id, role_id=system_admin_role.id))
     for role, role_input in zip(additional_roles, payload.additional_roles):
