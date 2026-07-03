@@ -251,12 +251,13 @@ class _PrescriptionTestMixin(unittest.TestCase):
         status: ConsultationStatus = ConsultationStatus.DRAFT,
         attending_doctor_id: uuid.UUID | None = None,
         deleted: bool = False,
+        patient_id: uuid.UUID | None = None,
     ) -> uuid.UUID:
         consultation_id = uuid.uuid4()
         with Session(self.engine) as session:
             consultation = Consultation(
                 id=consultation_id,
-                patient_id=self.patient_id,
+                patient_id=patient_id or self.patient_id,
                 attending_doctor_id=attending_doctor_id or self.doctor_id,
                 consulted_at=utc_now(),
                 reason_for_visit="Control",
@@ -368,9 +369,11 @@ class PrescriptionRoutesTest(_PrescriptionTestMixin, unittest.TestCase):
         deleted = self._seed_consultation(deleted=True)
         self.assertEqual(self._create(consultation_id=str(deleted)).status_code, 404)
 
-    def test_create_finalized_consultation_409(self) -> None:
+    def test_create_on_finalized_consultation_allowed(self) -> None:
+        # El estado de la consulta NO condiciona la receta: pueden surgir ajustes de receta
+        # en el momento aunque la consulta ya esté finalizada. Sólo debe existir (no eliminada).
         finalized = self._seed_consultation(status=ConsultationStatus.FINALIZED)
-        self.assertEqual(self._create(consultation_id=str(finalized)).status_code, 409)
+        self.assertEqual(self._create(consultation_id=str(finalized)).status_code, 201)
 
     # --- diagnóstico relacionado ---
 
@@ -411,6 +414,27 @@ class PrescriptionRoutesTest(_PrescriptionTestMixin, unittest.TestCase):
         self._create()
         listed = self.client.get(_BASE, params={"internal_folio": folio}).json()
         self.assertEqual(listed["pagination"]["total"], 1)
+
+    def test_list_filter_by_patient_across_consultations(self) -> None:
+        # ``patient_id`` se deriva de la consulta (subconsulta del modelo): el filtro
+        # reúne las recetas de TODAS las consultas del paciente y excluye las de
+        # otros pacientes.
+        first = self._create_id()
+        second_consultation = self._seed_consultation()
+        second = self.client.post(
+            _BASE, json={"consultation_id": str(second_consultation)}
+        ).json()["id"]
+        other_patient = self._seed_patient()
+        other_consultation = self._seed_consultation(patient_id=other_patient)
+        self.client.post(_BASE, json={"consultation_id": str(other_consultation)})
+
+        listed = self.client.get(_BASE, params={"patient_id": str(self.patient_id)}).json()
+        self.assertEqual(listed["pagination"]["total"], 2)
+        self.assertEqual({item["id"] for item in listed["items"]}, {first, second})
+        # El item de lista y el detalle exponen el paciente derivado.
+        self.assertEqual(listed["items"][0]["patient_id"], str(self.patient_id))
+        got = self.client.get(f"{_BASE}/{first}").json()
+        self.assertEqual(got["patient_id"], str(self.patient_id))
 
     # --- edición de borrador ---
 
@@ -493,9 +517,10 @@ class PrescriptionRoutesTest(_PrescriptionTestMixin, unittest.TestCase):
         prescription_id = self._approved_prescription()
         self.assertEqual(self._approve(prescription_id).status_code, 409)
 
-    def test_approve_finalized_consultation_409(self) -> None:
-        # Una consulta finalizada no debería tener recetas en borrador, pero el
-        # endpoint se protege igualmente.
+    def test_approve_on_finalized_consultation_allowed(self) -> None:
+        # La aprobación depende del ciclo de vida de la RECETA (draft) y del médico tratante,
+        # NO del estado de la consulta: una receta puede aprobarse aunque la consulta ya esté
+        # finalizada (ajuste que surge en el momento).
         prescription_id = self._create_id()
         self.assertEqual(self._add_item(prescription_id).status_code, 201)
         with Session(self.engine) as session:
@@ -505,7 +530,7 @@ class PrescriptionRoutesTest(_PrescriptionTestMixin, unittest.TestCase):
             consultation.finalized_at = utc_now()
             session.add(consultation)
             session.commit()
-        self.assertEqual(self._approve(prescription_id).status_code, 409)
+        self.assertEqual(self._approve(prescription_id).status_code, 200)
 
     def test_approve_not_attending_doctor_403(self) -> None:
         other_user = self._seed_user()

@@ -16,11 +16,13 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    select,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, column_property, mapped_column, relationship
 
 from backend.app.models.base import Base
+from backend.app.models.consultation import Consultation
 from backend.app.models.enums import PrescriptionStatus, enum_values
 
 
@@ -37,6 +39,15 @@ class Prescription(Base):
         ForeignKey("consultations.id", ondelete="RESTRICT"),
         nullable=False,
         comment="Consulta origen de la receta.",
+    )
+    # Paciente DERIVADO de la consulta (sin columna propia ni migración): subconsulta
+    # escalar correlacionada. Habilita filtrar/listar recetas por paciente a través de
+    # todas sus consultas (contrato ``patient_id``) sin denormalizar la tabla.
+    patient_id: Mapped[uuid.UUID] = column_property(
+        select(Consultation.patient_id)
+        .where(Consultation.id == consultation_id)
+        .correlate_except(Consultation)
+        .scalar_subquery()
     )
     internal_folio: Mapped[int] = mapped_column(
         BigInteger,

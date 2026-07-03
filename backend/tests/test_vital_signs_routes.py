@@ -196,12 +196,13 @@ class VitalSignRoutesTest(unittest.TestCase):
         *,
         status: ConsultationStatus = ConsultationStatus.DRAFT,
         deleted: bool = False,
+        patient_id: uuid.UUID | None = None,
     ) -> uuid.UUID:
         consultation_id = uuid.uuid4()
         with Session(self.engine) as session:
             consultation = Consultation(
                 id=consultation_id,
-                patient_id=self.patient_id,
+                patient_id=patient_id or self.patient_id,
                 attending_doctor_id=self.doctor_id,
                 consulted_at=utc_now(),
                 reason_for_visit="Control",
@@ -274,6 +275,29 @@ class VitalSignRoutesTest(unittest.TestCase):
 
         got = self.client.get(f"{_BASE}/{created['id']}")
         self.assertEqual(got.status_code, 200)
+
+    def test_list_filter_by_patient_across_consultations(self) -> None:
+        # ``patient_id`` se deriva de la consulta (subconsulta del modelo): el filtro
+        # reúne las mediciones de TODAS las consultas del paciente y excluye las de
+        # otros pacientes.
+        first = self._create().json()
+        second_consultation = self._seed_consultation()
+        second = self.client.post(
+            _BASE, json={"consultation_id": str(second_consultation)}
+        ).json()
+        other_patient = self._seed_patient()
+        other_consultation = self._seed_consultation(patient_id=other_patient)
+        self.client.post(_BASE, json={"consultation_id": str(other_consultation)})
+
+        listed = self.client.get(_BASE, params={"patient_id": str(self.patient_id)}).json()
+        self.assertEqual(listed["pagination"]["total"], 2)
+        self.assertEqual(
+            {item["id"] for item in listed["items"]}, {first["id"], second["id"]}
+        )
+        # El item de lista y el detalle exponen el paciente derivado.
+        self.assertEqual(listed["items"][0]["patient_id"], str(self.patient_id))
+        got = self.client.get(f"{_BASE}/{first['id']}").json()
+        self.assertEqual(got["patient_id"], str(self.patient_id))
 
     def test_measured_at_range_operators(self) -> None:
         self._create(measured_at="2024-01-10T08:00:00")

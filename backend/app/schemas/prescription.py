@@ -98,6 +98,8 @@ class PrescriptionRead(ApiReadSchema):
 
     id: uuid.UUID
     consultation_id: uuid.UUID
+    # Derivado de la consulta (subconsulta en el modelo); no se acepta como entrada.
+    patient_id: uuid.UUID
     internal_folio: int
     related_diagnosis_id: Optional[uuid.UUID] = None
     observations: Optional[str] = None
@@ -117,6 +119,9 @@ class PrescriptionListItem(ApiReadSchema):
 
     id: uuid.UUID
     consultation_id: uuid.UUID = Field(title="Consulta")
+    # Paciente derivado de la consulta (subconsulta en el modelo): habilita el filtro
+    # exacto por paciente a través de todas sus consultas.
+    patient_id: uuid.UUID = Field(title="Paciente")
     internal_folio: int = Field(title="Folio", json_schema_extra={"ui": {"list": True}})
     related_diagnosis_id: Optional[uuid.UUID] = Field(
         default=None, title="Diagnóstico"

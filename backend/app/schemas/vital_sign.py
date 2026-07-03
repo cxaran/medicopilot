@@ -204,6 +204,8 @@ class VitalSignRead(ApiReadSchema):
 
     id: uuid.UUID
     consultation_id: uuid.UUID
+    # Derivado de la consulta (subconsulta en el modelo); no se acepta como entrada.
+    patient_id: uuid.UUID
     measured_at: datetime
     weight_kg: Optional[float] = None
     height_cm: Optional[float] = None
@@ -229,9 +231,12 @@ class VitalSignListItem(ApiReadSchema):
     """Versión de listado (sin ``observations``), con ``bmi`` derivado."""
 
     id: uuid.UUID
-    # ``consultation_id`` habilita el filtro exacto del recurso (el motor exige que
-    # los campos de filtro existan en el schema de listado).
+    # ``consultation_id``/``patient_id`` habilitan los filtros exactos del recurso (el
+    # motor exige que los campos de filtro existan en el schema de listado). El paciente
+    # se deriva de la consulta (subconsulta en el modelo): permite listar las mediciones
+    # de TODAS las consultas de un paciente.
     consultation_id: uuid.UUID = Field(title="Consulta")
+    patient_id: uuid.UUID = Field(title="Paciente")
     measured_at: datetime = Field(
         title="Medición", json_schema_extra=_MEASURED_AT_LIST_FILTER_UI
     )

@@ -5,6 +5,13 @@ Ciclo de vida: ``draft`` → ``approved`` (aprobación explícita del médico tr
 genera la base de datos; el snapshot de los datos profesionales del médico se
 captura al aprobar y es inmutable después.
 
+El estado de la CONSULTA padre (borrador/finalizada) NO condiciona las recetas: una
+receta puede crearse, modificarse en borrador y aprobarse aunque la consulta ya esté
+finalizada, porque en la práctica surgen ajustes de la receta en el momento (nueva
+indicación, corrección de dosis). El gobierno de la receta es SUYO: nace en borrador,
+sólo la aprueba/anula el médico tratante, y sólo se edita/elimina mientras siga en
+borrador. La consulta sólo debe existir (no estar eliminada).
+
 Concurrencia: toda mutación toma primero la fila de la consulta padre con
 ``SELECT ... FOR UPDATE`` y luego la de la receta, en ese orden (consulta → receta
 → renglón), serializándose sobre la misma fila que ``consultations.finalize``. Las
@@ -35,7 +42,7 @@ from backend.app.core.database import SessionDep
 from backend.app.models.consultation import Consultation
 from backend.app.models.consultation_diagnosis import ConsultationDiagnosis
 from backend.app.models.doctor import Doctor
-from backend.app.models.enums import ConsultationStatus, PrescriptionStatus, RecordStatus
+from backend.app.models.enums import PrescriptionStatus, RecordStatus
 from backend.app.models.prescription import Prescription, PrescriptionItem
 from backend.app.resources.registry import PRESCRIPTIONS
 from backend.app.schemas.pagination import OffsetPage
@@ -55,7 +62,6 @@ router = APIRouter(prefix="/prescriptions", tags=["prescriptions"])
 _NOT_FOUND = "Receta no encontrada"
 _CONSULTATION_NOT_FOUND = "Consulta no encontrada"
 _CONFLICT = "No se pudo guardar la receta"
-_SEALED = "La consulta está finalizada: no se pueden modificar sus recetas"
 _NOT_DRAFT = "Sólo se puede modificar o eliminar una receta en borrador"
 _BAD_DIAGNOSIS = "El diagnóstico relacionado no pertenece a la consulta"
 
@@ -171,10 +177,11 @@ def create_prescription(
     current_user: CurrentUser,
     _: PrescriptionPermissions.CREATE.requiere,
 ) -> PrescriptionRead:
-    # Consulta destino: bloqueada (serializa con finalize), vigente y aún en borrador.
+    # Consulta destino: bloqueada (serializa con finalize) y vigente. Su estado
+    # (borrador/finalizada) NO condiciona la receta: se permite recetar aunque la
+    # consulta ya esté finalizada (ajustes que surgen en el momento).
     lock_active_or_404(
         session, Consultation, payload.consultation_id, _CONSULTATION_NOT_FOUND,
-        allowed_status=(ConsultationStatus.DRAFT,), status_message=_SEALED,
     )
     if payload.related_diagnosis_id is not None:
         _validate_related_diagnosis(
@@ -202,10 +209,11 @@ def update_prescription(
     current_user: CurrentUser,
     _: PrescriptionPermissions.UPDATE.requiere,
 ) -> PrescriptionRead:
-    prescription, consultation = _load_active_prescription(
+    prescription, _consultation = _load_active_prescription(
         session, prescription_id, lock=True
     )
-    require_status(consultation, (ConsultationStatus.DRAFT,), _SEALED)
+    # El estado de la consulta padre NO condiciona la edición: sólo importa que la
+    # receta siga en borrador.
     require_status(prescription, (PrescriptionStatus.DRAFT,), _NOT_DRAFT)
     data = payload.model_dump(exclude_unset=True)
     if data.get("related_diagnosis_id") is not None:
@@ -229,10 +237,11 @@ def delete_prescription(
     current_user: CurrentUser,
     _: PrescriptionPermissions.DELETE.requiere,
 ) -> PrescriptionRead:
-    prescription, consultation = _load_active_prescription(
+    prescription, _consultation = _load_active_prescription(
         session, prescription_id, lock=True
     )
-    require_status(consultation, (ConsultationStatus.DRAFT,), _SEALED)
+    # El estado de la consulta padre NO condiciona la eliminación: sólo importa que
+    # la receta siga en borrador.
     require_status(prescription, (PrescriptionStatus.DRAFT,), _NOT_DRAFT)
     prescription = soft_delete_entity(
         session,
@@ -254,12 +263,10 @@ def approve_prescription(
     prescription, consultation = _load_active_prescription(
         session, prescription_id, lock=True
     )
+    # La aprobación depende del ciclo de vida de la RECETA (debe seguir en borrador) y
+    # de la identidad del médico tratante, NO del estado de la consulta: una receta
+    # puede aprobarse aunque la consulta ya esté finalizada.
     require_status(prescription, (PrescriptionStatus.DRAFT,), _NOT_DRAFT)
-    require_status(
-        consultation,
-        (ConsultationStatus.DRAFT,),
-        "No se puede aprobar: la consulta ya está finalizada",
-    )
     doctor = _require_attending_doctor(session, current_user, consultation)
 
     items = session.exec(

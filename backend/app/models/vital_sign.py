@@ -3,11 +3,22 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Optional
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, Numeric, Text, func
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    Text,
+    func,
+    select,
+)
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, column_property, mapped_column, relationship
 
 from backend.app.models.base import Base
+from backend.app.models.consultation import Consultation
 
 
 class VitalSign(Base):
@@ -23,6 +34,15 @@ class VitalSign(Base):
         ForeignKey("consultations.id", ondelete="RESTRICT"),
         nullable=False,
         comment="Consulta relacionada con la medición de signos vitales.",
+    )
+    # Paciente DERIVADO de la consulta (sin columna propia ni migración): subconsulta
+    # escalar correlacionada. Habilita filtrar/listar signos por paciente a través de
+    # todas sus consultas (contrato ``patient_id``) sin denormalizar la tabla.
+    patient_id: Mapped[uuid.UUID] = column_property(
+        select(Consultation.patient_id)
+        .where(Consultation.id == consultation_id)
+        .correlate_except(Consultation)
+        .scalar_subquery()
     )
     measured_at: Mapped[datetime] = mapped_column(
         DateTime,
