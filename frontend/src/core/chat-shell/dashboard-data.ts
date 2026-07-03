@@ -46,8 +46,10 @@ function isNextControlFlow(error: unknown): boolean {
   );
 }
 
-const AGENDA_LIMIT = 8;
-const CONSULTATIONS_LIMIT = 6;
+// Suficiente para el diálogo "Ver más" paginado de la card (la card sólo muestra los
+// primeros renglones); una sola lectura, sin paginar contra el backend desde el inicio.
+const AGENDA_LIMIT = 30;
+const CONSULTATIONS_LIMIT = 30;
 // Pacientes a resolver para las etiquetas de citas/consultas; el backend acota a su max_limit.
 const PATIENTS_LIMIT = 200;
 const FALLBACK_TZ = "UTC";

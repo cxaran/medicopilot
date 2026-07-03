@@ -1,8 +1,10 @@
 "use client";
 
-import { useSyncExternalStore, type ReactNode } from "react";
+import { useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import Link from "next/link";
 
+import { ResourcePagination } from "@/components/resources/ResourcePagination";
+import { useFocusTrap } from "@/components/resources/use-focus-trap";
 import { AnimatedOrb } from "@/components/ui/AnimatedOrb";
 import { useSession } from "@/core/auth/SessionProvider";
 import type {
@@ -11,6 +13,12 @@ import type {
   DashboardItem,
   DashboardTone,
 } from "@/core/chat-shell/dashboard";
+
+// Límite de renglones VISIBLES por tarjeta (las alertas pueden ser decenas y la card
+// crecería sin tope); el resto se consulta con "Ver más" en un diálogo paginado.
+const CARD_PREVIEW_LIMIT = 5;
+// Renglones por página dentro del diálogo (paginación en memoria sobre lo ya cargado).
+const DIALOG_PAGE_SIZE = 10;
 
 const svgProps = {
   width: 17,
@@ -205,6 +213,95 @@ function ItemRow({
   );
 }
 
+/**
+ * Diálogo "Ver más" de una tarjeta: la lista COMPLETA ya cargada, paginada en memoria
+ * (DIALOG_PAGE_SIZE por página). Accesible: focus trap, Escape y clic en el fondo
+ * cierran. Abrir el chat de un paciente desde un renglón también cierra el diálogo.
+ */
+function CardItemsDialog({
+  title,
+  items,
+  layout,
+  onOpenPatient,
+  onClose,
+}: Readonly<{
+  title: string;
+  items: DashboardItem[];
+  layout: ItemLayout;
+  onOpenPatient: (patientId: string, patientLabel: string) => void;
+  onClose: () => void;
+}>) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [offset, setOffset] = useState(0);
+  useFocusTrap(panelRef);
+
+  const pageItems = items.slice(offset, offset + DIALOG_PAGE_SIZE);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(20,17,16,0.4)] p-4"
+      onPointerDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        tabIndex={-1}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") onClose();
+        }}
+        className="flex max-h-[80vh] w-full max-w-[480px] flex-col rounded-[18px] border border-[var(--border)] bg-[var(--panel)] p-4 shadow-[var(--soft2)]"
+      >
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <span className="text-[14px] font-semibold text-[var(--tx)]">
+            {title}
+            <span className="ml-2 text-[12px] font-medium text-[var(--tx3)]">{items.length}</span>
+          </span>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Cerrar"
+            className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--tx3)] transition hover:bg-[var(--panel2)] hover:text-[var(--tx)]"
+          >
+            <svg {...svgProps} aria-hidden="true">
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          </button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          {pageItems.map((item) => (
+            <ItemRow
+              key={item.key}
+              item={item}
+              layout={layout}
+              onOpenPatient={(patientId, patientLabel) => {
+                onClose();
+                onOpenPatient(patientId, patientLabel);
+              }}
+            />
+          ))}
+        </div>
+        <div className="mt-3">
+          <ResourcePagination
+            variant="compact"
+            pagination={{
+              total: items.length,
+              limit: DIALOG_PAGE_SIZE,
+              offset,
+              has_next: offset + DIALOG_PAGE_SIZE < items.length,
+            }}
+            onPrev={() => setOffset(Math.max(0, offset - DIALOG_PAGE_SIZE))}
+            onNext={() => setOffset(offset + DIALOG_PAGE_SIZE)}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Card({
   title,
   icon,
@@ -226,6 +323,11 @@ function Card({
   onOpenPatient: (patientId: string, patientLabel: string) => void;
   footer?: ReactNode;
 }>) {
+  const [expanded, setExpanded] = useState(false);
+  // La tarjeta muestra a lo más CARD_PREVIEW_LIMIT renglones; el resto vive en el diálogo.
+  const previewItems = card.items.slice(0, CARD_PREVIEW_LIMIT);
+  const hiddenCount = card.items.length - previewItems.length;
+
   return (
     <section className="flex flex-col rounded-[18px] border border-[var(--border)] bg-[var(--panel)] p-4 shadow-[var(--soft)]">
       <div className="mb-3 flex items-center justify-between gap-2">
@@ -251,12 +353,30 @@ function Card({
         <p className="py-2 text-[12.5px] text-[var(--tx3)]">{emptyText}</p>
       ) : (
         <div className="flex flex-col">
-          {card.items.map((item) => (
+          {previewItems.map((item) => (
             <ItemRow key={item.key} item={item} layout={layout} onOpenPatient={onOpenPatient} />
           ))}
         </div>
       )}
+      {hiddenCount > 0 && (
+        <button
+          type="button"
+          onClick={() => setExpanded(true)}
+          className="mt-2 rounded-[9px] border border-dashed border-[var(--border)] px-3 py-1.5 text-center text-[12.5px] font-medium text-[var(--accent-tx)] transition hover:bg-[var(--panel2)]"
+        >
+          Ver más ({hiddenCount})
+        </button>
+      )}
       {footer}
+      {expanded && (
+        <CardItemsDialog
+          title={title}
+          items={card.items}
+          layout={layout}
+          onOpenPatient={onOpenPatient}
+          onClose={() => setExpanded(false)}
+        />
+      )}
     </section>
   );
 }
