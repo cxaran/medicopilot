@@ -73,10 +73,9 @@ class FilterValueShape(str, Enum):
     SINGLE = "single"
     # Rango con dos extremos declarados en ``parameters`` (p. ej. ``between``).
     RANGE = "range"
-    # Múltiples valores (p. ej. ``in``).
-    MULTIPLE = "multiple"
-    # Sin valor (p. ej. ``isnull``): el operador es la condición.
-    NONE = "none"
+    # Nota: "multiple" y "none" se retiraron — los operadores in/isnull están
+    # excluidos a propósito del contrato filtrable visible, así que esas formas
+    # eran inalcanzables y obligaban al frontend a narrowing de casos imposibles.
 
 
 class HttpMethod(str, Enum):
@@ -88,7 +87,10 @@ class HttpMethod(str, Enum):
 
 
 class ActionScope(str, Enum):
-    RESOURCE = "resource"
+    # Sólo acciones por ITEM: el valor "resource" (acciones a nivel de recurso) se
+    # retiró — ningún recurso lo producía y el frontend no tenía render para él
+    # (habría sido un botón fantasma). Si algún día hace falta, se construye con
+    # su superficie de UI a la par.
     ITEM = "item"
 
 
@@ -96,9 +98,6 @@ class ResourceView(str, Enum):
     TABLE = "table"
     GROUPED_CATALOG = "grouped_catalog"
 
-
-class RelationCardinality(str, Enum):
-    MULTIPLE = "multiple"
 
 
 class OptionsSourceType(str, Enum):
@@ -398,7 +397,6 @@ class ResourceRelationCapability(ApiReadSchema):
     name: str
     label: str
     description: Optional[str] = None
-    cardinality: RelationCardinality
     required: bool
     editable: bool
     selection_url: str

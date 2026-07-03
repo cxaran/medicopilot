@@ -295,20 +295,53 @@ def _range_bound_widget(value_type: FieldValueType) -> WidgetType:
 
 
 def _eq_filter_declaration(
-    field_name: str, field_info: FieldInfo
+    field_name: str, field_info: FieldInfo, plan_operators: set[Operator]
 ) -> tuple[Optional[list[ResourceFilterOption]], Optional[WidgetType]]:
     """Opciones/widget declarados para el ``eq`` de un campo vía ``ui.filter`` (select).
 
     Reusa la única declaración existente (p. ej. ``is_active`` con Activos/Inactivos);
-    si no hay declaración select, ``eq`` toma el widget por defecto del tipo."""
+    si no hay declaración select, ``eq`` toma el widget por defecto del tipo. Una
+    declaración MALFORMADA (operador inexistente o fuera del plan del campo, widget
+    inválido, label vacío, opciones rotas) FALLA con ``CapabilityConfigError`` en la
+    construcción del catálogo — validaciones portadas del contrato legacy retirado;
+    nunca se traga en silencio.
+    """
     declaration = _ui(field_info).get("filter")
-    if not isinstance(declaration, dict) or declaration.get("operator") != "eq":
+    if declaration is None:
         return None, None
+    if not isinstance(declaration, dict):
+        raise CapabilityConfigError(
+            f"La declaración ui.filter de '{field_name}' debe ser un dict."
+        )
+
+    try:
+        operator = Operator(declaration.get("operator"))
+    except ValueError as error:
+        raise CapabilityConfigError(
+            f"El filtro '{field_name}' declara un operador inválido: "
+            f"{declaration.get('operator')!r}."
+        ) from error
+    if operator not in plan_operators:
+        raise CapabilityConfigError(
+            f"El filtro '{field_name}' usa el operador '{operator.value}' ausente en "
+            "el plan del campo."
+        )
+
+    label = declaration.get("label")
+    if not isinstance(label, str) or label.strip() == "":
+        raise CapabilityConfigError(
+            f"El filtro '{field_name}' requiere un label explícito."
+        )
+
     try:
         widget = WidgetType(declaration.get("widget"))
-    except ValueError:
-        return None, None
-    if widget is not WidgetType.SELECT:
+    except ValueError as error:
+        raise CapabilityConfigError(
+            f"El filtro '{field_name}' declara un widget inválido: "
+            f"{declaration.get('widget')!r}."
+        ) from error
+
+    if operator is not Operator.EQ or widget is not WidgetType.SELECT:
         return None, None
     return _filter_options(field_name, widget, declaration.get("options")), widget
 
@@ -422,7 +455,8 @@ def _filterable_fields(
     result: list[FilterableFieldCapability] = []
     for name, field_cap in field_caps.items():
         field_info = list_schema.model_fields[name]
-        eq_options, eq_widget = _eq_filter_declaration(name, field_info)
+        plan_operators = {Operator(op.value) for op in field_cap.filter_operators}
+        eq_options, eq_widget = _eq_filter_declaration(name, field_info, plan_operators)
         operators: list[FilterableOperatorCapability] = []
 
         for operator in _FILTERABLE_OPERATOR_ORDER:
@@ -477,6 +511,30 @@ def _filterable_fields(
             )
         )
     return result
+
+
+# Memoización de las piezas PURAS del catálogo: la capability de lista y los campos
+# de formulario son deterministas por recurso/schema tras el import (el registry es
+# estático por proceso); solo el filtrado por permisos depende del usuario. Sin esto,
+# cada GET /resources recompilaba las ~31 proyecciones completas.
+_LIST_CAPABILITY_CACHE: dict[str, ResourceListCapability] = {}
+_FORM_FIELDS_CACHE: dict[type[BaseModel], list[ResourceFormFieldCapability]] = {}
+
+
+def _list_capability_cached(definition: ResourceDefinition) -> ResourceListCapability:
+    cached = _LIST_CAPABILITY_CACHE.get(definition.name)
+    if cached is None:
+        cached = _list_capability(definition)
+        _LIST_CAPABILITY_CACHE[definition.name] = cached
+    return cached
+
+
+def _form_fields_cached(write_schema: type[BaseModel]) -> list[ResourceFormFieldCapability]:
+    cached = _FORM_FIELDS_CACHE.get(write_schema)
+    if cached is None:
+        cached = _form_fields(write_schema)
+        _FORM_FIELDS_CACHE[write_schema] = cached
+    return cached
 
 
 def _list_capability(definition: ResourceDefinition) -> ResourceListCapability:
@@ -604,7 +662,7 @@ def _forms_capability(
         create = ResourceFormCapability(
             method=HttpMethod.POST,
             url_template=definition.api_path,
-            fields=_form_fields(definition.create_schema),
+            fields=_form_fields_cached(definition.create_schema),
             transport=definition.create_transport,
             file_field=definition.create_file_field,
         )
@@ -617,7 +675,7 @@ def _forms_capability(
         update = ResourceFormCapability(
             method=HttpMethod.PATCH,
             url_template=f"{definition.api_path}/{{id}}",
-            fields=_form_fields(definition.update_schema),
+            fields=_form_fields_cached(definition.update_schema),
         )
 
     if create is None and update is None:
@@ -634,7 +692,7 @@ def _action_capability(action: ActionDef) -> ResourceActionCapability:
     # ``fixed_body`` e ``input_schema`` son excluyentes (validado en ActionDef). El
     # formulario reusa exactamente la misma proyección que create/update.
     input_schema = (
-        ActionInputSchema(fields=_form_fields(action.input_schema))
+        ActionInputSchema(fields=_form_fields_cached(action.input_schema))
         if action.input_schema is not None
         else None
     )
@@ -672,7 +730,6 @@ def _relation_capability(relation: RelationDef) -> ResourceRelationCapability:
         name=relation.name,
         label=relation.label,
         description=relation.description,
-        cardinality=relation.cardinality,
         required=relation.required,
         editable=True,
         selection_url=relation.selection_url_template,
@@ -732,7 +789,7 @@ def _build_capability(definition: ResourceDefinition, user: SessionUser) -> Reso
     forms_cap: Optional[ResourceFormsCapability] = None
 
     if definition.view == ResourceView.TABLE and definition.list_query is not None:
-        list_cap = _list_capability(definition)
+        list_cap = _list_capability_cached(definition)
         forms_cap = _forms_capability(definition, user)
 
     actions = [
@@ -763,8 +820,11 @@ def _build_capability(definition: ResourceDefinition, user: SessionUser) -> Reso
     item_reference: Optional[ItemReference] = None
     detail: Optional[ResourceDetailCapability] = None
     if definition.detail_url_template is not None:
+        # Invariante del contrato: el identificador del item es SIEMPRE ``id``
+        # (UUID). El antiguo knob item_id_field nunca se ejerció y la proyección lo
+        # ignoraba (placeholder/tipo fijos): se declara honesto en vez de configurable.
         item_reference = ItemReference(
-            field=definition.item_id_field,
+            field="id",
             placeholder="id",
             type=FieldValueType.UUID,
         )

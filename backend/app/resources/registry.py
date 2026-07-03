@@ -68,7 +68,6 @@ from backend.app.schemas.capabilities import (
     FormTransport,
     HttpMethod,
     OptionsSourceType,
-    RelationCardinality,
     ResourceFileFieldCapability,
     ResourceView,
 )
@@ -860,7 +859,6 @@ class RelationDef:
     name: str
     label: str
     description: Optional[str]
-    cardinality: RelationCardinality
     required: bool
     selection_url_template: str
     # Campo de la respuesta de ``selection_url`` que contiene la lista de valores
@@ -914,10 +912,9 @@ class ResourceDefinition:
     download_url_template: Optional[str] = None
     download_permission: Optional[SecurityGroup] = None
     # Lectura individual: si está declarada, el recurso publica ``item_reference`` y
-    # ``detail``. El campo identificador (``item_id_field``) coincide con el token
+    # ``detail``. El campo identificador (el id del item (invariante ``id``)) coincide con el token
     # ``{id}`` de las plantillas de URL (detail, update, acciones).
     detail_url_template: Optional[str] = None
-    item_id_field: str = "id"
     actions: tuple[ActionDef, ...] = ()
     relations: tuple[RelationDef, ...] = ()
     related_lists: tuple[RelatedListDef, ...] = ()
@@ -1013,7 +1010,6 @@ RESOURCE_REGISTRY: tuple[ResourceDefinition, ...] = (
                 name="roles",
                 label="Roles",
                 description="Roles asignados al usuario",
-                cardinality=RelationCardinality.MULTIPLE,
                 required=False,
                 selection_url_template="/api/v1/users/{id}/roles",
                 selection_field=None,
@@ -1096,7 +1092,6 @@ RESOURCE_REGISTRY: tuple[ResourceDefinition, ...] = (
                 name="permissions",
                 label="Permisos",
                 description="Permisos asignados al rol",
-                cardinality=RelationCardinality.MULTIPLE,
                 required=False,
                 selection_url_template="/api/v1/roles/{id}/permissions",
                 selection_field="permissions",
@@ -1750,8 +1745,6 @@ RESOURCE_REGISTRY: tuple[ResourceDefinition, ...] = (
         # (insumos JSON estructurados que arma el copiloto y el médico aprueba, P1), vía el
         # endpoint dedicado /api/v1/scale-results. Se conservan los permisos create/update
         # para gobernar ese endpoint (RBAC), y el recurso publica lista/detalle/baja.
-        create_permission=ScaleResultPermissions.CREATE,
-        update_permission=ScaleResultPermissions.UPDATE,
         detail_url_template="/api/v1/scale-results/{id}",
         actions=(
             ActionDef(

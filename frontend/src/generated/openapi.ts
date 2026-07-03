@@ -2637,7 +2637,7 @@ export interface components {
          * ActionScope
          * @enum {string}
          */
-        ActionScope: "resource" | "item";
+        ActionScope: "item";
         /**
          * ActionSuccessBehavior
          * @enum {string}
@@ -5187,7 +5187,7 @@ export interface components {
          * FilterValueShape
          * @enum {string}
          */
-        FilterValueShape: "single" | "range" | "multiple" | "none";
+        FilterValueShape: "single" | "range";
         /**
          * FilterableFieldCapability
          * @description Campo filtrable y los operadores que expone (contrato visible de filtros).
@@ -7881,11 +7881,6 @@ export interface components {
             email: string;
         };
         /**
-         * RelationCardinality
-         * @enum {string}
-         */
-        RelationCardinality: "multiple";
-        /**
          * RelationOptionsSource
          * @description Origen declarado del universo de opciones de un editor relacional.
          */
@@ -8116,7 +8111,6 @@ export interface components {
             label: string;
             /** Description */
             description?: string | null;
-            cardinality: components["schemas"]["RelationCardinality"];
             /** Required */
             required: boolean;
             /** Editable */

@@ -220,7 +220,6 @@ class ResourceRelationsTest(unittest.TestCase):
         with _As("users:read", "users:manage_roles"):
             users = client.get("/api/v1/resources/users").json()
         relation = next(r for r in users["relations"] if r["name"] == "roles")
-        self.assertEqual(relation["cardinality"], "multiple")
         self.assertTrue(relation["editable"])
         self.assertEqual(relation["selection_url"], "/api/v1/users/{id}/roles")
         self.assertEqual(relation["mutation_method"], "PUT")
@@ -391,8 +390,7 @@ class ResourcesOpenApiTest(unittest.TestCase):
             "ActionSuccessBehavior",
             "ResourceRelationCapability",
             "RelationOptionsSource",
-            "RelationCardinality",
-            "OptionsSourceType",
+                        "OptionsSourceType",
             "FieldValueType",
             "WidgetType",
             "FilterOperator",

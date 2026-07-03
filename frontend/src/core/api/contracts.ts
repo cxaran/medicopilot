@@ -70,7 +70,6 @@ export type ResourceRelationCapability = components["schemas"]["ResourceRelation
 export type ResourceRelatedListCapability =
   components["schemas"]["ResourceRelatedListCapability"];
 export type RelationOptionsSource = components["schemas"]["RelationOptionsSource"];
-export type RelationCardinality = components["schemas"]["RelationCardinality"];
 export type OptionsSourceType = components["schemas"]["OptionsSourceType"];
 export type ResourceView = components["schemas"]["ResourceView"];
 export type FieldValueType = components["schemas"]["FieldValueType"];
