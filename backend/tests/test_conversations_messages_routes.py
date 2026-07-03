@@ -2,10 +2,12 @@
 
 ``Conversation`` persiste cada hilo (de un paciente o el chat global con ``patient_id`` nulo) y
 ``Message`` cada turno del hilo (rol, contenido, payload), con ``sequence_index`` asignado por el
-servidor para mantener el orden. Las pruebas de ruta usan Postgres real (sólo si TEST_POSTGRES_URL
-apunta a una base *_test): verifican alta con auditoría, el chat global sin paciente, el append
-ordenado, la lectura filtrada por paciente/conversación excluyendo eliminados, el CHECK del enum de
-rol, el RBAC y la baja lógica. Persistir el hilo NO es una escritura clínica (no requiere P1).
+servidor para mantener el orden. Los hilos son POR USUARIO (``created_by``) y el borrado de
+mensajes es FÍSICO (el chat no es expediente). Las pruebas de ruta usan Postgres real (sólo si
+TEST_POSTGRES_URL apunta a una base *_test): verifican alta con auditoría, el chat global sin
+paciente, el append ordenado y serializado (restricción única de orden), el aislamiento entre
+usuarios, el CHECK del enum de rol, el RBAC y el borrado/reinicio permanentes. Persistir el hilo
+NO es una escritura clínica (no requiere P1).
 """
 
 import os
@@ -45,7 +47,7 @@ os.environ.update(DEV_ENV)
 from fastapi.testclient import TestClient  # noqa: E402
 from sqlalchemy import create_engine, delete, text  # noqa: E402
 from sqlalchemy.exc import IntegrityError  # noqa: E402
-from sqlmodel import Session  # noqa: E402
+from sqlmodel import Session, select  # noqa: E402
 
 from backend.app.auth.auth_dependencies import get_current_user  # noqa: E402
 from backend.app.core.database import get_db  # noqa: E402
@@ -97,11 +99,15 @@ class ChatPersistenceRoutesTest(unittest.TestCase):
         cls.engine = create_engine(_TEST_PG_URL)
         Base.metadata.create_all(cls.engine)
         cls.actor_id = uuid.uuid4()
+        cls.other_actor_id = uuid.uuid4()
         cls.patient_id = uuid.uuid4()
         cls.other_patient_id = uuid.uuid4()
         with Session(cls.engine) as session:
             session.add(User(id=cls.actor_id, name="Médico", last_name="Tester",
                              email=f"a-{cls.actor_id}@example.com", hashed_password="x",
+                             is_active=True))
+            session.add(User(id=cls.other_actor_id, name="Otra", last_name="Médica",
+                             email=f"b-{cls.other_actor_id}@example.com", hashed_password="x",
                              is_active=True))
             session.add(Patient(id=cls.patient_id, full_name="Paciente Chat",
                                 birth_date=date(1980, 1, 1), sex=Sex.MALE))
@@ -132,9 +138,10 @@ class ChatPersistenceRoutesTest(unittest.TestCase):
     def tearDown(self) -> None:
         app.dependency_overrides.clear()
 
-    def _as(self, *permissions: str) -> None:
+    def _as(self, *permissions: str, user_id: uuid.UUID | None = None) -> None:
+        actor = user_id or self.actor_id
         app.dependency_overrides[get_current_user] = lambda: SessionUser(
-            id=self.actor_id, name="Médico", last_name="Tester",
+            id=actor, name="Médico", last_name="Tester",
             email="medico@example.com", permissions=set(permissions),
         )
 
@@ -229,6 +236,12 @@ class ChatPersistenceRoutesTest(unittest.TestCase):
         body = resp.json()
         self.assertEqual(body["role"], "assistant")
         self.assertEqual(body["payload"], {"tool_calls": [{"name": "search_patients"}]})
+        # REGRESIÓN (2026-07-03): el sembrado del chat restaura el hilo desde la LISTA; si el
+        # listado omite ``payload``, el hilo recargado pierde razonamiento/tarjetas/notas/UI.
+        listed = self.client.get(f"/api/v1/messages?conversation_id={conv}").json()
+        self.assertEqual(
+            listed["items"][0]["payload"], {"tool_calls": [{"name": "search_patients"}]}
+        )
 
     def test_append_to_nonexistent_conversation_rejected(self) -> None:
         resp = self._append(uuid.uuid4())
@@ -253,21 +266,22 @@ class ChatPersistenceRoutesTest(unittest.TestCase):
                 self.assertGreater(after.updated_at, initial_updated_at)
             self.assertEqual(after.updated_by, self.actor_id)
 
-    def test_list_messages_excludes_soft_deleted(self) -> None:
+    def test_unique_sequence_index_per_conversation(self) -> None:
+        # Última garantía contra la carrera del orden del hilo: dos mensajes no pueden
+        # compartir (conversation_id, sequence_index) — inserción CRUDA duplicando el índice.
         conv = self._new_conversation().json()["id"]
-        keep = self._append(conv, content="Se queda").json()["id"]
-        gone = self._append(conv, content="Se elimina").json()["id"]
-        with Session(self.engine) as session:
-            msg = session.get(Message, uuid.UUID(gone))
-            assert msg is not None
-            msg.deleted_at = datetime.now(timezone.utc)
-            msg.deleted_by = self.actor_id
-            session.add(msg)
-            session.commit()
-        listed = self.client.get(f"/api/v1/messages?conversation_id={conv}").json()
-        ids = {row["id"] for row in listed["items"]}
-        self.assertIn(keep, ids)
-        self.assertNotIn(gone, ids)
+        self._append(conv, content="Cero")
+        with self.assertRaises(IntegrityError):
+            with Session(self.engine) as session:
+                session.execute(
+                    text(
+                        "INSERT INTO messages"
+                        " (id, conversation_id, role, content, sequence_index)"
+                        " VALUES (:id, :cid, 'user', '', 0)"
+                    ),
+                    {"id": str(uuid.uuid4()), "cid": conv},
+                )
+                session.commit()
 
     # ----- Metadatos de presentación: PATCH del payload -----
 
@@ -314,7 +328,7 @@ class ChatPersistenceRoutesTest(unittest.TestCase):
 
     # ----- Gestión del historial: borrar mensajes y reiniciar el hilo -----
 
-    def test_delete_message_soft_deletes_and_hides_from_list(self) -> None:
+    def test_delete_message_removes_row_permanently(self) -> None:
         conv = self._new_conversation().json()["id"]
         keep = self._append(conv, content="Se queda").json()["id"]
         gone = self._append(conv, content="Se borra").json()["id"]
@@ -326,13 +340,10 @@ class ChatPersistenceRoutesTest(unittest.TestCase):
         ids = {row["id"] for row in listed["items"]}
         self.assertIn(keep, ids)
         self.assertNotIn(gone, ids)
-        # Baja LÓGICA con autoría: la fila sigue en la tabla, marcada.
+        # Borrado FÍSICO: la fila ya no existe (el chat no es expediente).
         with Session(self.engine) as session:
-            row = session.get(Message, uuid.UUID(gone))
-            assert row is not None
-            self.assertIsNotNone(row.deleted_at)
-            self.assertEqual(row.deleted_by, self.actor_id)
-        # Borrarlo de nuevo: ya no está vigente → 404 (mismo contrato que el detalle).
+            self.assertIsNone(session.get(Message, uuid.UUID(gone)))
+        # Borrarlo de nuevo: ya no existe → 404 (mismo contrato que el detalle).
         self.assertEqual(self.client.delete(f"/api/v1/messages/{gone}").status_code, 404)
 
     def test_reset_conversation_full_clears_and_restarts_sequence(self) -> None:
@@ -346,7 +357,13 @@ class ChatPersistenceRoutesTest(unittest.TestCase):
 
         listed = self.client.get(f"/api/v1/messages?conversation_id={conv}").json()
         self.assertEqual(listed["items"], [])
-        # El hilo sigue vivo y el orden vuelve a empezar (máximo vigente + 1 = 0).
+        # Borrado FÍSICO: no quedan filas del hilo en la tabla.
+        with Session(self.engine) as session:
+            remaining = session.exec(
+                select(Message).where(Message.conversation_id == uuid.UUID(conv))
+            ).all()
+            self.assertEqual(remaining, [])
+        # El hilo sigue vivo y el orden vuelve a empezar (máximo + 1 = 0).
         self.assertEqual(
             self.client.get(f"/api/v1/conversations/{conv}").status_code, 200
         )
@@ -397,6 +414,47 @@ class ChatPersistenceRoutesTest(unittest.TestCase):
                     {"id": str(uuid.uuid4()), "cid": conv},
                 )
                 session.commit()
+
+    # ----- Aislamiento por usuario (los hilos son de su dueño) -----
+
+    def test_threads_are_scoped_to_their_owner(self) -> None:
+        conv = self._new_conversation().json()["id"]
+        msg = self._append(conv, content="Privado").json()["id"]
+
+        # Otro usuario con TODOS los permisos: no ve ni alcanza el hilo ajeno (404, sin
+        # revelar existencia; el listado simplemente no lo incluye).
+        self._as(*_ALL_PERMS, user_id=self.other_actor_id)
+        listed = self.client.get(
+            f"/api/v1/conversations?patient_id={self.patient_id}"
+        ).json()
+        self.assertNotIn(conv, {row["id"] for row in listed["items"]})
+        self.assertEqual(self.client.get(f"/api/v1/conversations/{conv}").status_code, 404)
+        messages = self.client.get(f"/api/v1/messages?conversation_id={conv}").json()
+        self.assertEqual(messages["items"], [])
+        self.assertEqual(self.client.get(f"/api/v1/messages/{msg}").status_code, 404)
+        self.assertEqual(self._append(conv, content="Intruso").status_code, 404)
+        self.assertEqual(
+            self.client.patch(f"/api/v1/messages/{msg}", json={"payload": {}}).status_code,
+            404,
+        )
+        self.assertEqual(self.client.delete(f"/api/v1/messages/{msg}").status_code, 404)
+        self.assertEqual(
+            self.client.post(f"/api/v1/conversations/{conv}/reset", json={}).status_code,
+            404,
+        )
+
+        # Cada usuario tiene SU hilo del mismo paciente: el otro crea el suyo sin chocar.
+        own = self._new_conversation().json()["id"]
+        self.assertNotEqual(own, conv)
+        own_listed = self.client.get(
+            f"/api/v1/conversations?patient_id={self.patient_id}"
+        ).json()
+        self.assertIn(own, {row["id"] for row in own_listed["items"]})
+
+        # El dueño original conserva su hilo intacto.
+        self._as(*_ALL_PERMS)
+        mine = self.client.get(f"/api/v1/messages?conversation_id={conv}").json()
+        self.assertEqual([row["id"] for row in mine["items"]], [msg])
 
     # ----- RBAC -----
 

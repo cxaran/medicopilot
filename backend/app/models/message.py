@@ -9,6 +9,7 @@ from sqlalchemy import (
     Index,
     Integer,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -25,9 +26,13 @@ class Message(Base):
 
     Persiste cada turno del hilo: rol (enum NO nativo VARCHAR+CHECK), contenido de texto, un
     payload estructurado opcional (tool calls / metadatos) en JSON (JSONB en PostgreSQL) y un
-    índice de orden dentro de la conversación. uuid PK + auditoría + borrado lógico, igual que el
-    resto. Guardar el mensaje NO es una escritura clínica; las escrituras clínicas (borradores)
-    siguen su camino de aprobación (P1).
+    índice de orden dentro de la conversación. uuid PK + auditoría de creación/edición. A
+    diferencia del dominio clínico, el borrado es FÍSICO (decisión 2026-07-03): el chat no es
+    expediente y limpiarlo/reiniciarlo elimina las filas de verdad — por eso NO hay
+    ``deleted_at``/``deleted_by``. El orden lo garantiza la restricción única
+    ``(conversation_id, sequence_index)`` junto con el bloqueo de la conversación en el append.
+    Guardar el mensaje NO es una escritura clínica; las escrituras clínicas (borradores) siguen
+    su camino de aprobación (P1).
     """
 
     __tablename__ = "messages"
@@ -96,24 +101,15 @@ class Message(Base):
         nullable=True,
         comment="Usuario que actualizó el mensaje.",
     )
-    deleted_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime,
-        nullable=True,
-        comment="Fecha de eliminación lógica del mensaje.",
-    )
-    deleted_by: Mapped[Optional[uuid.UUID]] = mapped_column(
-        PG_UUID(as_uuid=True),
-        ForeignKey("user.id", ondelete="RESTRICT"),
-        nullable=True,
-        comment="Usuario que eliminó lógicamente el mensaje.",
-    )
-
     conversation = relationship("Conversation", foreign_keys=[conversation_id])
     created_by_user = relationship("User", foreign_keys=[created_by])
     updated_by_user = relationship("User", foreign_keys=[updated_by])
-    deleted_by_user = relationship("User", foreign_keys=[deleted_by])
 
     __table_args__ = (
         Index("ix_messages_conversation", "conversation_id"),
-        Index("ix_messages_conversation_sequence", "conversation_id", "sequence_index"),
+        # Orden estable del hilo: dos mensajes no pueden compartir índice en la misma
+        # conversación (el append bloquea la conversación y asigna MAX+1).
+        UniqueConstraint(
+            "conversation_id", "sequence_index", name="uq_messages_conversation_sequence"
+        ),
     )

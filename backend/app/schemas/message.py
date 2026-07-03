@@ -65,7 +65,13 @@ class MessageRead(ApiReadSchema):
 
 
 class MessageListItem(ApiReadSchema):
-    """Versión de listado compatible con ``ResourceQuery`` (orden por ``sequence_index``)."""
+    """Versión de listado compatible con ``ResourceQuery`` (orden por ``sequence_index``).
+
+    Incluye el ``payload`` estructurado: el sembrado del chat restaura el hilo DESDE ESTA LISTA
+    (razonamiento, tarjetas de herramientas, notas y UI generativa viven ahí); sin él, el hilo
+    recargado degrada a texto plano. No se proyecta como columna del recurso (sin ``title`` ni
+    ``ui.list``): es transporte para el cliente, no presentación tabular.
+    """
 
     id: uuid.UUID
     conversation_id: uuid.UUID = Field(title="Conversación")
@@ -73,3 +79,4 @@ class MessageListItem(ApiReadSchema):
     content: str = Field(title="Contenido", json_schema_extra={"ui": {"list": True}})
     sequence_index: int = Field(title="Orden", json_schema_extra={"ui": {"list": True}})
     created_at: datetime = Field(title="Creado", json_schema_extra={"ui": {"list": True}})
+    payload: Optional[dict[str, Any]] = None
