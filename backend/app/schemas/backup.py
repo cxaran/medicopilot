@@ -80,6 +80,28 @@ class BackupSettingsUpdate(ApiPatchSchema):
         title="Copias anuales",
         json_schema_extra={"ui": {"form": True, "widget": "number"}},
     )
+    explorer_enabled: Optional[bool] = Field(
+        default=None,
+        title="Artefacto de exploración",
+        description="Genera el SQLite legible junto a cada respaldo (mismo snapshot).",
+        json_schema_extra={"ui": {"form": True, "widget": "switch"}},
+    )
+    google_drive_client_id: Optional[str] = Field(
+        default=None,
+        min_length=1,
+        max_length=255,
+        title="Google Drive: client ID",
+        description="Del cliente OAuth (tipo web) creado en Google Cloud.",
+        json_schema_extra={"ui": {"form": True, "widget": "text"}},
+    )
+    # Secreto WRITE-ONLY: valor reemplaza, null borra, omitir conserva.
+    google_drive_client_secret: Optional[str] = Field(
+        default=None,
+        max_length=255,
+        title="Google Drive: client secret (write-only)",
+        description="Se guarda cifrado; nunca vuelve a mostrarse.",
+        json_schema_extra={"ui": {"form": True, "widget": "text"}},
+    )
     age_recipient: Optional[str] = Field(
         default=None,
         min_length=1,
@@ -107,6 +129,12 @@ class BackupSettingsRead(ApiReadSchema):
     retention_yearly_count: int
     age_recipient: Optional[str] = None
     age_recipient_fingerprint: Optional[str] = None
+    explorer_enabled: bool
+    google_drive_client_id: Optional[str] = None
+    google_drive_client_secret_configured: bool
+    # Redirect URI calculado (env override o derivado del dominio verificado): la UI
+    # lo muestra para copiarlo al crear el cliente en Google Cloud.
+    google_drive_redirect_uri: Optional[str] = None
     drive_status: BackupDriveStatus
     drive_folder_id: Optional[str] = None
     drive_connected_at: Optional[datetime] = None

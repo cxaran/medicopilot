@@ -197,6 +197,19 @@ class SendTestEmailRequest(ApiPatchSchema):
     )
 
 
+class VerifyDomainRequest(ApiPatchSchema):
+    """Cuerpo de la verificación de dominio (sin valor: se deriva del Origin)."""
+
+    base_url: Optional[str] = Field(
+        default=None,
+        min_length=8,
+        max_length=255,
+        title="Dominio base (opcional)",
+        description="https://tu-dominio; vacío = el dominio por el que navegas ahora.",
+        json_schema_extra={"ui": {"form": True, "widget": "text"}},
+    )
+
+
 class SetupChecklistItemRead(ApiReadSchema):
     """Ítem del checklist de puesta en marcha (estado derivado)."""
 

@@ -10,7 +10,7 @@ checklist.
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, Query, Request, status
 
 from backend.app.api.resource_actions import api_error, get_or_404, paginate_resource
 from backend.app.auth.auth_dependencies import CurrentUser
@@ -21,6 +21,7 @@ from backend.app.resources.registry import SYSTEM_SETTINGS
 from backend.app.schemas.pagination import OffsetPage
 from backend.app.schemas.system_settings import (
     SendTestEmailRequest,
+    VerifyDomainRequest,
     SetupChecklistItemRead,
     SetupChecklistRead,
     SystemSettingsListItem,
@@ -106,6 +107,98 @@ def dismiss_setup_checklist(
     """Descarta el banner del checklist (el checklist sigue disponible a demanda)."""
     system.dismiss_onboarding(session)
     session.commit()
+
+
+@router.get("/domain-challenge/{nonce}")
+def domain_challenge(nonce: str) -> dict[str, str]:
+    """Reto PÚBLICO de verificación de dominio: responde un HMAC del nonce con la
+    clave de la instalación. El verificador (verify-domain) llama a este endpoint A
+    TRAVÉS del dominio propuesto: si la respuesta coincide, ese dominio sirve ESTA
+    instalación. Sin estado, sin auth, sin efectos."""
+    import hashlib
+    import hmac as hmac_module
+
+    if not nonce or len(nonce) > 128:
+        api_error(status.HTTP_422_UNPROCESSABLE_ENTITY, "invalid_nonce", "Nonce inválido.")
+    digest = hmac_module.new(
+        settings.secret_key.get_secret_value().encode("utf-8"),
+        f"domain-challenge:{nonce}".encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    return {"challenge": digest}
+
+
+@router.post("/system-settings/{item_id}/verify-domain", response_model=SystemSettingsRead)
+async def verify_domain(
+    item_id: UUID,
+    payload: VerifyDomainRequest,
+    request: Request,
+    session: SessionDep,
+    current_user: CurrentUser,
+    _: SystemSettingsPermissions.CONFIGURE.requiere,
+) -> SystemSettingsRead:
+    """Verifica y guarda el dominio base de la instalación.
+
+    Deriva el candidato del header Origin si no se envía; lo normaliza (solo
+    esquema+host+puerto) y hace la prueba REAL: pedir el domain-challenge A TRAVÉS
+    de ese dominio y comparar el HMAC. Si pasa, se persiste (app_base_url +
+    verified_at), se AÑADE a los orígenes confiables en runtime (nunca reemplaza
+    los del entorno) y habilita los redirect URIs derivados (Google Drive)."""
+    import hashlib
+    import hmac as hmac_module
+    import secrets as secrets_module
+
+    from backend.app.core.runtime_origins import add_verified_origin, normalize_base_url
+
+    row = get_or_404(session, SystemSettings, item_id, _NOT_FOUND)
+    candidate_raw = payload.base_url or request.headers.get("origin") or ""
+    candidate = normalize_base_url(candidate_raw)
+    if candidate is None:
+        api_error(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "invalid_base_url",
+            "El dominio debe ser un origen http(s) sin ruta ni credenciales.",
+        )
+
+    nonce = secrets_module.token_urlsafe(24)
+    expected = hmac_module.new(
+        settings.secret_key.get_secret_value().encode("utf-8"),
+        f"domain-challenge:{nonce}".encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+    import httpx
+
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
+            response = await client.get(f"{candidate}/api/v1/domain-challenge/{nonce}")
+        received = response.json().get("challenge") if response.status_code == 200 else None
+    except Exception:
+        received = None
+    if received is None or not hmac_module.compare_digest(received, expected):
+        api_error(
+            status.HTTP_409_CONFLICT,
+            "domain_verification_failed",
+            f"No se pudo verificar {candidate}: el dominio no respondió el reto de "
+            "esta instalación (revisa DNS/proxy y que apunte a este despliegue).",
+        )
+
+    row.app_base_url = candidate
+    row.app_base_url_verified_at = utc_now()
+    row.updated_by = current_user.id
+    session.add(row)
+    add_verified_origin(candidate)
+    record_config_change(
+        session,
+        actor_user_id=current_user.id,
+        entity_type="system_settings",
+        entity_id=row.id,
+        action="domain_verified",
+        changed_fields=["app_base_url", "app_base_url_verified_at"],
+    )
+    session.commit()
+    session.refresh(row)
+    return _serialize_read(session, row)
 
 
 @router.post("/system-settings/{item_id}/send-test-email", response_model=SystemSettingsRead)

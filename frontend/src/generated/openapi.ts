@@ -878,6 +878,55 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/domain-challenge/{nonce}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Domain Challenge
+         * @description Reto PÚBLICO de verificación de dominio: responde un HMAC del nonce con la
+         *     clave de la instalación. El verificador (verify-domain) llama a este endpoint A
+         *     TRAVÉS del dominio propuesto: si la respuesta coincide, ese dominio sirve ESTA
+         *     instalación. Sin estado, sin auth, sin efectos.
+         */
+        get: operations["domain_challenge_api_v1_domain_challenge__nonce__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/system-settings/{item_id}/verify-domain": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Verify Domain
+         * @description Verifica y guarda el dominio base de la instalación.
+         *
+         *     Deriva el candidato del header Origin si no se envía; lo normaliza (solo
+         *     esquema+host+puerto) y hace la prueba REAL: pedir el domain-challenge A TRAVÉS
+         *     de ese dominio y comparar el HMAC. Si pasa, se persiste (app_base_url +
+         *     verified_at), se AÑADE a los orígenes confiables en runtime (nunca reemplaza
+         *     los del entorno) y habilita los redirect URIs derivados (Google Drive).
+         */
+        post: operations["verify_domain_api_v1_system_settings__item_id__verify_domain_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/system-settings/{item_id}/send-test-email": {
         parameters: {
             query?: never;
@@ -3473,6 +3522,14 @@ export interface components {
             age_recipient?: string | null;
             /** Age Recipient Fingerprint */
             age_recipient_fingerprint?: string | null;
+            /** Explorer Enabled */
+            explorer_enabled: boolean;
+            /** Google Drive Client Id */
+            google_drive_client_id?: string | null;
+            /** Google Drive Client Secret Configured */
+            google_drive_client_secret_configured: boolean;
+            /** Google Drive Redirect Uri */
+            google_drive_redirect_uri?: string | null;
             drive_status: components["schemas"]["BackupDriveStatus"];
             /** Drive Folder Id */
             drive_folder_id?: string | null;
@@ -3528,6 +3585,21 @@ export interface components {
             retention_monthly_count?: number | null;
             /** Copias anuales */
             retention_yearly_count?: number | null;
+            /**
+             * Artefacto de exploración
+             * @description Genera el SQLite legible junto a cada respaldo (mismo snapshot).
+             */
+            explorer_enabled?: boolean | null;
+            /**
+             * Google Drive: client ID
+             * @description Del cliente OAuth (tipo web) creado en Google Cloud.
+             */
+            google_drive_client_id?: string | null;
+            /**
+             * Google Drive: client secret (write-only)
+             * @description Se guarda cifrado; nunca vuelve a mostrarse.
+             */
+            google_drive_client_secret?: string | null;
             /**
              * Recipient de age (clave pública, opcional)
              * @description OPCIONAL. Sin recipient el respaldo sube SIN cifrar (.tar); con la clave PÚBLICA age1… se cifra antes de subir (la privada nunca se sube).
@@ -9388,6 +9460,17 @@ export interface components {
             ctx?: Record<string, never>;
         };
         /**
+         * VerifyDomainRequest
+         * @description Cuerpo de la verificación de dominio (sin valor: se deriva del Origin).
+         */
+        VerifyDomainRequest: {
+            /**
+             * Dominio base (opcional)
+             * @description https://tu-dominio; vacío = el dominio por el que navegas ahora.
+             */
+            base_url?: string | null;
+        };
+        /**
          * VitalMetric
          * @description Signo vital comparable en un criterio de umbral (columna de ``vital_signs``).
          * @enum {string}
@@ -11473,6 +11556,76 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    domain_challenge_api_v1_domain_challenge__nonce__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nonce: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    verify_domain_api_v1_system_settings__item_id__verify_domain_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VerifyDomainRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemSettingsRead"];
+                };
             };
             /** @description Validation Error */
             422: {

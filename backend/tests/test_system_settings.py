@@ -353,6 +353,83 @@ class SystemSettingsApiTest(unittest.TestCase):
         )
         self.assertEqual(forgot.status_code, 403)
 
+    # -- Dominio verificado ------------------------------------------------------------
+
+    def test_domain_challenge_is_public_and_deterministic(self) -> None:
+        first = self.client.get("/api/v1/domain-challenge/abc123")
+        second = self.client.get("/api/v1/domain-challenge/abc123")
+        other = self.client.get("/api/v1/domain-challenge/zzz")
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(first.json()["challenge"], second.json()["challenge"])
+        self.assertNotEqual(first.json()["challenge"], other.json()["challenge"])
+
+    def _mock_challenge_client(self, *, tamper: bool = False):  # type: ignore[no-untyped-def]
+        """Simula el fetch del reto: calcula el HMAC real del nonce de la URL (o uno
+        alterado para el caso de fallo)."""
+        import hashlib
+        import hmac as hmac_module
+
+        class _Response:
+            status_code = 200
+
+            def __init__(self, challenge: str) -> None:
+                self._challenge = challenge
+
+            def json(self) -> dict:
+                return {"challenge": self._challenge}
+
+        class _Client:
+            def __init__(self, *args, **kwargs) -> None: ...
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args) -> None: ...
+
+            async def get(self, url: str):
+                nonce = url.rsplit("/", 1)[-1]
+                digest = hmac_module.new(
+                    settings.secret_key.get_secret_value().encode("utf-8"),
+                    f"domain-challenge:{nonce}".encode("utf-8"),
+                    hashlib.sha256,
+                ).hexdigest()
+                return _Response("0" * 64 if tamper else digest)
+
+        return _Client
+
+    def test_verify_domain_persists_origin_and_enables_derived_redirects(self) -> None:
+        import httpx
+
+        sid = self._settings_id()
+        with mock.patch.object(httpx, "AsyncClient", self._mock_challenge_client()):
+            resp = self.client.post(
+                f"/api/v1/system-settings/{sid}/verify-domain",
+                json={"base_url": "https://clinica.example.com"},
+            )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        body = resp.json()
+        self.assertEqual(body["app_base_url"], "https://clinica.example.com")
+        self.assertIsNotNone(body["app_base_url_verified_at"])
+        from backend.app.core.runtime_origins import verified_origins
+
+        self.assertIn("https://clinica.example.com", verified_origins())
+
+    def test_verify_domain_rejects_mismatch_and_bad_urls(self) -> None:
+        import httpx
+
+        sid = self._settings_id()
+        bad = self.client.post(
+            f"/api/v1/system-settings/{sid}/verify-domain",
+            json={"base_url": "ftp://x/path?q=1"},
+        )
+        self.assertEqual(bad.status_code, 422)
+        with mock.patch.object(httpx, "AsyncClient", self._mock_challenge_client(tamper=True)):
+            resp = self.client.post(
+                f"/api/v1/system-settings/{sid}/verify-domain",
+                json={"base_url": "https://impostor.example.com"},
+            )
+        self.assertEqual(resp.status_code, 409, resp.text)
+        self.assertIn("domain_verification_failed", resp.text)
+
     # -- Servicio: bootstrap aplica la política --------------------------------------
 
     def test_apply_bootstrap_choices_updates_singleton(self) -> None:

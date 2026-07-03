@@ -20,7 +20,10 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     siguen siendo procesos propios (profile "taskiq"), nunca hijos de FastAPI. Un
     fallo del broker no impide arrancar la API (la cola es durable: el tick
     programado procesa lo pendiente igual)."""
+    from backend.app.core.runtime_origins import load_from_database
     from backend.app.taskiq_app import broker
+
+    load_from_database()
 
     try:
         await broker.startup()

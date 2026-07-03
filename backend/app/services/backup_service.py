@@ -212,9 +212,13 @@ def build_explorer_filename(
     return f"{prefix}-{stamp}-{run_id.hex[:8]}{suffix}"
 
 
-def initial_explorer_status() -> tuple[Optional[BackupExplorerStatus], Optional[int]]:
-    """Estado inicial del artefacto de exploración al CREAR una ejecución."""
-    if settings.backup_explorer_enabled:
+def initial_explorer_status(
+    config: BackupSettings,
+) -> tuple[Optional[BackupExplorerStatus], Optional[int]]:
+    """Estado inicial del artefacto de exploración al CREAR una ejecución. El flag
+    es POLÍTICA editable (backup_settings.explorer_enabled); el env quedó sólo como
+    valor de importación inicial."""
+    if config.explorer_enabled:
         return BackupExplorerStatus.BUILDING, 1
     return BackupExplorerStatus.NOT_REQUESTED, None
 
@@ -291,7 +295,14 @@ def missing_configuration(settings_row: BackupSettings) -> list[str]:
         missing.append("drive_folder_id")
     if settings.backup_token_encryption_key is None:
         missing.append("backup_token_encryption_key")
-    if not settings.google_drive_client_id or settings.google_drive_client_secret is None:
+    has_client_id = bool(
+        settings_row.google_drive_client_id or settings.google_drive_client_id
+    )
+    has_client_secret = bool(
+        settings_row.google_drive_client_secret_ciphertext
+        or settings.google_drive_client_secret is not None
+    )
+    if not has_client_id or not has_client_secret:
         missing.append("google_oauth_client")
     return missing
 
@@ -334,16 +345,54 @@ def decrypt_refresh_token(ciphertext: str) -> str:
 # --------------------------------------------------------------------------------
 
 
-def _require_oauth_client() -> tuple[str, str, str]:
-    client_id = settings.google_drive_client_id
-    client_secret = settings.google_drive_client_secret
-    redirect_uri = settings.google_drive_redirect_uri
-    if not client_id or client_secret is None or not redirect_uri:
+DRIVE_CALLBACK_PATH = "/api/v1/backups/google-drive/callback"
+
+
+def resolve_drive_redirect_uri(session: Session) -> Optional[str]:
+    """Redirect URI del OAuth de Drive: el env (override de despliegue) o DERIVADO
+    del dominio base verificado; ``None`` si no hay ninguno."""
+    if settings.google_drive_redirect_uri:
+        return settings.google_drive_redirect_uri
+    from backend.app.services.system_settings_service import get_system_settings
+
+    system = get_system_settings(session)
+    if system.app_base_url and system.app_base_url_verified_at is not None:
+        return system.app_base_url.rstrip("/") + DRIVE_CALLBACK_PATH
+    return None
+
+
+def resolve_drive_oauth(session: Session) -> tuple[str, str, str]:
+    """(client_id, client_secret, redirect_uri) del OAuth de Drive.
+
+    Las credenciales guardadas en la fila (UI) tienen prioridad; las variables de
+    entorno actúan como fallback/override de despliegue (IaC). Lanza
+    ``BackupPermanentError`` con la causa exacta si falta algo.
+    """
+    config = get_backup_settings(session)
+    client_id = config.google_drive_client_id or settings.google_drive_client_id
+    client_secret: Optional[str] = None
+    if config.google_drive_client_secret_ciphertext:
+        from backend.app.services.secret_cipher import decrypt_secret
+
+        client_secret = decrypt_secret(config.google_drive_client_secret_ciphertext)
+    if client_secret is None and settings.google_drive_client_secret is not None:
+        client_secret = settings.google_drive_client_secret.get_secret_value()
+    redirect_uri = resolve_drive_redirect_uri(session)
+
+    missing = []
+    if not client_id:
+        missing.append("client ID")
+    if not client_secret:
+        missing.append("client secret")
+    if not redirect_uri:
+        missing.append("redirect URI (verifica el dominio de la instalación)")
+    if missing:
         raise BackupPermanentError(
             "oauth_client_unconfigured",
-            "Faltan GOOGLE_DRIVE_CLIENT_ID/SECRET/REDIRECT_URI en el despliegue.",
+            "Falta configurar el cliente OAuth de Google: " + ", ".join(missing) + ".",
         )
-    return client_id, client_secret.get_secret_value(), redirect_uri
+    assert client_id is not None and client_secret is not None and redirect_uri is not None
+    return client_id, client_secret, redirect_uri
 
 
 def get_backup_settings(session: Session, *, for_update: bool = False) -> BackupSettings:
@@ -362,7 +411,7 @@ def get_backup_settings(session: Session, *, for_update: bool = False) -> Backup
 def start_drive_connection(session: Session, user_id: uuid.UUID) -> str:
     """Crea el state OAuth (sólo su SHA-256 se guarda) y devuelve la URL de
     autorización de Google. Purga estados expirados al crear uno nuevo."""
-    client_id, _client_secret, redirect_uri = _require_oauth_client()
+    client_id, _client_secret, redirect_uri = resolve_drive_oauth(session)
 
     now = utc_now()
     for stale in session.exec(
@@ -398,7 +447,7 @@ def start_drive_connection(session: Session, user_id: uuid.UUID) -> str:
 def complete_drive_connection(session: Session, *, state: str, code: str) -> None:
     """Callback OAuth: valida y consume el state, intercambia el code, exige refresh
     token, lo cifra, asegura la carpeta y activa la conexión."""
-    client_id, client_secret, redirect_uri = _require_oauth_client()
+    client_id, client_secret, redirect_uri = resolve_drive_oauth(session)
 
     now = utc_now()
     state_hash = hashlib.sha256(state.encode("utf-8")).hexdigest()
@@ -557,7 +606,9 @@ def backup_settings_email(config: BackupSettings, identity_plain: Optional[str])
     return "MediCopilot: configuración de respaldos actualizada", "\n".join(lines)
 
 
-def drive_client_from_config(config: BackupSettings) -> GoogleDriveBackupService:
+def drive_client_from_config(
+    session: Session, config: BackupSettings
+) -> GoogleDriveBackupService:
     """Cliente de Drive autenticado con la conexión guardada. Lanza
     ``BackupPermanentError`` si Drive no está conectado/activo."""
     if (
@@ -568,7 +619,7 @@ def drive_client_from_config(config: BackupSettings) -> GoogleDriveBackupService
         raise BackupPermanentError(
             "drive_not_connected", "Google Drive no está conectado."
         )
-    client_id, client_secret, _redirect = _require_oauth_client()
+    client_id, client_secret, _redirect = resolve_drive_oauth(session)
     return GoogleDriveBackupService(
         refresh_token=decrypt_refresh_token(config.drive_refresh_token_ciphertext),
         client_id=client_id,
@@ -578,7 +629,7 @@ def drive_client_from_config(config: BackupSettings) -> GoogleDriveBackupService
 
 def enqueue_manual_run(session: Session) -> BackupRun:
     """Crea la ejecución manual (queued, reclamable de inmediato por el tick)."""
-    explorer_status, policy = initial_explorer_status()
+    explorer_status, policy = initial_explorer_status(get_backup_settings(session))
     run = BackupRun(
         status=BackupRunStatus.QUEUED,
         trigger_kind=BackupTriggerKind.MANUAL,
@@ -677,7 +728,7 @@ class BackupService:
             )
             return
 
-        explorer_status, policy = initial_explorer_status()
+        explorer_status, policy = initial_explorer_status(config)
         session.add(
             BackupRun(
                 status=BackupRunStatus.QUEUED,
@@ -769,7 +820,8 @@ class BackupService:
                 "drive_token_missing", "No hay token de Drive guardado; reconecta Google Drive."
             )
 
-        client_id, client_secret, _redirect = _require_oauth_client()
+        with Session(engine) as oauth_session:
+            client_id, client_secret, _redirect = resolve_drive_oauth(oauth_session)
         drive = GoogleDriveBackupService(
             refresh_token=decrypt_refresh_token(token_ciphertext),
             client_id=client_id,
@@ -977,8 +1029,8 @@ class BackupService:
         """Construye el SQLite de exploración DENTRO del snapshot compartido. Un
         fallo aquí marca explorer_status=failed y devuelve None: el respaldo
         restaurable continúa intacto."""
-        if not settings.backup_explorer_enabled:
-            return None
+        # El gate real es la política (explorer_status del run, decidido al crear);
+        # el flag de la fila pudo cambiar después y el run manda.
         with Session(engine) as session:
             run = session.get(BackupRun, run_id)
             if run is None or run.explorer_status != BackupExplorerStatus.BUILDING:

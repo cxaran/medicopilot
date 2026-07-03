@@ -124,6 +124,23 @@ class BackupSettings(Base):
         ),
     )
 
+    google_drive_client_id: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        nullable=True,
+        comment="Client ID del OAuth de Google (editable en la UI; el entorno actúa como fallback).",
+    )
+    google_drive_client_secret_ciphertext: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Client secret del OAuth de Google CIFRADO (Fernet). Nunca se proyecta a la API.",
+    )
+    explorer_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        comment="Genera el artefacto de exploración (SQLite legible) junto a cada respaldo.",
+    )
+
     drive_status: Mapped[BackupDriveStatus] = mapped_column(
         SAEnum(
             BackupDriveStatus,

@@ -379,6 +379,69 @@ class BackupApiAndTickTest(unittest.TestCase):
             self.client.post(f"/api/v1/backup-settings/{sid}/run-now").status_code, 403
         )
 
+    # -- Credenciales del cliente OAuth de Google en la fila ------------------------
+
+    def test_drive_client_secret_is_write_only_and_db_takes_priority(self) -> None:
+        sid = self._settings_id()
+        with self._with_fernet_key():
+            resp = self.client.patch(
+                f"/api/v1/backup-settings/{sid}",
+                json={
+                    "google_drive_client_id": "db-client-id.apps.googleusercontent.com",
+                    "google_drive_client_secret": "GOCSPX-super-secreto",
+                },
+            )
+            self.assertEqual(resp.status_code, 200, resp.text)
+            body = resp.json()
+            self.assertTrue(body["google_drive_client_secret_configured"])
+            self.assertNotIn("GOCSPX-super-secreto", resp.text)
+
+            # resolve_drive_oauth prioriza la fila sobre el entorno.
+            with Session(self.engine) as session:
+                with mock.patch.object(backups.settings, "google_drive_client_id", "env-id"), \
+                        mock.patch.object(
+                            backups.settings, "google_drive_redirect_uri", "http://x/cb"
+                        ):
+                    client_id, client_secret, redirect = backups.resolve_drive_oauth(session)
+            self.assertEqual(client_id, "db-client-id.apps.googleusercontent.com")
+            self.assertEqual(client_secret, "GOCSPX-super-secreto")
+            self.assertEqual(redirect, "http://x/cb")
+
+            # null borra el secreto.
+            clear = self.client.patch(
+                f"/api/v1/backup-settings/{sid}", json={"google_drive_client_secret": None}
+            )
+            self.assertFalse(clear.json()["google_drive_client_secret_configured"])
+
+    def test_drive_redirect_derives_from_verified_domain(self) -> None:
+        from backend.app.models.system_settings import SystemSettings
+        from backend.app.utils.utc_now import utc_now
+
+        # El singleton puede existir de otras suites: se actualiza, no se inserta.
+        from backend.app.services.system_settings_service import get_system_settings
+
+        with Session(self.engine) as session:
+            row = get_system_settings(session, for_update=True)
+            row.app_base_url = "https://clinica.example.com"
+            row.app_base_url_verified_at = utc_now()
+            session.add(row)
+            session.commit()
+        try:
+            with Session(self.engine) as session:
+                with mock.patch.object(backups.settings, "google_drive_redirect_uri", None):
+                    redirect = backups.resolve_drive_redirect_uri(session)
+            self.assertEqual(
+                redirect,
+                "https://clinica.example.com/api/v1/backups/google-drive/callback",
+            )
+        finally:
+            with Session(self.engine) as session:
+                row = get_system_settings(session, for_update=True)
+                row.app_base_url = None
+                row.app_base_url_verified_at = None
+                session.add(row)
+                session.commit()
+
     # -- Archivos reales en Drive (fase inicial del explorador) --------------------
 
     def _connect_fake_drive(self) -> None:
@@ -768,22 +831,26 @@ class BackupApiAndTickTest(unittest.TestCase):
     def test_new_runs_get_initial_explorer_status_by_setting(self) -> None:
         from backend.app.models.enums import BackupExplorerStatus
 
-        # Ambos sentidos se fijan explícitamente: el entorno de la suite puede
-        # correr con BACKUP_EXPLORER_ENABLED en cualquier valor.
-        with mock.patch.object(backups.settings, "backup_explorer_enabled", False):
-            with Session(self.engine) as session:
-                run_off = backups.enqueue_manual_run(session)
-                session.commit()
-                self.assertEqual(
-                    run_off.explorer_status, BackupExplorerStatus.NOT_REQUESTED
-                )
-                self.assertIsNone(run_off.explorer_policy_version)
-        with mock.patch.object(backups.settings, "backup_explorer_enabled", True):
-            with Session(self.engine) as session:
-                run_on = backups.enqueue_manual_run(session)
-                session.commit()
-                self.assertEqual(run_on.explorer_status, BackupExplorerStatus.BUILDING)
-                self.assertEqual(run_on.explorer_policy_version, 1)
+        # El default de la fila del setUp es explorer_enabled=False.
+        with Session(self.engine) as session:
+            run_off = backups.enqueue_manual_run(session)
+            session.commit()
+            self.assertEqual(
+                run_off.explorer_status, BackupExplorerStatus.NOT_REQUESTED
+            )
+            self.assertIsNone(run_off.explorer_policy_version)
+        # El flag es POLÍTICA de la fila (backup_settings.explorer_enabled), ya no
+        # una variable de entorno.
+        with Session(self.engine) as session:
+            config = backups.get_backup_settings(session, for_update=True)
+            config.explorer_enabled = True
+            session.add(config)
+            session.commit()
+        with Session(self.engine) as session:
+            run_on = backups.enqueue_manual_run(session)
+            session.commit()
+            self.assertEqual(run_on.explorer_status, BackupExplorerStatus.BUILDING)
+            self.assertEqual(run_on.explorer_policy_version, 1)
 
     def test_explorer_success_marks_ready_without_touching_restore(self) -> None:
         import tempfile as tempfile_module

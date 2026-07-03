@@ -63,6 +63,21 @@ _RUN_NOT_FOUND = "Ejecución de respaldo no encontrada"
 _FRONTEND_BACKUPS_PATH = "/backups"
 
 
+def _serialize_settings(session, row) -> BackupSettingsRead:  # type: ignore[no-untyped-def]
+    """Read con los campos CALCULADOS (secret configurado y redirect derivado)."""
+    from backend.app.api.resource_actions import serialize_with
+
+    return serialize_with(
+        BackupSettingsRead,
+        row,
+        {
+            "google_drive_client_secret_configured": row.google_drive_client_secret_ciphertext
+            is not None,
+            "google_drive_redirect_uri": backups.resolve_drive_redirect_uri(session),
+        },
+    )
+
+
 async def _send_settings_email(session, email_to: str, row) -> None:  # type: ignore[no-untyped-def]
     """Correo con la configuración aplicada y, si el sistema generó la clave de
     cifrado, la identidad privada (para que nunca se pierda). Best-effort: un fallo
@@ -88,7 +103,7 @@ def get_backup_settings_detail(
     _: BackupPermissions.READ.requiere,
 ) -> BackupSettingsRead:
     row = get_or_404(session, BackupSettings, item_id, _SETTINGS_NOT_FOUND)
-    return serialize(BackupSettingsRead, row)
+    return _serialize_settings(session, row)
 
 
 @router.patch("/backup-settings/{item_id}", response_model=BackupSettingsRead)
@@ -104,6 +119,7 @@ async def update_backup_settings(
     configuración completa. Cambios de horario recalculan ``next_run_at``."""
     row = get_or_404(session, BackupSettings, item_id, _SETTINGS_NOT_FOUND)
     data = payload.model_dump(exclude_unset=True)
+    changed_field_names = list(data.keys())
 
     if "timezone" in data:
         try:
@@ -127,6 +143,19 @@ async def update_backup_settings(
         row.age_identity_ciphertext = None
         if data["age_recipient"] is None:
             row.age_recipient_fingerprint = None
+
+    # Secreto WRITE-ONLY del cliente OAuth de Google: cifrar/borrar/conservar —
+    # ANTES del setattr genérico (no existe como columna en claro).
+    if "google_drive_client_secret" in data:
+        from backend.app.services.secret_cipher import SecretCipherError, encrypt_secret
+
+        secret_value = data.pop("google_drive_client_secret")
+        try:
+            row.google_drive_client_secret_ciphertext = (
+                encrypt_secret(secret_value) if secret_value else None
+            )
+        except SecretCipherError as error:
+            api_error(status.HTTP_409_CONFLICT, error.code, error.summary)
 
     for field, value in data.items():
         setattr(row, field, value)
@@ -157,7 +186,7 @@ async def update_backup_settings(
         entity_type="backup_settings",
         entity_id=row.id,
         action="backup_settings_updated",
-        changed_fields=list(data.keys()),
+        changed_fields=changed_field_names,
     )
     session.commit()
     session.refresh(row)
@@ -165,7 +194,7 @@ async def update_backup_settings(
     # hizo, incluyendo la clave de cifrado si el sistema la generó (requisito del
     # dueño: que la clave que abre los respaldos nunca se pierda).
     await _send_settings_email(session, current_user.email, row)
-    return serialize(BackupSettingsRead, row)
+    return _serialize_settings(session, row)
 
 
 @router.post(
@@ -200,7 +229,7 @@ async def generate_encryption_key(
     session.commit()
     session.refresh(row)
     await _send_settings_email(session, current_user.email, row)
-    return serialize(BackupSettingsRead, row)
+    return _serialize_settings(session, row)
 
 
 @router.post(
@@ -284,7 +313,7 @@ async def disconnect_drive(
     session.commit()
     session.refresh(row)
     await _send_settings_email(session, current_user.email, row)
-    return serialize(BackupSettingsRead, row)
+    return _serialize_settings(session, row)
 
 
 @router.post("/backup-settings/{item_id}/run-now", response_model=BackupRunRead)
@@ -346,7 +375,7 @@ def _drive_or_conflict(session: SessionDep):  # type: ignore[no-untyped-def]
     """Cliente Drive + carpeta desde la conexión guardada, o 409 legible."""
     config = backups.get_backup_settings(session)
     try:
-        client = backups.drive_client_from_config(config)
+        client = backups.drive_client_from_config(session, config)
     except backups.BackupPermanentError as error:
         api_error(status.HTTP_409_CONFLICT, error.code, error.summary)
     assert config.drive_folder_id is not None  # garantizado por drive_client_from_config

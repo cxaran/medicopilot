@@ -148,6 +148,7 @@ from backend.app.schemas.patient_history_item import (
 from backend.app.schemas.audit_event import AuditEventListItem
 from backend.app.schemas.system_settings import (
     SendTestEmailRequest,
+    VerifyDomainRequest,
     SystemSettingsListItem,
     SystemSettingsUpdate,
 )
@@ -1415,6 +1416,26 @@ RESOURCE_REGISTRY: tuple[ResourceDefinition, ...] = (
         update_permission=SystemSettingsPermissions.CONFIGURE,
         detail_url_template="/api/v1/system-settings/{id}",
         actions=(
+            ActionDef(
+                name="verify_domain",
+                label="Verificar dominio",
+                method=HttpMethod.POST,
+                url_template="/api/v1/system-settings/{id}/verify-domain",
+                scope=ActionScope.ITEM,
+                danger=False,
+                permission=SystemSettingsPermissions.CONFIGURE,
+                input_schema=VerifyDomainRequest,
+                confirmation=ConfirmationDef(
+                    title="Verificar dominio",
+                    message=(
+                        "Se comprobará que el dominio sirve esta instalación y se "
+                        "usará para calcular las URLs de OAuth."
+                    ),
+                    confirm_label="Verificar",
+                    destructive=False,
+                    required=False,
+                ),
+            ),
             ActionDef(
                 name="send_test_email",
                 label="Enviar correo de prueba",

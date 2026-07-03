@@ -225,9 +225,12 @@ class Settings(BaseSettings):
     # horario/retención EDITABLES viven en la tabla backup_settings (no aquí); estos
     # settings son el interruptor global y los secretos de despliegue. Apagado por
     # defecto: la API y el worker arrancan igual que antes sin configurar nada.
-    backups_enabled: bool = False
-    # Artefacto de EXPLORACIÓN por respaldo (SQLite legible del mismo snapshot).
-    # Apagado por defecto: no afecta instalaciones existentes.
+    # KILL-SWITCH del tick de respaldos (no un paso de instalación): el interruptor
+    # real es backup_settings.enabled, editable en la UI. Apagar esto detiene el
+    # procesamiento aunque la política diga lo contrario (emergencias).
+    backups_enabled: bool = True
+    # DEPRECADA como política: backup_settings.explorer_enabled (DB, editable) es la
+    # fuente de verdad; la migración d0e1f2a3b4c5 importó este valor una única vez.
     backup_explorer_enabled: bool = False
     backup_temp_dir: str = "/tmp/medicopilot-backups"
     backup_run_lease_minutes: int = 120
