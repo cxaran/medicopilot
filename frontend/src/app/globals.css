@@ -379,6 +379,14 @@ input::placeholder {
 .rt-row { --row-bg: var(--panel); transition: background-color 0.18s cubic-bezier(0.4, 0, 0.2, 1); }
 .rt-row:hover { --row-bg: var(--panel2); background: var(--panel2); }
 
+/* Fila enfocada por teclado (navegación j/k/flechas): resalte + barra acento. */
+.rt-row:focus {
+  --row-bg: var(--panel2);
+  outline: none;
+  background: var(--panel2);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
 /* Celda de acciones anclada al borde visible del scroll. */
 .rt-actions-cell {
   position: sticky;
@@ -399,6 +407,94 @@ input::placeholder {
 @media (hover: none) {
   .rt-col-filter {
     opacity: 1;
+  }
+}
+
+/*
+ * ====================================================================
+ * Tanda 3A — respuesta por CONTAINER queries (no viewport): la misma tabla
+ * decide su forma por el ancho de SU contenedor, porque vive en dos contextos
+ * muy distintos (página /resources completa vs record panel del chat).
+ * - Rango intermedio (<52rem): se ocultan las columnas de BAJA prioridad
+ *   (.rt-prio-low: datetimes de auditoría, uuids — heurística del contrato).
+ * - Contenedor angosto (<35rem): el MISMO markup de tabla se re-compone como
+ *   TARJETAS (tr=card, td=par etiqueta/valor vía data-label, primera columna
+ *   como título, acciones al pie). Cero JS y cero DOM duplicado; en navegadores
+ *   sin @container simplemente queda la tabla con scroll.
+ * ====================================================================
+ */
+.rt-container {
+  container-type: inline-size;
+}
+
+@container (max-width: 52rem) {
+  .rt-prio-low {
+    display: none;
+  }
+}
+
+@container (max-width: 35rem) {
+  .rt-cards .rt-scroller {
+    overflow: visible;
+  }
+  .rt-cards .rt-shade {
+    display: none;
+  }
+  .rt-cards table {
+    display: block;
+    min-width: 0;
+  }
+  .rt-cards thead {
+    display: none;
+  }
+  .rt-cards tbody {
+    display: block;
+  }
+  .rt-cards tr.rt-row {
+    display: flex;
+    flex-direction: column;
+    padding: 10px 14px;
+  }
+  .rt-cards td {
+    display: grid;
+    grid-template-columns: minmax(84px, 38%) 1fr;
+    align-items: baseline;
+    gap: 10px;
+    padding: 2px 0;
+  }
+  .rt-cards td::before {
+    content: attr(data-label);
+    font-size: 11.5px;
+    font-weight: 500;
+    color: var(--tx3);
+  }
+  /* Título de la tarjeta: la primera columna de TEXTO (marcada en el markup),
+     reordenada al frente con flex order, sin etiqueta. */
+  .rt-cards td.rt-card-title {
+    order: -1;
+    display: block;
+    padding-bottom: 4px;
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .rt-cards td.rt-card-title::before {
+    content: none;
+  }
+  .rt-cards td.rt-card-title span {
+    max-width: none;
+    white-space: normal;
+    text-align: left;
+  }
+  /* Acciones al pie de la tarjeta; el sticky/degradado no aplican aquí. */
+  .rt-cards td.rt-actions-cell {
+    display: flex;
+    justify-content: flex-end;
+    position: static;
+    background: none;
+    padding-top: 8px;
+  }
+  .rt-cards td.rt-actions-cell::before {
+    content: none;
   }
 }
 
@@ -444,20 +540,30 @@ input::placeholder {
 
 /* Flyout: pildora elevada que se despliega hacia la izquierda de la pestana.
    Oculto con opacity (no visibility) para que el foco de teclado pueda entrar
-   a los enlaces y revelarlo via :focus-within. */
+   a los enlaces y revelarlo via :focus-within. Los chips van SIEMPRE en una sola
+   linea: el wrap a dos lineas excede el alto de la fila y el overflow del
+   scroller lo recorta. El ancho crece hasta casi todo el contenedor de la tabla
+   (100cqw, resuelto contra .rt-container) y, si aun asi no cabe, la pildora
+   scrollea horizontalmente por dentro (flex-start deja el inicio alcanzable;
+   con width: max-content el shrink-to-fit alinea a la derecha igual). */
 .rt-flyout {
   position: absolute;
   top: 50%;
   right: calc(100% + 8px);
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  flex-wrap: wrap;
+  justify-content: flex-start;
+  flex-wrap: nowrap;
   gap: 2px;
   /* max-content: el shrink-to-fit del posicionamiento absoluto colapsaria al ancho
-     del ancla (la pestana); el tope lo pone max-width y flex-wrap hace el resto. */
+     del ancla (la pestana); el tope lo pone max-width. */
   width: max-content;
   max-width: min(70vw, 440px);
+  /* 112px ≈ pestana + lead opcional + paddings de la celda de acciones. */
+  max-width: calc(100cqw - 112px);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
   padding: 4px;
   border-radius: 15px;
   border: 1px solid var(--border);
@@ -473,6 +579,10 @@ input::placeholder {
     transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
   z-index: 5;
 }
+/* ResourceRowActions trae su propio wrapper flex-wrap (deseable en agenda y
+   detalle); dentro de la pildora envolveria a dos lineas otra vez → nowrap
+   (regla unlayered: gana a la utility). */
+.rt-flyout div { flex-wrap: nowrap; }
 .rt-flyout:focus-within,
 .rt-anchor[data-open="1"] .rt-flyout {
   opacity: 1;

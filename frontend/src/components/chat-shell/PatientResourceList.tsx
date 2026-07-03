@@ -201,6 +201,7 @@ export function PatientResourceList({
         resourceName={resourceName}
         relations={capability.relations ?? []}
         actions={capability.actions ?? []}
+        relatedLists={capability.related_lists ?? []}
         itemReference={capability.item_reference ?? null}
         editEnabled={editEnabled}
         detailEnabled={detailEnabled}

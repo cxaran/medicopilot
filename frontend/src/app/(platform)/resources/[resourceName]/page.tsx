@@ -149,6 +149,7 @@ export default async function ResourcePage({ params, searchParams }: PageProps) 
         resourceName={resourceName}
         relations={capability.relations ?? []}
         actions={capability.actions ?? []}
+        relatedLists={capability.related_lists ?? []}
         itemReference={capability.item_reference ?? null}
         editEnabled={Boolean(
           capability.item_reference && capability.detail && capability.forms?.update,

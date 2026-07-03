@@ -152,7 +152,9 @@ export function ResourcePagination({
     if (total <= limit && offset === 0) return null;
     return (
       <div className="flex items-center justify-end gap-2">
-        <span className="text-[12px] tabular-nums text-[var(--tx3)]">{rangeText(pagination)}</span>
+        <span aria-live="polite" className="text-[12px] tabular-nums text-[var(--tx3)]">
+          {rangeText(pagination)}
+        </span>
         <ArrowControl
           direction="prev"
           href={prevHref}
@@ -235,7 +237,10 @@ export function ResourcePagination({
 
   return (
     <div className="flex flex-wrap items-center justify-between gap-3">
-      <p className="text-[13px] tabular-nums text-[var(--tx3)]">{rangeText(pagination)}</p>
+      {/* aria-live: los lectores anuncian el nuevo rango al aplicar filtros/búsqueda. */}
+      <p aria-live="polite" className="text-[13px] tabular-nums text-[var(--tx3)]">
+        {rangeText(pagination)}
+      </p>
       <div className="flex flex-wrap items-center gap-4">
         {limits}
         {pages}

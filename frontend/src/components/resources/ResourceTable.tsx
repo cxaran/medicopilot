@@ -6,6 +6,7 @@ import type {
   ItemReference,
   ResourceActionCapability,
   ResourceListCapability,
+  ResourceRelatedListCapability,
   ResourceRelationCapability,
 } from "@/core/api/contracts";
 import type { ResourceListPage } from "@/core/resources/list-types";
@@ -27,6 +28,15 @@ const ACTION_LINK_CLASS =
 function rowId(row: Record<string, unknown>, field: string): string | null {
   const value = row[field];
   return typeof value === "string" && value !== "" ? value : null;
+}
+
+// Prioridad HEURÍSTICA por columna (guía de presentación, no contrato): la
+// primera columna y los enums de estado son alta; datetimes de auditoría y
+// uuids son baja → se ocultan primero cuando el contenedor se estrecha.
+function columnPriorityClass(index: number, type: FieldValueType): string {
+  if (index === 0) return "";
+  if (type === "datetime" || type === "uuid") return "rt-prio-low";
+  return "";
 }
 
 // Alineación por tipo de dato (encabezado y celda): números a la derecha con
@@ -167,6 +177,7 @@ export function ResourceTable({
   resourceName,
   relations = [],
   actions = [],
+  relatedLists = [],
   itemReference = null,
   editEnabled = false,
   detailEnabled = false,
@@ -189,6 +200,10 @@ export function ResourceTable({
   resourceName: string;
   relations?: ResourceRelationCapability[];
   actions?: ResourceActionCapability[];
+  // Listas relacionadas del contrato (capability.related_lists): enlace por fila a la
+  // lista del recurso destino filtrada por esta fila (p. ej. signos vitales de la
+  // consulta). El backend ya las filtró por permiso de lectura del destino.
+  relatedLists?: ResourceRelatedListCapability[];
   itemReference?: ItemReference | null;
   editEnabled?: boolean;
   detailEnabled?: boolean;
@@ -227,15 +242,25 @@ export function ResourceTable({
   const idField = itemReference?.field ?? "id";
   const actionPlaceholder = itemReference?.placeholder ?? "id";
   const hasActions =
-    detailEnabled || editEnabled || relations.length > 0 || actions.length > 0 || Boolean(renderRowLead);
+    detailEnabled ||
+    editEnabled ||
+    relations.length > 0 ||
+    actions.length > 0 ||
+    relatedLists.length > 0 ||
+    Boolean(renderRowLead);
   const enumLabels = enumLabelMaps(list);
+  // Título de la tarjeta en modo container-angosto: la primera columna de texto
+  // (un expediente numérico como título lee mal); cae a la primera si no hay.
+  const cardTitleName = (columns.find((column) => column.type === "string") ?? columns[0])?.name;
 
   // Densidad: el modo compacto recorta paddings y alto del header.
   const cellPad = compact ? "px-3 py-2" : "px-4 py-3";
   const headPad = compact ? "h-9 px-3" : "h-10 px-4";
+  // rt-container/rt-cards: container queries — prioridad de columnas y modo
+  // tarjetas según el ancho del CONTENEDOR (página completa vs record panel).
   const containerClass = compact
-    ? "overflow-hidden rounded-[10px] border border-[var(--border)]"
-    : "overflow-hidden rounded-[14px] border border-[var(--border)] bg-[var(--panel)] shadow-[var(--soft)]";
+    ? "rt-container rt-cards overflow-hidden rounded-[10px] border border-[var(--border)]"
+    : "rt-container rt-cards overflow-hidden rounded-[14px] border border-[var(--border)] bg-[var(--panel)] shadow-[var(--soft)]";
 
   function itemHref(id: string, ...segments: string[]): string {
     const tail = segments.map((segment) => encodeURIComponent(segment)).join("/");
@@ -264,7 +289,7 @@ export function ResourceTable({
             <table className="min-w-full divide-y divide-[var(--border)] text-sm">
               <thead className="rt-thead">
                 <tr>
-                  {columns.map((column) => {
+                  {columns.map((column, columnIndex) => {
                     const active =
                       explicitSort && explicitSort.field === column.name
                         ? explicitSort.direction
@@ -282,7 +307,7 @@ export function ResourceTable({
                               ? "descending"
                               : undefined
                         }
-                        className={`rt-th-resize group/th whitespace-nowrap p-0 align-middle text-[13px] font-medium text-[var(--tx2)] ${align.th}`}
+                        className={`rt-th-resize group/th whitespace-nowrap p-0 align-middle text-[13px] font-medium text-[var(--tx2)] ${align.th} ${columnPriorityClass(columnIndex, column.type)}`}
                       >
                         <div className={`flex items-center ${align.justify}`}>
                           {column.sortable ? (
@@ -327,14 +352,24 @@ export function ResourceTable({
                   const rowActions = visibleActionsForRow(actions, row);
                   const hasFlyout =
                     Boolean(id) &&
-                    (detailEnabled || editEnabled || relations.length > 0 || rowActions.length > 0);
+                    (detailEnabled ||
+                      editEnabled ||
+                      relations.length > 0 ||
+                      relatedLists.length > 0 ||
+                      rowActions.length > 0);
                   return (
                     <tr key={id ?? rowIndex} className="rt-row">
-                      {columns.map((column) => {
+                      {columns.map((column, columnIndex) => {
                         const align = columnAlignment(column.type);
                         const spanClass = `block max-w-[36ch] truncate ${align.cell}`;
                         return (
-                          <td key={column.name} className={`${cellPad} text-[var(--tx)]`}>
+                          <td
+                            key={column.name}
+                            data-label={column.label}
+                            className={`${cellPad} text-[var(--tx)] ${columnPriorityClass(columnIndex, column.type)} ${
+                              column.name === cardTitleName ? "rt-card-title" : ""
+                            }`}
+                          >
                             <CellView
                               value={row[column.name]}
                               type={column.type}
@@ -353,6 +388,7 @@ export function ResourceTable({
                                 {detailEnabled ? (
                                   <Link
                                     href={`/resources/${encodeURIComponent(resourceName)}/${encodeURIComponent(id)}`}
+                                    data-row-detail
                                     className={ACTION_LINK_CLASS}
                                   >
                                     Ver
@@ -380,6 +416,15 @@ export function ResourceTable({
                                     className={ACTION_LINK_CLASS}
                                   >
                                     {relation.label}
+                                  </Link>
+                                ))}
+                                {relatedLists.map((related) => (
+                                  <Link
+                                    key={related.resource}
+                                    href={`/resources/${encodeURIComponent(related.resource)}?${encodeURIComponent(related.parameter_name)}=${encodeURIComponent(id)}`}
+                                    className={ACTION_LINK_CLASS}
+                                  >
+                                    {related.label}
                                   </Link>
                                 ))}
                                 {rowActions.length > 0 ? (

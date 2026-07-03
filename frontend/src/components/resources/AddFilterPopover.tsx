@@ -56,6 +56,7 @@ export function AddFilterPopover({
         type="button"
         onClick={toggle}
         aria-expanded={Boolean(anchor)}
+        data-hotkey="add-filter"
         className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-[10px] border border-dashed border-[var(--border2)] px-3 text-[12.5px] font-medium text-[var(--tx2)] transition hover:border-[var(--accent-bd)] hover:text-[var(--accent-tx)]"
       >
         <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">

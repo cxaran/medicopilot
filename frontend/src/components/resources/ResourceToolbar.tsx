@@ -6,6 +6,8 @@ import type { FilterableFieldControl } from "@/core/resources/filterable";
 import { AddFilterPopover } from "./AddFilterPopover";
 import { ColumnVisibilityMenu } from "./ColumnVisibilityMenu";
 import { ResourceSearch } from "./ResourceSearch";
+import { TableHotkeys } from "./TableHotkeys";
+import { ViewsMenu } from "./ViewsMenu";
 import { ExportButton } from "./export/ExportButton";
 import { hrefWithParamUpdates } from "./filter-nav";
 
@@ -90,6 +92,8 @@ export function ResourceToolbar({
 
   return (
     <div className="flex flex-wrap items-center gap-2">
+      {/* Atajos de teclado (sin UI): /, f, j/k, ←/→, Enter, Ctrl+P. */}
+      <TableHotkeys />
       <h2 className="mr-1 shrink-0 text-lg font-semibold text-[var(--tx)]">{label}</h2>
 
       {search.enabled ? (
@@ -126,6 +130,7 @@ export function ResourceToolbar({
       <AddFilterPopover fields={fields} basePath={basePath} params={params} />
 
       <div className="ml-auto flex shrink-0 items-center gap-2">
+        <ViewsMenu resourceName={resourceName} basePath={basePath} params={params} />
         <ExportButton resourceName={resourceName} defaultTitle={label} />
         <ColumnVisibilityMenu
           resourceName={resourceName}

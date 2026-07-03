@@ -18,6 +18,7 @@ import {
 
 import { FilterEditor } from "../FilterEditor";
 import { fieldParameterNames, hiddenColumnsCookieName } from "../filter-nav";
+import { useFocusTrap } from "../use-focus-trap";
 import {
   buildExportRows,
   enumLabelMaps,
@@ -99,14 +100,21 @@ function localChips(
 export function ExportDialog({
   resourceName,
   defaultTitle,
+  initialFormat = "excel",
   onClose,
-}: Readonly<{ resourceName: string; defaultTitle: string; onClose: () => void }>) {
+}: Readonly<{
+  resourceName: string;
+  defaultTitle: string;
+  // "pdf" cuando se abre desde el atajo de imprimir (Ctrl+P).
+  initialFormat?: "excel" | "pdf";
+  onClose: () => void;
+}>) {
   const searchParams = useSearchParams();
 
   const [ready, setReady] = useState<Ready | null>(null);
   const [loadError, setLoadError] = useState(false);
 
-  const [format, setFormat] = useState<"excel" | "pdf">("excel");
+  const [format, setFormat] = useState<"excel" | "pdf">(initialFormat);
   const [title, setTitle] = useState(defaultTitle);
   const [scope, setScope] = useState<"filtered" | "page">("filtered");
   const [filters, setFilters] = useState<Record<string, string>>({});
@@ -126,6 +134,8 @@ export function ExportDialog({
   const [doneMessage, setDoneMessage] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
   const cancelRef = useRef(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(dialogRef);
 
   // Carga de la capability + estado inicial desde la URL actual de la tabla.
   useEffect(() => {
@@ -388,10 +398,12 @@ export function ExportDialog({
         }}
       />
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label={`Exportar ${defaultTitle}`}
-        className="fixed left-1/2 top-1/2 z-[101] flex max-h-[90vh] w-[min(1000px,95vw)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-[16px] border border-[var(--border)] bg-[var(--elev)] shadow-[var(--shadow)]"
+        tabIndex={-1}
+        className="fixed left-1/2 top-1/2 z-[101] flex max-h-[90vh] w-[min(1000px,95vw)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-[16px] border border-[var(--border)] bg-[var(--elev)] shadow-[var(--shadow)] outline-none"
       >
         <header className="flex items-center justify-between border-b border-[var(--border)] px-4 py-3">
           <h3 className="text-[15px] font-semibold text-[var(--tx)]">Exportar · {defaultTitle}</h3>

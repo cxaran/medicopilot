@@ -1,21 +1,35 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
+import { OPEN_EXPORT_EVENT } from "../TableHotkeys";
 import { ExportDialog } from "./ExportDialog";
 
-/** Botón de descarga de la toolbar: monta el diálogo de exportación bajo demanda. */
+/**
+ * Botón de descarga de la toolbar: monta el diálogo de exportación bajo demanda.
+ * También responde al evento de "imprimir" (Ctrl+P vía TableHotkeys), abriendo
+ * el diálogo directo en PDF.
+ */
 export function ExportButton({
   resourceName,
   defaultTitle,
 }: Readonly<{ resourceName: string; defaultTitle: string }>) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState<false | "excel" | "pdf">(false);
+
+  useEffect(() => {
+    const onOpen = (event: Event) => {
+      const format = (event as CustomEvent<{ format?: string }>).detail?.format;
+      setOpen(format === "pdf" ? "pdf" : "excel");
+    };
+    document.addEventListener(OPEN_EXPORT_EVENT, onOpen);
+    return () => document.removeEventListener(OPEN_EXPORT_EVENT, onOpen);
+  }, []);
 
   return (
     <>
       <button
         type="button"
-        onClick={() => setOpen(true)}
+        onClick={() => setOpen("excel")}
         aria-label="Exportar"
         title="Exportar (Excel / PDF)"
         className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] border border-[var(--border)] bg-[var(--panel)] text-[var(--tx2)] transition hover:border-[var(--accent-bd)] hover:text-[var(--accent-tx)]"
@@ -30,6 +44,7 @@ export function ExportButton({
         <ExportDialog
           resourceName={resourceName}
           defaultTitle={defaultTitle}
+          initialFormat={open}
           onClose={() => setOpen(false)}
         />
       ) : null}

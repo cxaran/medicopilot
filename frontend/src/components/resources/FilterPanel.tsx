@@ -3,6 +3,8 @@
 import { useEffect, useRef, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 
+import { useFocusTrap } from "./use-focus-trap";
+
 /**
  * Contenedor de los menús de filtro (popover estilo Excel). Va en un PORTAL al
  * body con position:fixed, así no lo recorta el overflow de la tabla ni lo
@@ -38,6 +40,9 @@ export function FilterPanel({
   children: ReactNode;
 }>) {
   const panelRef = useRef<HTMLDivElement>(null);
+  // Foco: entra al primer control al abrir, Tab cicla dentro, y al cerrar
+  // regresa al disparador.
+  useFocusTrap(panelRef);
 
   useEffect(() => {
     const onPointerDown = (event: PointerEvent) => {
@@ -85,7 +90,8 @@ export function FilterPanel({
       ref={panelRef}
       role="dialog"
       aria-label={title}
-      className="rounded-[12px] border border-[var(--border)] bg-[var(--elev)] shadow-[var(--soft2)]"
+      tabIndex={-1}
+      className="rounded-[12px] border border-[var(--border)] bg-[var(--elev)] shadow-[var(--soft2)] outline-none"
       style={
         asDialog
           ? {
