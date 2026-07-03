@@ -31,6 +31,9 @@ export type BootstrapWizardDraft = {
   user: InitialUserDraft;
   system_admin_role: SystemAdminRoleDraft;
   additional_roles: AdditionalRoleDraft[];
+  // Política inicial de plataforma (editable después en Configuración del sistema).
+  public_registration_enabled: boolean;
+  institution_name: string;
 };
 
 export type WizardFieldErrors = Record<string, string[]>;
@@ -77,6 +80,8 @@ export function emptyBootstrapDraft(): BootstrapWizardDraft {
       description: "Administración inicial de la plataforma",
     },
     additional_roles: [],
+    public_registration_enabled: false,
+    institution_name: "",
   };
 }
 
@@ -101,6 +106,8 @@ export function buildBootstrapPayload(draft: BootstrapWizardDraft): BootstrapIni
         permissions: [...new Set(role.permissions)],
         assign_to_initial_user: role.assign_to_initial_user,
       })),
+    public_registration_enabled: draft.public_registration_enabled,
+    institution_name: draft.institution_name.trim() || null,
   };
 }
 

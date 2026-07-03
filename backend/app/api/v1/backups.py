@@ -44,6 +44,7 @@ from backend.app.services.backup_crypto_service import (
     validate_age_recipient,
 )
 from backend.app.services import backup_service as backups
+from backend.app.services.config_audit import record_config_change
 from backend.app.services.google_drive_service import (
     DriveReauthError,
     DriveTemporaryError,
@@ -151,6 +152,14 @@ async def update_backup_settings(
 
     row.updated_by = current_user.id
     session.add(row)
+    record_config_change(
+        session,
+        actor_user_id=current_user.id,
+        entity_type="backup_settings",
+        entity_id=row.id,
+        action="backup_settings_updated",
+        changed_fields=list(data.keys()),
+    )
     session.commit()
     session.refresh(row)
     # Cada cambio de configuración se notifica por correo al administrador que lo
@@ -181,6 +190,14 @@ async def generate_encryption_key(
     except backups.BackupPermanentError as error:
         # Sin BACKUP_TOKEN_ENCRYPTION_KEY no hay dónde guardar la identidad cifrada.
         api_error(status.HTTP_409_CONFLICT, error.code, error.summary)
+    record_config_change(
+        session,
+        actor_user_id=current_user.id,
+        entity_type="backup_settings",
+        entity_id=row.id,
+        action="backup_encryption_key_generated",
+        changed_fields=["age_recipient", "age_identity_ciphertext"],
+    )
     session.commit()
     session.refresh(row)
     await _send_settings_email(current_user.email, row)
@@ -223,8 +240,16 @@ async def google_drive_callback(
         )
     try:
         backups.complete_drive_connection(session, state=state, code=code)
-        session.commit()
         row = backups.get_backup_settings(session)
+        record_config_change(
+            session,
+            actor_user_id=current_user.id,
+            entity_type="backup_settings",
+            entity_id=row.id,
+            action="backup_drive_connected",
+            changed_fields=["drive_status", "drive_folder_id"],
+        )
+        session.commit()
         await _send_settings_email(current_user.email, row)
     except backups.BackupPermanentError:
         session.rollback()
@@ -249,6 +274,14 @@ async def disconnect_drive(
 ) -> BackupSettingsRead:
     get_or_404(session, BackupSettings, item_id, _SETTINGS_NOT_FOUND)
     row = backups.disconnect_drive(session, current_user.id)
+    record_config_change(
+        session,
+        actor_user_id=current_user.id,
+        entity_type="backup_settings",
+        entity_id=row.id,
+        action="backup_drive_disconnected",
+        changed_fields=["drive_status"],
+    )
     session.commit()
     session.refresh(row)
     await _send_settings_email(current_user.email, row)

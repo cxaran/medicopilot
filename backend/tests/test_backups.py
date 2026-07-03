@@ -235,10 +235,13 @@ class BackupApiAndTickTest(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls) -> None:
+        from backend.app.models.audit_event import AuditEvent
+
         with Session(cls.engine) as session:
             session.execute(delete(BackupRun))
             session.execute(delete(BackupOauthState))
             session.execute(delete(BackupSettings))
+            session.execute(delete(AuditEvent))
             session.execute(delete(User))
             session.commit()
         Base.metadata.drop_all(cls.engine)
@@ -335,7 +338,10 @@ class BackupApiAndTickTest(unittest.TestCase):
 
     def test_connect_drive_without_oauth_config_is_409(self) -> None:
         sid = self._settings_id()
-        resp = self.client.post(f"/api/v1/backup-settings/{sid}/connect-drive")
+        # Se fija el estado "sin OAuth configurado" explícitamente: el entorno de la
+        # suite puede traer credenciales reales de Google.
+        with mock.patch.object(backups.settings, "google_drive_client_id", None),                 mock.patch.object(backups.settings, "google_drive_client_secret", None):
+            resp = self.client.post(f"/api/v1/backup-settings/{sid}/connect-drive")
         self.assertEqual(resp.status_code, 409, resp.text)
 
     def test_run_now_requires_complete_configuration(self) -> None:

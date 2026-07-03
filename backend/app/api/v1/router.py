@@ -11,6 +11,7 @@ from backend.app.api.v1.appointments import router as appointments_router
 from backend.app.api.v1.audit_events import router as audit_events_router
 from backend.app.api.v1.auth import router as auth_router
 from backend.app.api.v1.backups import router as backups_router
+from backend.app.api.v1.system_settings import router as system_settings_router
 from backend.app.api.v1.bootstrap import router as bootstrap_router
 from backend.app.api.v1.clinical_codes import router as clinical_codes_router
 from backend.app.api.v1.clinical_documents import (
@@ -79,6 +80,7 @@ router.include_router(appointments_router)
 router.include_router(audit_events_router)
 router.include_router(auth_router)
 router.include_router(backups_router)
+router.include_router(system_settings_router)
 router.include_router(bootstrap_router)
 router.include_router(clinical_codes_router)
 router.include_router(clinical_documents_router)

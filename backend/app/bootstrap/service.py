@@ -61,6 +61,9 @@ class BootstrapInitializeInput:
     user: BootstrapUserInput
     system_admin_role: BootstrapRoleInput = field(default_factory=BootstrapRoleInput)
     additional_roles: list[BootstrapAdditionalRoleInput] = field(default_factory=list)
+    # Política inicial de plataforma (sin secretos de terceros).
+    public_registration_enabled: bool = False
+    institution_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -147,6 +150,17 @@ def initialize_platform(session: Session, payload: BootstrapInitializeInput) -> 
         origin=ORIGIN_BOOTSTRAP,
         completed_by_user_id=user.id,
         system_admin_role_id=system_admin_role.id,
+    )
+    session.flush()
+
+    # Decisiones de POLÍTICA del asistente → singleton de configuración del sistema
+    # (la migración ya sembró la fila; aquí sólo se actualiza).
+    from backend.app.services.system_settings_service import apply_bootstrap_choices
+
+    apply_bootstrap_choices(
+        session,
+        public_registration_enabled=payload.public_registration_enabled,
+        institution_name=payload.institution_name,
     )
     session.flush()
 

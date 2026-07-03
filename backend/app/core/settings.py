@@ -115,7 +115,19 @@ class Settings(BaseSettings):
     # Al completarse un registro, el usuario queda ACTIVO pero SIN roles (sin acceso
     # hasta que un administrador le asigne uno) y SIN sesión automática.
     registration_enabled: bool = False
+    # Gate de DESPLIEGUE del registro público: si es False, la política persistida en
+    # system_settings no puede activarse (candado de infraestructura que la UI no
+    # salta). Sin valor explícito: permitido sólo en entorno local. La política
+    # efectiva es (gate AND system_settings.public_registration_enabled).
+    registration_allowed: bool | None = None
     password_reset_enabled: bool = True
+
+    @computed_field
+    @property
+    def registration_allowed_effective(self) -> bool:
+        if self.registration_allowed is not None:
+            return self.registration_allowed
+        return self.environment == "local"
 
     # Ticket de conexión al Agent Gateway (puente firmado y efímero FastAPI<->Gateway).
     # FastAPI es la autoridad clínica y NO almacena credenciales de proveedor de IA; el

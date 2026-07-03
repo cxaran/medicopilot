@@ -108,6 +108,8 @@ def initialize_bootstrap(
             label=payload.system_admin_role.label,
             description=payload.system_admin_role.description,
         ),
+        public_registration_enabled=payload.public_registration_enabled,
+        institution_name=payload.institution_name,
         additional_roles=[
             BootstrapAdditionalRoleInput(
                 name=role.name,

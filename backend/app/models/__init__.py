@@ -68,6 +68,7 @@ from backend.app.models.prescription import Prescription, PrescriptionItem
 from backend.app.models.scale_result import ScaleResult
 from backend.app.models.setup import PlatformSetup
 from backend.app.models.study_order import StudyOrder
+from backend.app.models.system_settings import SystemSettings
 from backend.app.models.user import Role, RoleAccess, User, UserRole
 from backend.app.models.vital_sign import VitalSign
 
@@ -145,6 +146,7 @@ __all__ = [
     "Sex",
     "StudyOrder",
     "StudyOrderStatus",
+    "SystemSettings",
     "User",
     "UserRole",
     "VitalSign",

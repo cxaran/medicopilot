@@ -306,6 +306,37 @@ function RolesStep({
           <TextField id="system-admin-description" label="Descripción" value={draft.system_admin_role.description} error={fieldErrors["system_admin_role.description"]?.join(" ")} required={false} onChange={(value) => setDraft({ ...draft, system_admin_role: { ...draft.system_admin_role, description: value } })} />
         </div>
       </section>
+      <section className="rounded-2xl border border-[var(--border2)] bg-[var(--bg2)] p-4">
+        <h3 className="text-lg font-semibold">Política inicial de la plataforma</h3>
+        <p className="mt-1 text-sm text-[var(--tx2)]">
+          Decisiones editables después en Configuración del sistema. Las integraciones
+          (correo, respaldos, IA) se configuran tras iniciar sesión, de forma guiada.
+        </p>
+        <div className="mt-4 grid gap-4 sm:grid-cols-[1.3fr_1fr]">
+          <TextField
+            id="institution-name"
+            label="Nombre del consultorio (opcional)"
+            value={draft.institution_name}
+            required={false}
+            onChange={(value) => setDraft({ ...draft, institution_name: value })}
+          />
+          <label className="flex items-center gap-3 self-end pb-2 text-sm text-[var(--tx)]">
+            <input
+              type="checkbox"
+              checked={draft.public_registration_enabled}
+              onChange={(event) =>
+                setDraft({ ...draft, public_registration_enabled: event.target.checked })
+              }
+              className="h-4 w-4 accent-[var(--accent)]"
+            />
+            Permitir registro público de cuentas
+          </label>
+        </div>
+        <p className="mt-2 text-xs text-[var(--tx3)]">
+          Deshabilitado, las cuentas las crean los administradores. Recomendado dejarlo
+          apagado en producción.
+        </p>
+      </section>
       <section className="space-y-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>

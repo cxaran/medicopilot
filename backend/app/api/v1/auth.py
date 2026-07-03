@@ -27,6 +27,10 @@ from backend.app.security.rate_limit import (
     limit_reset_password,
 )
 
+from backend.app.services.system_settings_service import (
+    is_public_registration_enabled,
+)
+
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
@@ -37,10 +41,14 @@ def _require_enabled(enabled: bool, code: str, message: str) -> None:
 
 
 @router.get("/policy", response_model=AuthPolicyRead)
-def read_auth_policy() -> AuthPolicyRead:
-    """Política pública de auth. El frontend la consume; no infiere de settings."""
+def read_auth_policy(session: SessionDep) -> AuthPolicyRead:
+    """Política pública de auth. El frontend la consume; no infiere de settings.
+
+    El registro público es la política EFECTIVA: lo persistido en system_settings
+    (editable por administradores) AND el candado del despliegue.
+    """
     return AuthPolicyRead(
-        registration_enabled=settings.registration_enabled,
+        registration_enabled=is_public_registration_enabled(session),
         password_reset_enabled=settings.password_reset_enabled,
     )
 
@@ -86,7 +94,7 @@ async def request_registration(
     session: SessionDep,
 ) -> MessageResponse:
     _require_enabled(
-        settings.registration_enabled,
+        is_public_registration_enabled(session),
         "registration_disabled",
         "El registro de cuentas no está disponible.",
     )
@@ -102,7 +110,7 @@ def complete_registration(
     session: SessionDep,
 ) -> MessageResponse:
     _require_enabled(
-        settings.registration_enabled,
+        is_public_registration_enabled(session),
         "registration_disabled",
         "El registro de cuentas no está disponible.",
     )

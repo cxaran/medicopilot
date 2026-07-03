@@ -41,14 +41,21 @@ class AuthPolicyTest(unittest.TestCase):
         self.client = TestClient(app)
         self._prev = {
             "rate_limit_enabled": settings.rate_limit_enabled,
-            "registration_enabled": settings.registration_enabled,
             "password_reset_enabled": settings.password_reset_enabled,
         }
         settings.rate_limit_enabled = False
-        settings.registration_enabled = False
         settings.password_reset_enabled = True
+        # La política de registro ahora es EFECTIVA (system_settings AND gate del
+        # despliegue); esta suite no usa base de datos, así que se parchea el
+        # resolutor en el módulo del router (la integración real con la DB se prueba
+        # en test_system_settings).
+        self._registration = patch.object(
+            auth_router, "is_public_registration_enabled", return_value=False
+        )
+        self._registration.start()
 
     def tearDown(self) -> None:
+        self._registration.stop()
         for key, value in self._prev.items():
             setattr(settings, key, value)
 
@@ -81,7 +88,11 @@ class AuthPolicyTest(unittest.TestCase):
         self.assertEqual(response.json()["code"], "registration_disabled")
 
     def test_register_request_passes_guard_when_enabled(self) -> None:
-        settings.registration_enabled = True
+        self._registration.stop()
+        self._registration = patch.object(
+            auth_router, "is_public_registration_enabled", return_value=True
+        )
+        self._registration.start()
         with patch.object(
             auth_router, "send_registration_token", new=AsyncMock(return_value=None)
         ):

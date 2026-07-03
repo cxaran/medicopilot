@@ -451,6 +451,9 @@ export interface paths {
         /**
          * Read Auth Policy
          * @description Política pública de auth. El frontend la consume; no infiere de settings.
+         *
+         *     El registro público es la política EFECTIVA: lo persistido en system_settings
+         *     (editable por administradores) AND el candado del despliegue.
          */
         get: operations["read_auth_policy_api_v1_auth_policy_get"];
         put?: never;
@@ -816,6 +819,81 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/v1/system-settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List System Settings */
+        get: operations["list_system_settings_api_v1_system_settings_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/system-settings/setup-checklist": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Setup Checklist
+         * @description Checklist de puesta en marcha DERIVADO del estado real de la configuración.
+         */
+        get: operations["get_setup_checklist_api_v1_system_settings_setup_checklist_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/system-settings/setup-checklist/dismiss": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Dismiss Setup Checklist
+         * @description Descarta el banner del checklist (el checklist sigue disponible a demanda).
+         */
+        post: operations["dismiss_setup_checklist_api_v1_system_settings_setup_checklist_dismiss_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/system-settings/{item_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get System Settings Detail */
+        get: operations["get_system_settings_detail_api_v1_system_settings__item_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update System Settings */
+        patch: operations["update_system_settings_api_v1_system_settings__item_id__patch"];
         trace?: never;
     };
     "/api/v1/bootstrap/status": {
@@ -3464,6 +3542,17 @@ export interface components {
             system_admin_role?: components["schemas"]["BootstrapSystemAdminRole"];
             /** Additional Roles */
             additional_roles?: components["schemas"]["BootstrapAdditionalRole"][];
+            /**
+             * Public Registration Enabled
+             * @description Permitir el auto-registro público desde el primer momento.
+             * @default false
+             */
+            public_registration_enabled: boolean;
+            /**
+             * Institution Name
+             * @description Nombre del consultorio/institución (opcional).
+             */
+            institution_name?: string | null;
         };
         /** BootstrapLimitsRead */
         BootstrapLimitsRead: {
@@ -6249,6 +6338,12 @@ export interface components {
             items: components["schemas"]["StudyOrderListItem"][];
             pagination: components["schemas"]["OffsetPagination"];
         };
+        /** OffsetPage[SystemSettingsListItem] */
+        OffsetPage_SystemSettingsListItem_: {
+            /** Items */
+            items: components["schemas"]["SystemSettingsListItem"][];
+            pagination: components["schemas"]["OffsetPagination"];
+        };
         /** OffsetPage[UserAdminListItem] */
         OffsetPage_UserAdminListItem_: {
             /** Items */
@@ -7317,6 +7412,11 @@ export interface components {
              * Format: uuid
              */
             consultation_id: string;
+            /**
+             * Paciente
+             * Format: uuid
+             */
+            patient_id: string;
             /** Folio */
             internal_folio: number;
             /** Diagnóstico */
@@ -7350,6 +7450,11 @@ export interface components {
              * Format: uuid
              */
             consultation_id: string;
+            /**
+             * Patient Id
+             * Format: uuid
+             */
+            patient_id: string;
             /** Internal Folio */
             internal_folio: number;
             /** Related Diagnosis Id */
@@ -7741,6 +7846,11 @@ export interface components {
              * @default []
              */
             relations: components["schemas"]["ResourceRelationCapability"][];
+            /**
+             * Related Lists
+             * @default []
+             */
+            related_lists: components["schemas"]["ResourceRelatedListCapability"][];
         };
         /**
          * ResourceDetailCapability
@@ -7877,6 +7987,23 @@ export interface components {
             pagination: components["schemas"]["PaginationCapability"];
             search: components["schemas"]["SearchCapability"];
             sort: components["schemas"]["SortCapability"];
+        };
+        /**
+         * ResourceRelatedListCapability
+         * @description Lista RELACIONADA navegable por item (p. ej. signos vitales de una consulta).
+         *
+         *     Es navegación de solo lectura, no un editor: el frontend enlaza a la lista del
+         *     recurso destino con ``parameter_name=<valor de la referencia del item>`` (el
+         *     filtro EQ ya publicado por ``filterable_fields`` del destino). Se proyecta solo
+         *     si el actor tiene el permiso de LECTURA del recurso destino.
+         */
+        ResourceRelatedListCapability: {
+            /** Resource */
+            resource: string;
+            /** Label */
+            label: string;
+            /** Parameter Name */
+            parameter_name: string;
         };
         /**
          * ResourceRelationCapability
@@ -8256,6 +8383,35 @@ export interface components {
          */
         SettingCategory: "vital_threshold" | "lab_target" | "follow_up" | "protocol";
         /**
+         * SetupChecklistItemRead
+         * @description Ítem del checklist de puesta en marcha (estado derivado).
+         */
+        SetupChecklistItemRead: {
+            /** Key */
+            key: string;
+            /** Title */
+            title: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "complete" | "pending" | "not_applicable";
+            /** Detail */
+            detail: string;
+        };
+        /**
+         * SetupChecklistRead
+         * @description Checklist derivado + si el administrador lo descartó.
+         */
+        SetupChecklistRead: {
+            /** Items */
+            items: components["schemas"]["SetupChecklistItemRead"][];
+            /** Dismissed */
+            dismissed: boolean;
+            /** Pending Count */
+            pending_count: number;
+        };
+        /**
          * Sex
          * @description Sexo registrado para fines clínicos y administrativos.
          * @enum {string}
@@ -8450,6 +8606,80 @@ export interface components {
             status?: components["schemas"]["StudyOrderStatus"] | null;
             /** Resultado vinculado */
             result_lab_result_id?: string | null;
+        };
+        /**
+         * SystemSettingsListItem
+         * @description Versión de listado del singleton (una fila).
+         */
+        SystemSettingsListItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Institución */
+            institution_name?: string | null;
+            /** Registro público */
+            public_registration_enabled: boolean;
+            /** Dominio */
+            app_base_url?: string | null;
+            /** Actualizado */
+            updated_at?: string | null;
+            /**
+             * Creado
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
+         * SystemSettingsRead
+         * @description Estado completo y SEGURO de la configuración del sistema.
+         */
+        SystemSettingsRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Public Registration Enabled */
+            public_registration_enabled: boolean;
+            /** Registration Allowed By Deployment */
+            registration_allowed_by_deployment: boolean;
+            /** Public Registration Effective */
+            public_registration_effective: boolean;
+            /** App Base Url */
+            app_base_url?: string | null;
+            /** App Base Url Verified At */
+            app_base_url_verified_at?: string | null;
+            /** Institution Name */
+            institution_name?: string | null;
+            /** Environment */
+            environment: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Updated At */
+            updated_at?: string | null;
+            /** Updated By */
+            updated_by?: string | null;
+        };
+        /**
+         * SystemSettingsUpdate
+         * @description Campos EDITABLES de la política del sistema.
+         */
+        SystemSettingsUpdate: {
+            /**
+             * Registro público
+             * @description Permitir el auto-registro por correo. Sólo tiene efecto si el despliegue lo permite (candado del entorno).
+             */
+            public_registration_enabled?: boolean | null;
+            /**
+             * Nombre de la institución
+             * @description Nombre del consultorio para membretes y encabezados.
+             */
+            institution_name?: string | null;
         };
         /**
          * TopDiagnosis
@@ -8759,6 +8989,11 @@ export interface components {
              */
             consultation_id: string;
             /**
+             * Paciente
+             * Format: uuid
+             */
+            patient_id: string;
+            /**
              * Medición
              * Format: date-time
              */
@@ -8808,6 +9043,11 @@ export interface components {
              * Format: uuid
              */
             consultation_id: string;
+            /**
+             * Patient Id
+             * Format: uuid
+             */
+            patient_id: string;
             /**
              * Measured At
              * Format: date-time
@@ -10676,6 +10916,173 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_system_settings_api_v1_system_settings_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+                /** @description Campos de orden separados por coma. Use '-' para orden descendente. */
+                sort?: string;
+                id_in?: string[] | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OffsetPage_SystemSettingsListItem_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_setup_checklist_api_v1_system_settings_setup_checklist_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SetupChecklistRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    dismiss_setup_checklist_api_v1_system_settings_setup_checklist_dismiss_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_system_settings_detail_api_v1_system_settings__item_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemSettingsRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_system_settings_api_v1_system_settings__item_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SystemSettingsUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemSettingsRead"];
                 };
             };
             /** @description Validation Error */
@@ -14781,6 +15188,7 @@ export interface operations {
                 /** @description Campos de orden separados por coma. Use '-' para orden descendente. */
                 sort?: string;
                 consultation_id?: string | null;
+                patient_id?: string | null;
                 related_diagnosis_id?: string | null;
                 status?: components["schemas"]["PrescriptionStatus"] | null;
                 internal_folio?: number | null;
@@ -16381,6 +16789,7 @@ export interface operations {
                 /** @description Campos de orden separados por coma. Use '-' para orden descendente. */
                 sort?: string;
                 consultation_id?: string | null;
+                patient_id?: string | null;
                 id_in?: string[] | null;
                 measured_at_on?: string | null;
                 measured_at_before?: string | null;

@@ -48,6 +48,7 @@ from backend.app.security.groups.reports import ReportsPermissions
 from backend.app.security.groups.roles import RolePermissions
 from backend.app.security.groups.scale_results import ScaleResultPermissions
 from backend.app.security.groups.study_orders import StudyOrderPermissions
+from backend.app.security.groups.system_settings import SystemSettingsPermissions
 from backend.app.security.groups.users import UserPermissions
 from backend.app.security.groups.vital_signs import VitalSignPermissions
 from backend.app.security.security_group import SecurityGroup
@@ -71,6 +72,7 @@ SECURITY_GROUPS: list[type[SecurityGroup]] = [
     LabResultPermissions,
     ClinicalEventPermissions,
     StudyOrderPermissions,
+    SystemSettingsPermissions,
     ClinicalTaskPermissions,
     PrescriptionPermissions,
     AppointmentPermissions,

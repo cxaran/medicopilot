@@ -78,6 +78,19 @@ class BootstrapInitializeRequest(ApiWriteSchema):
         default_factory=list,
         max_length=MAX_ADDITIONAL_ROLES,
     )
+    # Política inicial de la plataforma (editable después en Configuración del
+    # sistema). El bootstrap NUNCA recibe secretos de terceros: esas integraciones
+    # se configuran autenticado y auditado, en el checklist post-bootstrap.
+    public_registration_enabled: bool = Field(
+        default=False,
+        description="Permitir el auto-registro público desde el primer momento.",
+    )
+    institution_name: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=200,
+        description="Nombre del consultorio/institución (opcional).",
+    )
 
 
 class BootstrapInitializeRead(ApiReadSchema):

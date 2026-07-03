@@ -1,6 +1,8 @@
 import os
 import unittest
 
+from backend.app.security.groups.system_settings import SystemSettingsPermissions
+
 
 DEV_ENV = {
     "ENVIRONMENT": "local",
@@ -133,6 +135,7 @@ class SecurityCatalogTest(unittest.TestCase):
                 LabResultPermissions,
                 ClinicalEventPermissions,
                 StudyOrderPermissions,
+                SystemSettingsPermissions,
                 ClinicalTaskPermissions,
                 PrescriptionPermissions,
                 AppointmentPermissions,
@@ -231,6 +234,8 @@ class SecurityCatalogTest(unittest.TestCase):
                 "study_orders:create",
                 "study_orders:update",
                 "study_orders:delete",
+                "system_settings:read",
+                "system_settings:configure",
                 "clinical_tasks:read",
                 "clinical_tasks:create",
                 "clinical_tasks:update",

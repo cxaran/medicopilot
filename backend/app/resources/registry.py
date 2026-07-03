@@ -19,6 +19,7 @@ from backend.app.models.clinical_code import ClinicalCode
 from backend.app.models.clinical_document import ClinicalDocument
 from backend.app.models.audit_event import AuditEvent
 from backend.app.models.backup import BackupRun, BackupSettings
+from backend.app.models.system_settings import SystemSettings
 from backend.app.models.clinical_event import ClinicalEvent
 from backend.app.models.clinical_note import ClinicalNote
 from backend.app.models.clinical_task import ClinicalTask
@@ -146,6 +147,10 @@ from backend.app.schemas.patient_history_item import (
     PatientHistoryItemUpdate,
 )
 from backend.app.schemas.audit_event import AuditEventListItem
+from backend.app.schemas.system_settings import (
+    SystemSettingsListItem,
+    SystemSettingsUpdate,
+)
 from backend.app.schemas.backup import (
     BackupRunListItem,
     BackupSettingsListItem,
@@ -219,6 +224,7 @@ from backend.app.security.groups.patient_clinical_items import (
 )
 from backend.app.security.groups.audit_events import AuditEventPermissions
 from backend.app.security.groups.backups import BackupPermissions
+from backend.app.security.groups.system_settings import SystemSettingsPermissions
 from backend.app.security.groups.patient_history_items import (
     PatientHistoryItemPermissions,
 )
@@ -464,6 +470,18 @@ BACKUP_SETTINGS = ResourceQuery(
     ),
 )
 
+SYSTEM_SETTINGS = ResourceQuery(
+    name="SystemSettingsQuery",
+    model=SystemSettings,
+    schema=SystemSettingsListItem,
+    options=QueryOptions(
+        # Singleton: una fila; sin filtros ni búsqueda.
+        sort_fields=("created_at",),
+        in_fields=("id",),
+        default_sort="created_at",
+    ),
+)
+
 BACKUP_RUNS = ResourceQuery(
     name="BackupRunQuery",
     model=BackupRun,
@@ -537,11 +555,13 @@ VITAL_SIGNS = ResourceQuery(
     model=VitalSign,
     schema=VitalSignListItem,
     options=QueryOptions(
-        # ``consultation_id`` (UUID) por igualdad: las mediciones se consultan por
-        # consulta. ``measured_at`` admite rango de calendario. Sin búsqueda libre
-        # sobre observaciones ni numéricos. Los listados excluyen eliminadas
-        # (``deleted_at``) y las de consultas eliminadas vía stmt base en el router.
-        filter_fields=("consultation_id",),
+        # ``consultation_id``/``patient_id`` (UUID) por igualdad: las mediciones se
+        # consultan por consulta o por paciente (derivado de la consulta vía
+        # subconsulta del modelo — permite el expediente por paciente). ``measured_at``
+        # admite rango de calendario. Sin búsqueda libre sobre observaciones ni
+        # numéricos. Los listados excluyen eliminadas (``deleted_at``) y las de
+        # consultas eliminadas vía stmt base en el router.
+        filter_fields=("consultation_id", "patient_id"),
         sort_fields=("measured_at", "created_at", "updated_at"),
         in_fields=("id",),
         field_operators={"measured_at": _CREATED_AT_OPERATORS},
@@ -682,11 +702,19 @@ PRESCRIPTIONS = ResourceQuery(
     model=Prescription,
     schema=PrescriptionListItem,
     options=QueryOptions(
-        # ``consultation_id``/``related_diagnosis_id`` (UUID) por igualdad: las recetas
-        # se consultan por consulta. ``status`` (enum no-nativo) y ``internal_folio``
-        # (entero) como filtros exactos. Sin búsqueda libre. Los listados excluyen
-        # recetas eliminadas y las de consultas eliminadas vía stmt base en el router.
-        filter_fields=("consultation_id", "related_diagnosis_id", "status", "internal_folio"),
+        # ``consultation_id``/``patient_id``/``related_diagnosis_id`` (UUID) por
+        # igualdad: las recetas se consultan por consulta o por paciente (derivado de
+        # la consulta vía subconsulta del modelo — permite el expediente por paciente).
+        # ``status`` (enum no-nativo) y ``internal_folio`` (entero) como filtros
+        # exactos. Sin búsqueda libre. Los listados excluyen recetas eliminadas y las
+        # de consultas eliminadas vía stmt base en el router.
+        filter_fields=(
+            "consultation_id",
+            "patient_id",
+            "related_diagnosis_id",
+            "status",
+            "internal_folio",
+        ),
         sort_fields=("internal_folio", "created_at", "updated_at", "approved_at", "voided_at"),
         in_fields=("id",),
         default_sort="-created_at",
@@ -850,6 +878,20 @@ class RelationDef:
 
 
 @dataclass(frozen=True)
+class RelatedListDef:
+    """Lista relacionada navegable por item (p. ej. signos vitales de una consulta).
+
+    ``resource`` es el nombre REGISTRADO del recurso destino y ``filter_field`` su
+    campo de filtro EQ (debe estar en los ``filter_fields`` del destino) que recibe
+    el id del item dueño. La proyección la publica solo si el actor tiene el permiso
+    de lectura del recurso destino; es navegación de solo lectura, no un editor."""
+
+    resource: str
+    label: str
+    filter_field: str
+
+
+@dataclass(frozen=True)
 class ResourceDefinition:
     name: str
     label: str
@@ -878,6 +920,7 @@ class ResourceDefinition:
     item_id_field: str = "id"
     actions: tuple[ActionDef, ...] = ()
     relations: tuple[RelationDef, ...] = ()
+    related_lists: tuple[RelatedListDef, ...] = ()
 
 
 RESOURCE_REGISTRY: tuple[ResourceDefinition, ...] = (
@@ -1364,6 +1407,19 @@ RESOURCE_REGISTRY: tuple[ResourceDefinition, ...] = (
         detail_url_template="/api/v1/messages/{id}",
     ),
     ResourceDefinition(
+        name="system_settings",
+        label="Configuración del sistema",
+        api_path="/api/v1/system-settings",
+        view=ResourceView.TABLE,
+        read_permission=SystemSettingsPermissions.READ,
+        list_query=SYSTEM_SETTINGS,
+        list_schema=SystemSettingsListItem,
+        # Singleton editable: sin create ni delete; el update usa el PATCH del detail.
+        update_schema=SystemSettingsUpdate,
+        update_permission=SystemSettingsPermissions.CONFIGURE,
+        detail_url_template="/api/v1/system-settings/{id}",
+    ),
+    ResourceDefinition(
         name="backup_settings",
         label="Configuración de respaldos",
         api_path="/api/v1/backup-settings",
@@ -1598,6 +1654,20 @@ RESOURCE_REGISTRY: tuple[ResourceDefinition, ...] = (
                     confirm_label="Eliminar",
                     destructive=True,
                 ),
+            ),
+        ),
+        # Navegación por fila a los registros de ESTA consulta (signos vitales y
+        # recetas se capturan por consulta; el filtro EQ ya existe en el destino).
+        related_lists=(
+            RelatedListDef(
+                resource="vital_signs",
+                label="Signos vitales",
+                filter_field="consultation_id",
+            ),
+            RelatedListDef(
+                resource="prescriptions",
+                label="Recetas",
+                filter_field="consultation_id",
             ),
         ),
     ),
