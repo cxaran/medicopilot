@@ -28,6 +28,7 @@ from backend.app.security.rate_limit import (
 )
 
 from backend.app.services.system_settings_service import (
+    is_password_reset_enabled,
     is_public_registration_enabled,
 )
 
@@ -49,7 +50,7 @@ def read_auth_policy(session: SessionDep) -> AuthPolicyRead:
     """
     return AuthPolicyRead(
         registration_enabled=is_public_registration_enabled(session),
-        password_reset_enabled=settings.password_reset_enabled,
+        password_reset_enabled=is_password_reset_enabled(session),
     )
 
 
@@ -145,7 +146,7 @@ async def request_password_reset(
     session: SessionDep,
 ) -> MessageResponse:
     _require_enabled(
-        settings.password_reset_enabled,
+        is_password_reset_enabled(session),
         "password_reset_disabled",
         "La recuperación de contraseña no está disponible.",
     )
@@ -161,7 +162,7 @@ def complete_password_reset(
     session: SessionDep,
 ) -> MessageResponse:
     _require_enabled(
-        settings.password_reset_enabled,
+        is_password_reset_enabled(session),
         "password_reset_disabled",
         "La recuperación de contraseña no está disponible.",
     )

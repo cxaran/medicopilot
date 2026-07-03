@@ -70,6 +70,7 @@ class BootstrapInitializeInput:
     additional_roles: list[BootstrapAdditionalRoleInput] = field(default_factory=list)
     # Política inicial de plataforma (sin secretos de terceros).
     public_registration_enabled: bool = False
+    password_reset_enabled: bool = True
     institution_name: str | None = None
     # Perfil de MÉDICO del usuario inicial (instalación unipersonal admin=médico):
     # crea la fila Doctor vinculada, requisito real de los flujos clínicos
@@ -214,6 +215,7 @@ def initialize_platform(session: Session, payload: BootstrapInitializeInput) -> 
         session,
         public_registration_enabled=payload.public_registration_enabled,
         institution_name=payload.institution_name,
+        password_reset_enabled=payload.password_reset_enabled,
     )
     session.flush()
 

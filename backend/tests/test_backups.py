@@ -236,12 +236,16 @@ class BackupApiAndTickTest(unittest.TestCase):
     @classmethod
     def tearDownClass(cls) -> None:
         from backend.app.models.audit_event import AuditEvent
+        from backend.app.models.system_settings import SystemSettings
 
         with Session(cls.engine) as session:
             session.execute(delete(BackupRun))
             session.execute(delete(BackupOauthState))
             session.execute(delete(BackupSettings))
             session.execute(delete(AuditEvent))
+            # system_settings puede referenciar usuarios (updated_by) de otras suites
+            # contra la misma base *_test; se limpia antes de borrar usuarios.
+            session.execute(delete(SystemSettings))
             session.execute(delete(User))
             session.commit()
         Base.metadata.drop_all(cls.engine)
@@ -506,7 +510,7 @@ class BackupApiAndTickTest(unittest.TestCase):
     def test_patch_sends_settings_email_to_the_admin(self) -> None:
         sid = self._settings_id()
         with mock.patch(
-            "backend.app.api.v1.backups.send_email", new_callable=mock.AsyncMock
+            "backend.app.api.v1.backups.send_system_email", new_callable=mock.AsyncMock
         ) as send:
             resp = self.client.patch(
                 f"/api/v1/backup-settings/{sid}", json={"retention_daily_count": 9}
@@ -522,7 +526,7 @@ class BackupApiAndTickTest(unittest.TestCase):
     def test_generate_encryption_key_stores_encrypted_and_mails_private_key(self) -> None:
         sid = self._settings_id()
         with self._with_fernet_key(), mock.patch(
-            "backend.app.api.v1.backups.send_email", new_callable=mock.AsyncMock
+            "backend.app.api.v1.backups.send_system_email", new_callable=mock.AsyncMock
         ) as send:
             resp = self.client.post(
                 f"/api/v1/backup-settings/{sid}/generate-encryption-key"
@@ -551,11 +555,11 @@ class BackupApiAndTickTest(unittest.TestCase):
         sid = self._settings_id()
         with self._with_fernet_key():
             with mock.patch(
-                "backend.app.api.v1.backups.send_email", new_callable=mock.AsyncMock
+                "backend.app.api.v1.backups.send_system_email", new_callable=mock.AsyncMock
             ):
                 self.client.post(f"/api/v1/backup-settings/{sid}/generate-encryption-key")
             with mock.patch(
-                "backend.app.api.v1.backups.send_email", new_callable=mock.AsyncMock
+                "backend.app.api.v1.backups.send_system_email", new_callable=mock.AsyncMock
             ) as send:
                 resp = self.client.patch(
                     f"/api/v1/backup-settings/{sid}", json={"retention_daily_count": 5}
@@ -569,14 +573,14 @@ class BackupApiAndTickTest(unittest.TestCase):
         sid = self._settings_id()
         with self._with_fernet_key():
             with mock.patch(
-                "backend.app.api.v1.backups.send_email", new_callable=mock.AsyncMock
+                "backend.app.api.v1.backups.send_system_email", new_callable=mock.AsyncMock
             ):
                 self.client.post(f"/api/v1/backup-settings/{sid}/generate-encryption-key")
             external = "age1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqm5ku0f"
             with mock.patch(
                 "backend.app.api.v1.backups.validate_age_recipient"
             ), mock.patch(
-                "backend.app.api.v1.backups.send_email", new_callable=mock.AsyncMock
+                "backend.app.api.v1.backups.send_system_email", new_callable=mock.AsyncMock
             ) as send:
                 resp = self.client.patch(
                     f"/api/v1/backup-settings/{sid}", json={"age_recipient": external}

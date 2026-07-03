@@ -110,6 +110,7 @@ def initialize_bootstrap(
             description=payload.system_admin_role.description,
         ),
         public_registration_enabled=payload.public_registration_enabled,
+        password_reset_enabled=payload.password_reset_enabled,
         institution_name=payload.institution_name,
         doctor_profile=(
             BootstrapDoctorProfileInput(

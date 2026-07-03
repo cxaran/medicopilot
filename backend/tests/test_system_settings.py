@@ -256,6 +256,103 @@ class SystemSettingsApiTest(unittest.TestCase):
         checklist = self.client.get("/api/v1/system-settings/setup-checklist").json()
         self.assertTrue(checklist["dismissed"])
 
+    # -- Correo configurable y política de reset --------------------------------------
+
+    def _with_fernet_key(self):  # type: ignore[no-untyped-def]
+        from cryptography.fernet import Fernet
+        from pydantic import SecretStr
+
+        return mock.patch.object(
+            settings, "backup_token_encryption_key", SecretStr(Fernet.generate_key().decode())
+        )
+
+    def test_smtp_secret_is_write_only_and_encrypted(self) -> None:
+        sid = self._settings_id()
+        with self._with_fernet_key():
+            resp = self.client.patch(
+                f"/api/v1/system-settings/{sid}",
+                json={
+                    "email_mode": "smtp",
+                    "email_smtp_host": "smtp.example.com",
+                    "email_smtp_port": 587,
+                    "email_from_address": "clinica@example.com",
+                    "email_smtp_password": "super-secreta-123",
+                },
+            )
+            self.assertEqual(resp.status_code, 200, resp.text)
+            body = resp.json()
+            self.assertTrue(body["email_smtp_password_configured"])
+            self.assertIsNone(body["email_transport_reason"])
+            # El secreto JAMÁS aparece en la respuesta ni en claro en la fila.
+            self.assertNotIn("super-secreta-123", resp.text)
+            with Session(self.engine) as session:
+                row = session.exec(select(SystemSettings)).one()
+                assert row.email_smtp_password_ciphertext is not None
+                self.assertNotIn("super-secreta-123", row.email_smtp_password_ciphertext)
+
+            # Omitir el campo lo CONSERVA; enviar null lo BORRA.
+            keep = self.client.patch(
+                f"/api/v1/system-settings/{sid}", json={"email_from_name": "Clínica"}
+            )
+            self.assertTrue(keep.json()["email_smtp_password_configured"])
+            clear = self.client.patch(
+                f"/api/v1/system-settings/{sid}", json={"email_smtp_password": None}
+            )
+            self.assertFalse(clear.json()["email_smtp_password_configured"])
+
+        # La auditoría lleva SOLO nombres de campos (nunca el secreto).
+        with Session(self.engine) as session:
+            events = session.exec(
+                select(AuditEvent).where(AuditEvent.action == "system_settings_updated")
+            ).all()
+            self.assertGreater(len(events), 0)
+            self.assertNotIn("super-secreta-123", str([e.changed_fields for e in events]))
+
+    def test_send_test_email_persists_outcome(self) -> None:
+        sid = self._settings_id()
+        with mock.patch(
+            "backend.app.services.email_service._send_via_fastapi_mail",
+            new_callable=mock.AsyncMock,
+        ) as send:
+            ok = self.client.post(f"/api/v1/system-settings/{sid}/send-test-email", json={})
+            self.assertEqual(ok.status_code, 200, ok.text)
+            self.assertEqual(ok.json()["email_last_test_status"], "ok")
+            send.assert_awaited_once()
+            # El destinatario por defecto es el administrador que ejecuta.
+            self.assertEqual(send.await_args.kwargs["email_to"], "admin@example.com")
+
+            send.side_effect = RuntimeError("boom")
+            fail = self.client.post(f"/api/v1/system-settings/{sid}/send-test-email", json={})
+            self.assertEqual(fail.json()["email_last_test_status"], "failed")
+            self.assertIn("RuntimeError", fail.json()["email_last_test_error"])
+
+    def test_production_environment_mode_rejects_dev_mailbox(self) -> None:
+        from backend.app.services.email_service import transport_unavailable_reason
+
+        with Session(self.engine) as session:
+            row = session.exec(select(SystemSettings)).one()
+        # En local, Mailpit es válido; en producción, el mismo transporte se niega.
+        self.assertIsNone(transport_unavailable_reason(row))
+        with mock.patch.object(settings, "environment", "production"):
+            reason = transport_unavailable_reason(row)
+            self.assertIsNotNone(reason)
+            assert reason is not None
+            self.assertIn("buzón de desarrollo", reason)
+
+    def test_password_reset_policy_reads_database(self) -> None:
+        sid = self._settings_id()
+        policy = self.client.get("/api/v1/auth/policy").json()
+        self.assertTrue(policy["password_reset_enabled"])
+        self.client.patch(
+            f"/api/v1/system-settings/{sid}", json={"password_reset_enabled": False}
+        )
+        policy = self.client.get("/api/v1/auth/policy").json()
+        self.assertFalse(policy["password_reset_enabled"])
+        forgot = self.client.post(
+            "/api/v1/auth/password/forgot", json={"email": "x@example.com"}
+        )
+        self.assertEqual(forgot.status_code, 403)
+
     # -- Servicio: bootstrap aplica la política --------------------------------------
 
     def test_apply_bootstrap_choices_updates_singleton(self) -> None:

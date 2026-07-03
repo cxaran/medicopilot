@@ -49,7 +49,7 @@ from backend.app.services.google_drive_service import (
     DriveReauthError,
     DriveTemporaryError,
 )
-from backend.app.utils.email import send_email
+from backend.app.services.email_service import send_system_email
 from backend.app.utils.utc_now import utc_now
 
 logger = logging.getLogger("backend.backups")
@@ -63,13 +63,12 @@ _RUN_NOT_FOUND = "Ejecución de respaldo no encontrada"
 _FRONTEND_BACKUPS_PATH = "/backups"
 
 
-async def _send_settings_email(email_to: str, row) -> None:  # type: ignore[no-untyped-def]
+async def _send_settings_email(session, email_to: str, row) -> None:  # type: ignore[no-untyped-def]
     """Correo con la configuración aplicada y, si el sistema generó la clave de
     cifrado, la identidad privada (para que nunca se pierda). Best-effort: un fallo
-    de SMTP no revierte el cambio de configuración (send_email ya lo traga con warn).
-    """
+    del transporte no revierte el cambio de configuración."""
     subject, body = backups.backup_settings_email(row, backups.stored_identity_plain(row))
-    await send_email(subject=subject, email_to=email_to, message=body)
+    await send_system_email(session, subject=subject, email_to=email_to, message=body)
 
 
 @router.get("/backup-settings", response_model=OffsetPage[BackupSettingsListItem])
@@ -165,7 +164,7 @@ async def update_backup_settings(
     # Cada cambio de configuración se notifica por correo al administrador que lo
     # hizo, incluyendo la clave de cifrado si el sistema la generó (requisito del
     # dueño: que la clave que abre los respaldos nunca se pierda).
-    await _send_settings_email(current_user.email, row)
+    await _send_settings_email(session, current_user.email, row)
     return serialize(BackupSettingsRead, row)
 
 
@@ -200,7 +199,7 @@ async def generate_encryption_key(
     )
     session.commit()
     session.refresh(row)
-    await _send_settings_email(current_user.email, row)
+    await _send_settings_email(session, current_user.email, row)
     return serialize(BackupSettingsRead, row)
 
 
@@ -250,7 +249,7 @@ async def google_drive_callback(
             changed_fields=["drive_status", "drive_folder_id"],
         )
         session.commit()
-        await _send_settings_email(current_user.email, row)
+        await _send_settings_email(session, current_user.email, row)
     except backups.BackupPermanentError:
         session.rollback()
         # El motivo exacto queda en logs; a la URL sólo viaja el desenlace.
@@ -284,7 +283,7 @@ async def disconnect_drive(
     )
     session.commit()
     session.refresh(row)
-    await _send_settings_email(current_user.email, row)
+    await _send_settings_email(session, current_user.email, row)
     return serialize(BackupSettingsRead, row)
 
 

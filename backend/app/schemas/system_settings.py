@@ -36,6 +36,97 @@ class SystemSettingsUpdate(ApiPatchSchema):
         description="Nombre del consultorio para membretes y encabezados.",
         json_schema_extra={"ui": {"form": True, "widget": "text"}},
     )
+    password_reset_enabled: Optional[bool] = Field(
+        default=None,
+        title="Recuperación de contraseña",
+        description=(
+            "Permitir restablecer contraseña por correo. AVISO: apagarla con el "
+            "registro cerrado y un solo administrador puede dejar la instalación "
+            "sin acceso (la salida es el seed del servidor)."
+        ),
+        json_schema_extra={"ui": {"form": True, "widget": "switch"}},
+    )
+    email_mode: Optional[Literal["environment", "smtp", "resend"]] = Field(
+        default=None,
+        title="Transporte de correo",
+        description=(
+            "environment: SMTP del despliegue (Mailpit en desarrollo); smtp/resend: "
+            "credenciales guardadas aquí (cifradas)."
+        ),
+        json_schema_extra={
+            "ui": {
+                "form": True,
+                "widget": "select",
+                "options": [
+                    {"value": "environment", "label": "Del entorno (Mailpit en dev)"},
+                    {"value": "smtp", "label": "SMTP propio"},
+                    {"value": "resend", "label": "Resend"},
+                ],
+            }
+        },
+    )
+    email_from_address: Optional[str] = Field(
+        default=None,
+        min_length=3,
+        max_length=255,
+        title="Remitente",
+        description="Correo remitente (modos smtp/resend).",
+        json_schema_extra={"ui": {"form": True, "widget": "email"}},
+    )
+    email_from_name: Optional[str] = Field(
+        default=None,
+        min_length=1,
+        max_length=120,
+        title="Nombre del remitente",
+        json_schema_extra={"ui": {"form": True, "widget": "text"}},
+    )
+    email_smtp_host: Optional[str] = Field(
+        default=None,
+        min_length=1,
+        max_length=255,
+        title="Servidor SMTP",
+        json_schema_extra={"ui": {"form": True, "widget": "text"}},
+    )
+    email_smtp_port: Optional[int] = Field(
+        default=None,
+        ge=1,
+        le=65535,
+        title="Puerto SMTP",
+        json_schema_extra={"ui": {"form": True, "widget": "number"}},
+    )
+    email_smtp_username: Optional[str] = Field(
+        default=None,
+        min_length=1,
+        max_length=255,
+        title="Usuario SMTP",
+        json_schema_extra={"ui": {"form": True, "widget": "text"}},
+    )
+    email_smtp_tls: Optional[bool] = Field(
+        default=None,
+        title="STARTTLS",
+        json_schema_extra={"ui": {"form": True, "widget": "switch"}},
+    )
+    email_smtp_ssl: Optional[bool] = Field(
+        default=None,
+        title="SSL directo",
+        json_schema_extra={"ui": {"form": True, "widget": "switch"}},
+    )
+    # Secretos WRITE-ONLY: enviar un valor lo reemplaza, enviar null lo borra,
+    # omitirlo lo conserva. JAMÁS existen en el schema de lectura.
+    email_smtp_password: Optional[str] = Field(
+        default=None,
+        max_length=255,
+        title="Contraseña SMTP (write-only)",
+        description="Se guarda cifrada; nunca vuelve a mostrarse.",
+        json_schema_extra={"ui": {"form": True, "widget": "text"}},
+    )
+    email_resend_api_key: Optional[str] = Field(
+        default=None,
+        max_length=255,
+        title="API key de Resend (write-only)",
+        description="Se guarda cifrada; nunca vuelve a mostrarse.",
+        json_schema_extra={"ui": {"form": True, "widget": "text"}},
+    )
 
 
 class SystemSettingsRead(ApiReadSchema):
@@ -50,6 +141,23 @@ class SystemSettingsRead(ApiReadSchema):
     app_base_url: Optional[str] = None
     app_base_url_verified_at: Optional[datetime] = None
     institution_name: Optional[str] = None
+    password_reset_enabled: bool
+    # Correo: estado SEGURO (metadata; los secretos jamás se proyectan).
+    email_mode: str
+    email_from_address: Optional[str] = None
+    email_from_name: Optional[str] = None
+    email_smtp_host: Optional[str] = None
+    email_smtp_port: Optional[int] = None
+    email_smtp_username: Optional[str] = None
+    email_smtp_tls: bool
+    email_smtp_ssl: bool
+    email_smtp_password_configured: bool
+    email_resend_api_key_configured: bool
+    email_last_test_at: Optional[datetime] = None
+    email_last_test_status: Optional[str] = None
+    email_last_test_error: Optional[str] = None
+    # Derivado con la MISMA regla que usa el envío (None = transporte utilizable).
+    email_transport_reason: Optional[str] = None
     environment: str
     created_at: datetime
     updated_at: Optional[datetime] = None
@@ -74,6 +182,19 @@ class SystemSettingsListItem(ApiReadSchema):
     )
     # Presente para el contrato de orden del query.
     created_at: datetime = Field(title="Creado")
+
+
+class SendTestEmailRequest(ApiPatchSchema):
+    """Cuerpo de la acción de correo de prueba (destinatario opcional: default el
+    administrador que la ejecuta)."""
+
+    recipient: Optional[str] = Field(
+        default=None,
+        min_length=3,
+        max_length=255,
+        title="Destinatario (opcional)",
+        json_schema_extra={"ui": {"form": True, "widget": "email"}},
+    )
 
 
 class SetupChecklistItemRead(ApiReadSchema):

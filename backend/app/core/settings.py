@@ -122,7 +122,8 @@ class Settings(BaseSettings):
     # salta). Sin valor explícito: permitido sólo en entorno local. La política
     # efectiva es (gate AND system_settings.public_registration_enabled).
     registration_allowed: bool | None = None
-    password_reset_enabled: bool = True
+    # (password_reset_enabled también se retiró: vive en system_settings, importado
+    # del entorno una única vez por la migración c9d0e1f2a3b4.)
 
     @computed_field
     @property

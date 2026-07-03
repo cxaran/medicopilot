@@ -10,7 +10,7 @@ from datetime import date, datetime, time
 from decimal import Decimal
 from enum import Enum
 from types import UnionType
-from typing import Annotated, Any, Optional, Union, get_args, get_origin
+from typing import Annotated, Any, Optional, Union, get_args, get_origin, Literal
 from uuid import UUID
 
 import annotated_types as at
@@ -135,6 +135,10 @@ def _value_type(annotation: Any) -> FieldValueType:
     if inner is time:
         return FieldValueType.TIME
     if isinstance(inner, type) and issubclass(inner, Enum):
+        return FieldValueType.ENUM
+    # Literal de strings: universo cerrado de valores → ENUM del contrato (el campo
+    # declara sus opciones vía ui.options, con la misma forma {value, label}).
+    if get_origin(inner) is Literal and all(isinstance(v, str) for v in get_args(inner)):
         return FieldValueType.ENUM
     raise CapabilityConfigError(f"Tipo no mapeable a capability: {inner!r}")
 

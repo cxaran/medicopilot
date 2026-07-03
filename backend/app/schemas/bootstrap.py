@@ -93,6 +93,10 @@ class BootstrapInitializeRequest(ApiWriteSchema):
         default=False,
         description="Permitir el auto-registro público desde el primer momento.",
     )
+    password_reset_enabled: bool = Field(
+        default=True,
+        description="Permitir la recuperación de contraseña por correo.",
+    )
     institution_name: str | None = Field(
         default=None,
         min_length=1,

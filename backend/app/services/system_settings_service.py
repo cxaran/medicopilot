@@ -43,6 +43,12 @@ def is_public_registration_enabled(session: Session) -> bool:
     return get_system_settings(session).public_registration_enabled
 
 
+def is_password_reset_enabled(session: Session) -> bool:
+    """Política de recuperación de contraseña (sólo DB; sin candado de despliegue:
+    es de bajo riesgo — actúa sobre cuentas existentes vía su correo)."""
+    return get_system_settings(session).password_reset_enabled
+
+
 ChecklistStatus = Literal["complete", "pending", "not_applicable"]
 
 
@@ -101,19 +107,31 @@ def build_setup_checklist(
         )
     )
 
-    # Correo: en entorno local Mailpit funciona solo (no exige acción); fuera de
-    # local, mientras el correo no sea configurable en runtime (fase siguiente), el
-    # transporte del entorno es la decisión vigente.
+    # Correo: deriva del transporte REAL configurado (misma regla que el envío).
+    from backend.app.services.email_service import transport_unavailable_reason
+
+    email_reason = transport_unavailable_reason(system)
+    if email_reason is not None:
+        email_status: ChecklistStatus = "pending"
+        email_detail = email_reason
+    elif system.email_mode == "environment" and settings.environment == "local":
+        email_status = "complete"
+        email_detail = "Mailpit automático (entorno de desarrollo)."
+    elif system.email_last_test_status == "ok":
+        email_status = "complete"
+        email_detail = f"Transporte {system.email_mode} verificado con correo de prueba."
+    else:
+        email_status = "pending"
+        email_detail = (
+            "Envía un correo de prueba para verificar el transporte "
+            f"({system.email_mode})."
+        )
     items.append(
         ChecklistItem(
             key="email",
             title="Correo saliente",
-            status="complete" if settings.environment == "local" else "pending",
-            detail=(
-                "Mailpit automático (entorno de desarrollo)."
-                if settings.environment == "local"
-                else "Configura el proveedor de correo del despliegue."
-            ),
+            status=email_status,
+            detail=email_detail,
         )
     )
 
@@ -208,10 +226,12 @@ def apply_bootstrap_choices(
     *,
     public_registration_enabled: bool,
     institution_name: Optional[str],
+    password_reset_enabled: bool = True,
 ) -> None:
     """Aplica al singleton las decisiones tomadas en el asistente de bootstrap."""
     row = get_system_settings(session, for_update=True)
     row.public_registration_enabled = public_registration_enabled
+    row.password_reset_enabled = password_reset_enabled
     if institution_name:
         row.institution_name = institution_name.strip()
     session.add(row)

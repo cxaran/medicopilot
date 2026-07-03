@@ -878,6 +878,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/system-settings/{item_id}/send-test-email": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send Test Email
+         * @description Verifica el transporte configurado enviando un correo real y PERSISTE el
+         *     desenlace (email_last_test_*): el checklist marca el correo como verificado
+         *     solo tras un test exitoso.
+         */
+        post: operations["send_test_email_api_v1_system_settings__item_id__send_test_email_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/system-settings/{item_id}": {
         parameters: {
             query?: never;
@@ -1501,6 +1523,30 @@ export interface paths {
         put?: never;
         /** Create Doctor */
         post: operations["create_doctor_api_v1_doctors_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/doctors/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get My Doctor
+         * @description Perfil de médico del usuario AUTENTICADO (o 404 si no tiene).
+         *
+         *     SIN permiso de recurso: es el perfil PROPIO del usuario (no un dato de otro médico). Lo consume
+         *     el copiloto para anclar el contexto inicial (quién atiende) y firmar los borradores. Definido
+         *     antes de ``/{doctor_id}`` para que 'me' no se interprete como UUID.
+         */
+        get: operations["get_my_doctor_api_v1_doctors_me_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3582,6 +3628,12 @@ export interface components {
              * @default false
              */
             public_registration_enabled: boolean;
+            /**
+             * Password Reset Enabled
+             * @description Permitir la recuperación de contraseña por correo.
+             * @default true
+             */
+            password_reset_enabled: boolean;
             /**
              * Institution Name
              * @description Nombre del consultorio/institución (opcional).
@@ -8446,6 +8498,15 @@ export interface components {
             /** Max Length */
             max_length?: number | null;
         };
+        /**
+         * SendTestEmailRequest
+         * @description Cuerpo de la acción de correo de prueba (destinatario opcional: default el
+         *     administrador que la ejecuta).
+         */
+        SendTestEmailRequest: {
+            /** Destinatario (opcional) */
+            recipient?: string | null;
+        };
         /** SessionUser */
         SessionUser: {
             /**
@@ -8984,6 +9045,36 @@ export interface components {
             app_base_url_verified_at?: string | null;
             /** Institution Name */
             institution_name?: string | null;
+            /** Password Reset Enabled */
+            password_reset_enabled: boolean;
+            /** Email Mode */
+            email_mode: string;
+            /** Email From Address */
+            email_from_address?: string | null;
+            /** Email From Name */
+            email_from_name?: string | null;
+            /** Email Smtp Host */
+            email_smtp_host?: string | null;
+            /** Email Smtp Port */
+            email_smtp_port?: number | null;
+            /** Email Smtp Username */
+            email_smtp_username?: string | null;
+            /** Email Smtp Tls */
+            email_smtp_tls: boolean;
+            /** Email Smtp Ssl */
+            email_smtp_ssl: boolean;
+            /** Email Smtp Password Configured */
+            email_smtp_password_configured: boolean;
+            /** Email Resend Api Key Configured */
+            email_resend_api_key_configured: boolean;
+            /** Email Last Test At */
+            email_last_test_at?: string | null;
+            /** Email Last Test Status */
+            email_last_test_status?: string | null;
+            /** Email Last Test Error */
+            email_last_test_error?: string | null;
+            /** Email Transport Reason */
+            email_transport_reason?: string | null;
             /** Environment */
             environment: string;
             /**
@@ -9011,6 +9102,43 @@ export interface components {
              * @description Nombre del consultorio para membretes y encabezados.
              */
             institution_name?: string | null;
+            /**
+             * Recuperación de contraseña
+             * @description Permitir restablecer contraseña por correo. AVISO: apagarla con el registro cerrado y un solo administrador puede dejar la instalación sin acceso (la salida es el seed del servidor).
+             */
+            password_reset_enabled?: boolean | null;
+            /**
+             * Transporte de correo
+             * @description environment: SMTP del despliegue (Mailpit en desarrollo); smtp/resend: credenciales guardadas aquí (cifradas).
+             */
+            email_mode?: ("environment" | "smtp" | "resend") | null;
+            /**
+             * Remitente
+             * @description Correo remitente (modos smtp/resend).
+             */
+            email_from_address?: string | null;
+            /** Nombre del remitente */
+            email_from_name?: string | null;
+            /** Servidor SMTP */
+            email_smtp_host?: string | null;
+            /** Puerto SMTP */
+            email_smtp_port?: number | null;
+            /** Usuario SMTP */
+            email_smtp_username?: string | null;
+            /** STARTTLS */
+            email_smtp_tls?: boolean | null;
+            /** SSL directo */
+            email_smtp_ssl?: boolean | null;
+            /**
+             * Contraseña SMTP (write-only)
+             * @description Se guarda cifrada; nunca vuelve a mostrarse.
+             */
+            email_smtp_password?: string | null;
+            /**
+             * API key de Resend (write-only)
+             * @description Se guarda cifrada; nunca vuelve a mostrarse.
+             */
+            email_resend_api_key?: string | null;
         };
         /**
          * TopDiagnosis
@@ -11357,6 +11485,43 @@ export interface operations {
             };
         };
     };
+    send_test_email_api_v1_system_settings__item_id__send_test_email_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SendTestEmailRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemSettingsRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_system_settings_detail_api_v1_system_settings__item_id__get: {
         parameters: {
             query?: never;
@@ -13377,6 +13542,37 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DoctorRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_my_doctor_api_v1_doctors_me_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };

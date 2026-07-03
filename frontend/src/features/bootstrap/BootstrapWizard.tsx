@@ -320,17 +320,30 @@ function RolesStep({
             required={false}
             onChange={(value) => setDraft({ ...draft, institution_name: value })}
           />
-          <label className="flex items-center gap-3 self-end pb-2 text-sm text-[var(--tx)]">
-            <input
-              type="checkbox"
-              checked={draft.public_registration_enabled}
-              onChange={(event) =>
-                setDraft({ ...draft, public_registration_enabled: event.target.checked })
-              }
-              className="h-4 w-4 accent-[var(--accent)]"
-            />
-            Permitir registro público de cuentas
-          </label>
+          <div className="flex flex-col gap-2 self-end pb-2">
+            <label className="flex items-center gap-3 text-sm text-[var(--tx)]">
+              <input
+                type="checkbox"
+                checked={draft.public_registration_enabled}
+                onChange={(event) =>
+                  setDraft({ ...draft, public_registration_enabled: event.target.checked })
+                }
+                className="h-4 w-4 accent-[var(--accent)]"
+              />
+              Permitir registro público de cuentas
+            </label>
+            <label className="flex items-center gap-3 text-sm text-[var(--tx)]">
+              <input
+                type="checkbox"
+                checked={draft.password_reset_enabled}
+                onChange={(event) =>
+                  setDraft({ ...draft, password_reset_enabled: event.target.checked })
+                }
+                className="h-4 w-4 accent-[var(--accent)]"
+              />
+              Permitir recuperación de contraseña por correo
+            </label>
+          </div>
         </div>
         <p className="mt-2 text-xs text-[var(--tx3)]">
           Deshabilitado, las cuentas las crean los administradores. Recomendado dejarlo

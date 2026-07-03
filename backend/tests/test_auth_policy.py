@@ -41,10 +41,14 @@ class AuthPolicyTest(unittest.TestCase):
         self.client = TestClient(app)
         self._prev = {
             "rate_limit_enabled": settings.rate_limit_enabled,
-            "password_reset_enabled": settings.password_reset_enabled,
         }
         settings.rate_limit_enabled = False
-        settings.password_reset_enabled = True
+        # La política de reset también vive en system_settings: se parchea el
+        # resolutor (la integración real con DB se prueba en test_system_settings).
+        self._reset_policy = patch.object(
+            auth_router, "is_password_reset_enabled", return_value=True
+        )
+        self._reset_policy.start()
         # La política de registro ahora es EFECTIVA (system_settings AND gate del
         # despliegue); esta suite no usa base de datos, así que se parchea el
         # resolutor en el módulo del router (la integración real con la DB se prueba
@@ -56,6 +60,7 @@ class AuthPolicyTest(unittest.TestCase):
 
     def tearDown(self) -> None:
         self._registration.stop()
+        self._reset_policy.stop()
         for key, value in self._prev.items():
             setattr(settings, key, value)
 
@@ -103,7 +108,11 @@ class AuthPolicyTest(unittest.TestCase):
         self.assertEqual(response.status_code, 202)
 
     def test_password_reset_blocked_when_disabled(self) -> None:
-        settings.password_reset_enabled = False
+        self._reset_policy.stop()
+        self._reset_policy = patch.object(
+            auth_router, "is_password_reset_enabled", return_value=False
+        )
+        self._reset_policy.start()
         response = self.client.post(
             "/api/v1/auth/password/forgot", json={"email": "user@example.com"}
         )

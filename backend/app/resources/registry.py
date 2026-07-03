@@ -147,6 +147,7 @@ from backend.app.schemas.patient_history_item import (
 )
 from backend.app.schemas.audit_event import AuditEventListItem
 from backend.app.schemas.system_settings import (
+    SendTestEmailRequest,
     SystemSettingsListItem,
     SystemSettingsUpdate,
 )
@@ -1413,6 +1414,25 @@ RESOURCE_REGISTRY: tuple[ResourceDefinition, ...] = (
         update_schema=SystemSettingsUpdate,
         update_permission=SystemSettingsPermissions.CONFIGURE,
         detail_url_template="/api/v1/system-settings/{id}",
+        actions=(
+            ActionDef(
+                name="send_test_email",
+                label="Enviar correo de prueba",
+                method=HttpMethod.POST,
+                url_template="/api/v1/system-settings/{id}/send-test-email",
+                scope=ActionScope.ITEM,
+                danger=False,
+                permission=SystemSettingsPermissions.CONFIGURE,
+                input_schema=SendTestEmailRequest,
+                confirmation=ConfirmationDef(
+                    title="Correo de prueba",
+                    message="Se enviará un correo real con el transporte configurado.",
+                    confirm_label="Enviar",
+                    destructive=False,
+                    required=False,
+                ),
+            ),
+        ),
     ),
     ResourceDefinition(
         name="backup_settings",

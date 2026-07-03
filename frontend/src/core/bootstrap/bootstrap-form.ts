@@ -33,6 +33,7 @@ export type BootstrapWizardDraft = {
   additional_roles: AdditionalRoleDraft[];
   // Política inicial de plataforma (editable después en Configuración del sistema).
   public_registration_enabled: boolean;
+  password_reset_enabled: boolean;
   institution_name: string;
   // Perfil de médico del usuario inicial (instalación admin=médico).
   is_doctor: boolean;
@@ -86,6 +87,7 @@ export function emptyBootstrapDraft(): BootstrapWizardDraft {
     },
     additional_roles: [],
     public_registration_enabled: false,
+    password_reset_enabled: true,
     institution_name: "",
     is_doctor: true,
     doctor_professional_name: "",
@@ -116,6 +118,7 @@ export function buildBootstrapPayload(draft: BootstrapWizardDraft): BootstrapIni
         assign_to_initial_user: role.assign_to_initial_user,
       })),
     public_registration_enabled: draft.public_registration_enabled,
+    password_reset_enabled: draft.password_reset_enabled,
     institution_name: draft.institution_name.trim() || null,
     doctor_profile:
       draft.is_doctor && draft.doctor_professional_name.trim() && draft.doctor_license_number.trim()
