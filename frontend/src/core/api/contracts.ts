@@ -66,6 +66,10 @@ export type ActionConditionOperator = components["schemas"]["ActionConditionOper
 export type ItemReference = components["schemas"]["ItemReference"];
 export type ResourceDetailCapability = components["schemas"]["ResourceDetailCapability"];
 export type ResourceRelationCapability = components["schemas"]["ResourceRelationCapability"];
+// Lista relacionada navegable por item (p. ej. signos vitales de una consulta): enlace a la
+// lista del recurso destino filtrada con parameter_name=<id del item>. Solo lectura.
+export type ResourceRelatedListCapability =
+  components["schemas"]["ResourceRelatedListCapability"];
 export type RelationOptionsSource = components["schemas"]["RelationOptionsSource"];
 export type RelationCardinality = components["schemas"]["RelationCardinality"];
 export type OptionsSourceType = components["schemas"]["OptionsSourceType"];
@@ -86,6 +90,9 @@ export type PermissionGroupRead = components["schemas"]["PermissionGroupRead"];
 export type PermissionsCatalog =
   operations["list_permissions_api_v1_permissions_get"]["responses"][200]["content"]["application/json"];
 export type RolePermissionsRead = components["schemas"]["RolePermissionsRead"];
+
+// Resumen clínico compacto del paciente para el contexto del copiloto.
+export type PatientSummaryRead = components["schemas"]["PatientSummaryRead"];
 
 export type BootstrapStatusRead = components["schemas"]["BootstrapStatusRead"];
 export type BootstrapCatalogRead = components["schemas"]["BootstrapCatalogRead"];

@@ -6,7 +6,8 @@ import type { WireMessage } from "@/core/agent/protocol";
  * turno en este orden FIJO (ver ``composeLeadingLayers``):
  *
  *   [SEGURIDAD CLÍNICA (fija)] -> [OPERATIVA (fija)] -> [PERSONA (configurable)] ->
- *   [CONTEXTO ACTIVO] -> [MEMORIAS (P2, no confiables)] -> [conversación]
+ *   [CONTEXTO ACTIVO] -> [RESUMEN DEL PACIENTE (referencia)] -> [MEMORIAS (P2, no confiables)] ->
+ *   [conversación]
  *
  * La capa de SEGURIDAD es propiedad del CÓDIGO: siempre va primera, siempre presente, y el
  * médico NO puede editarla ni desactivarla. La PERSONA es editable por el médico (tono,
@@ -62,7 +63,7 @@ export const OPERATIONAL_LAYER_HEADER = "GUÍA OPERATIVA DE HERRAMIENTAS";
  * acciones directamente (la confirmación la gestiona la plataforma) y no entrar en bucles de
  * descubrimiento.
  */
-export const OPERATIONAL_TOOLS_GUIDANCE = [
+const OPERATIONAL_TOOLS_GUIDANCE = [
   OPERATIONAL_LAYER_HEADER,
   "Cómo trabajar con las herramientas (la plataforma valida permisos y confirmaciones por ti):",
   "- Tienes TODAS tus herramientas disponibles directamente; no necesitas buscarlas ni cargarlas. " +
@@ -151,16 +152,19 @@ export function personaLayerMessage(persona: PersonaFields | null | undefined): 
 
 /**
  * Capas LÍDER del contexto, en el orden fijo
- * [SEGURIDAD] -> [OPERATIVA] -> [PERSONA] -> [CONTEXTO ACTIVO] -> [MEMORIAS]. La seguridad SIEMPRE
- * está y SIEMPRE es la primera. La capa OPERATIVA (guía de herramientas, instrucción nuestra de
- * confianza) va justo después, antes de la persona configurable. El contexto clínico activo
- * (paciente/consulta) va ANTES de las memorias (datos no confiables). El llamador antepone esto a
- * la conversación (ya compactada).
+ * [SEGURIDAD] -> [OPERATIVA] -> [PERSONA] -> [CONTEXTO ACTIVO] -> [RESUMEN DEL PACIENTE] ->
+ * [MEMORIAS]. La seguridad SIEMPRE está y SIEMPRE es la primera. La capa OPERATIVA (guía de
+ * herramientas, instrucción nuestra de confianza) va justo después, antes de la persona
+ * configurable. El contexto clínico activo (paciente/consulta) y el RESUMEN del paciente (datos de
+ * referencia del expediente) van ANTES de las memorias (datos no confiables). El resumen se sitúa
+ * tras las capas ESTABLES (seguridad/operativa/persona) para que, cuando cambie, invalide lo mínimo
+ * del prefijo cacheado por el proveedor. El llamador antepone esto a la conversación (ya compactada).
  */
 export function composeLeadingLayers(
   persona: PersonaFields | null | undefined,
   memory: WireMessage | null,
   activeContext: WireMessage | null = null,
+  patientSummary: WireMessage | null = null,
 ): WireMessage[] {
   const layers: WireMessage[] = [safetyLayerMessage(), operationalLayerMessage()];
   const personaMessage = personaLayerMessage(persona);
@@ -169,6 +173,9 @@ export function composeLeadingLayers(
   }
   if (activeContext) {
     layers.push(activeContext);
+  }
+  if (patientSummary) {
+    layers.push(patientSummary);
   }
   if (memory) {
     layers.push(memory);

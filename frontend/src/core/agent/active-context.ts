@@ -3,15 +3,16 @@ import type { RecallScope } from "@/core/agent/memory-recall";
 
 /**
  * CONTEXTO CLÍNICO ACTIVO del copiloto (paciente y consulta opcional sobre los que el médico
- * está trabajando). Hoy el /copilot independiente no tiene paciente activo, así que el recall
- * (P2) y el contexto/compactación (P3) sólo se acotan por dueño y recencia. Este módulo PURO
- * (sin red ni React) modela ese ámbito: lo convierte en el RecallScope de P2, arma una nota de
- * contexto para el turno y produce el texto del chip indicador.
+ * está trabajando). En el chat POR PACIENTE hay contexto activo; en el /copilot GLOBAL no lo hay,
+ * y entonces el recall (P2) y el contexto/compactación (P3) sólo se acotan por dueño y recencia.
+ * Este módulo PURO (sin red ni React) modela ese ámbito: lo convierte en el RecallScope de P2,
+ * arma una nota de contexto para el turno y produce el texto del chip indicador.
  *
- * El selector SÓLO fija el ámbito (paciente/consulta elegidos por el médico). NO carga PHI del
- * expediente por su cuenta: la única PHI que entra al turno es la que el recall ya inyecta
- * (memorias del médico) y la ETIQUETA que el médico vio y eligió en el selector. La nota de
- * contexto es instrucción de confianza nuestra (delimita el ámbito), no datos del paciente.
+ * El selector SÓLO fija el ámbito (paciente/consulta elegidos por el médico). ESTE módulo NO carga
+ * PHI del expediente por su cuenta: sólo aporta al turno la ETIQUETA que el médico vio y eligió, y
+ * su nota de contexto es instrucción de confianza nuestra (delimita el ámbito), no datos del
+ * paciente. La PHI del expediente que llega al turno la inyectan otras capas: el recall (memorias
+ * del médico) y el RESUMEN DEL PACIENTE (ver patient-summary.ts), no este selector.
  */
 
 /** Paciente (y consulta opcional) activos, con su etiqueta visible para el médico. */

@@ -1474,12 +1474,13 @@ export interface paths {
         put?: never;
         /**
          * Reset Conversation
-         * @description Reinicia el hilo con baja LÓGICA en lote de sus mensajes vigentes.
+         * @description Reinicia el hilo eliminando FÍSICAMENTE sus mensajes (el chat no es expediente).
          *
          *     Sin ``from_sequence_index`` se vacía la conversación completa (el hilo queda utilizable y el
-         *     ``sequence_index`` vuelve a empezar en 0, porque el siguiente índice se calcula sobre los
-         *     vigentes); con él, se eliminan desde ese punto (inclusive) hasta el final. La conversación en
-         *     sí NO se elimina. Borra historial de chat, nunca datos clínicos.
+         *     ``sequence_index`` vuelve a empezar en 0); con él, se eliminan desde ese punto (inclusive)
+         *     hasta el final y el siguiente append continúa desde el máximo restante (los índices liberados
+         *     no se reusan: las filas ya no existen). Sólo sobre hilos propios. La conversación en sí NO se
+         *     elimina. Borra historial de chat, nunca datos clínicos.
          */
         post: operations["reset_conversation_api_v1_conversations__item_id__reset_post"];
         delete?: never;
@@ -1556,17 +1557,18 @@ export interface paths {
         post?: never;
         /**
          * Delete Message
-         * @description Baja LÓGICA de un mensaje puntual del hilo (limpieza del chat, no un borrado clínico).
+         * @description Borrado FÍSICO de un mensaje puntual del propio hilo (limpieza del chat, no clínico).
          *
-         *     El mensaje deja de aparecer en los listados; el resto del hilo conserva su orden (el
-         *     ``sequence_index`` de los demás no se recalcula).
+         *     La fila se elimina de verdad (el chat no es expediente); el resto del hilo conserva su
+         *     orden (el ``sequence_index`` de los demás no se recalcula y los índices liberados no se
+         *     reusan: el siguiente append parte del máximo restante).
          */
         delete: operations["delete_message_api_v1_messages__item_id__delete"];
         options?: never;
         head?: never;
         /**
          * Update Message
-         * @description Actualiza los METADATOS de presentación de un mensaje vigente (sólo ``payload``).
+         * @description Actualiza los METADATOS de presentación de un mensaje del propio hilo (sólo ``payload``).
          *
          *     Permite reflejar estado que cambia DESPUÉS del alta —p. ej. una interfaz generada ya usada,
          *     para restaurarla contraída al recargar el hilo—. El contenido, el rol y el ``sequence_index``
@@ -1889,6 +1891,26 @@ export interface paths {
         head?: never;
         /** Update Patient Immunization */
         patch: operations["update_patient_immunization_api_v1_patient_immunizations__item_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/patients/{patient_id}/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Patient Summary
+         * @description Resumen clínico compacto del paciente para el contexto del copiloto. Sólo lectura.
+         */
+        get: operations["get_patient_summary_api_v1_patients__patient_id__summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/patients": {
@@ -6021,6 +6043,11 @@ export interface components {
         /**
          * MessageListItem
          * @description Versión de listado compatible con ``ResourceQuery`` (orden por ``sequence_index``).
+         *
+         *     Incluye el ``payload`` estructurado: el sembrado del chat restaura el hilo DESDE ESTA LISTA
+         *     (razonamiento, tarjetas de herramientas, notas y UI generativa viven ahí); sin él, el hilo
+         *     recargado degrada a texto plano. No se proyecta como columna del recurso (sin ``title`` ni
+         *     ``ui.list``): es transporte para el cliente, no presentación tabular.
          */
         MessageListItem: {
             /**
@@ -6044,6 +6071,10 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /** Payload */
+            payload?: {
+                [key: string]: unknown;
+            } | null;
         };
         /**
          * MessageRead
@@ -7122,6 +7153,77 @@ export interface components {
          * @enum {string}
          */
         PatientStatus: "active" | "inactive" | "archived";
+        /**
+         * PatientSummaryRead
+         * @description Resumen compacto del paciente para el contexto del copiloto.
+         *
+         *     ``patient_id`` es el ÚNICO identificador; los elementos anidados no llevan ids.
+         */
+        PatientSummaryRead: {
+            /**
+             * Patient Id
+             * Format: uuid
+             */
+            patient_id: string;
+            /**
+             * Generado En
+             * Format: date-time
+             */
+            generado_en: string;
+            datos_generales: components["schemas"]["SummaryGeneral"];
+            /**
+             * Resumen Clinico
+             * @default []
+             */
+            resumen_clinico: components["schemas"]["SummaryClinicalItem"][];
+            /**
+             * Antecedentes
+             * @default []
+             */
+            antecedentes: components["schemas"]["SummaryHistoryItem"][];
+            historia_clinica?: components["schemas"]["SummaryMedicalHistory"] | null;
+            /**
+             * Consultas
+             * @default []
+             */
+            consultas: components["schemas"]["SummaryConsultation"][];
+            /**
+             * Notas
+             * @default []
+             */
+            notas: components["schemas"]["SummaryNote"][];
+            signos_vitales?: components["schemas"]["SummaryVitals"] | null;
+            /**
+             * Recetas
+             * @default []
+             */
+            recetas: components["schemas"]["SummaryPrescription"][];
+            /**
+             * Laboratorios
+             * @default []
+             */
+            laboratorios: components["schemas"]["SummaryLab"][];
+            /**
+             * Estudios
+             * @default []
+             */
+            estudios: components["schemas"]["SummaryStudy"][];
+            /**
+             * Seguimiento
+             * @default []
+             */
+            seguimiento: components["schemas"]["SummaryTask"][];
+            /**
+             * Archivos
+             * @default []
+             */
+            archivos: components["schemas"]["SummaryFile"][];
+            /**
+             * Citas
+             * @default []
+             */
+            citas: components["schemas"]["SummaryAppointment"][];
+        };
         /**
          * PatientUpdate
          * @description Actualización parcial de un paciente (PATCH).
@@ -8620,6 +8722,248 @@ export interface components {
             status?: components["schemas"]["StudyOrderStatus"] | null;
             /** Resultado vinculado */
             result_lab_result_id?: string | null;
+        };
+        /** SummaryAppointment */
+        SummaryAppointment: {
+            /**
+             * Fecha
+             * Format: date
+             */
+            fecha: string;
+            /** Hora */
+            hora?: string | null;
+            /** Motivo */
+            motivo: string;
+            /** Estado */
+            estado: string;
+        };
+        /**
+         * SummaryClinicalItem
+         * @description Dato clínico importante del resumen: alergia, condición crónica, medicación actual…
+         */
+        SummaryClinicalItem: {
+            /** Tipo */
+            tipo: string;
+            /** Titulo */
+            titulo: string;
+            /** Detalle */
+            detalle?: string | null;
+            /** Severidad */
+            severidad?: string | null;
+        };
+        /**
+         * SummaryConsultation
+         * @description Consulta reciente: fecha, estado, motivo, evaluación y diagnósticos.
+         */
+        SummaryConsultation: {
+            /**
+             * Fecha
+             * Format: date-time
+             */
+            fecha: string;
+            /** Estado */
+            estado: string;
+            /** Motivo */
+            motivo: string;
+            /** Evaluacion */
+            evaluacion?: string | null;
+            /**
+             * Diagnosticos
+             * @default []
+             */
+            diagnosticos: components["schemas"]["SummaryDiagnosis"][];
+        };
+        /** SummaryDiagnosis */
+        SummaryDiagnosis: {
+            /** Tipo */
+            tipo: string;
+            /** Texto */
+            texto: string;
+            /** Codigo */
+            codigo?: string | null;
+        };
+        /**
+         * SummaryFile
+         * @description Archivo clínico: sólo metadatos (NUNCA los bytes).
+         */
+        SummaryFile: {
+            /** Nombre */
+            nombre: string;
+            /** Tipo */
+            tipo: string;
+            /** Fecha */
+            fecha?: string | null;
+        };
+        /**
+         * SummaryGeneral
+         * @description Datos generales relevantes para la consulta (sin datos administrativos irrelevantes).
+         */
+        SummaryGeneral: {
+            /** Nombre */
+            nombre: string;
+            /** Edad */
+            edad?: number | null;
+            /** Sexo */
+            sexo: string;
+            /** Ocupacion */
+            ocupacion?: string | null;
+            /** Embarazo */
+            embarazo?: string | null;
+        };
+        /**
+         * SummaryHistoryItem
+         * @description Antecedente estructurado (familiar, quirúrgico, obstétrico, patológico, no patológico).
+         */
+        SummaryHistoryItem: {
+            /** Categoria */
+            categoria: string;
+            /** Descripcion */
+            descripcion: string;
+            /** Parentesco */
+            parentesco?: string | null;
+            /** Notas */
+            notas?: string | null;
+        };
+        /**
+         * SummaryLab
+         * @description Resultado de laboratorio: analito, valor, unidad, marca de anormalidad y fecha.
+         */
+        SummaryLab: {
+            /** Analito */
+            analito: string;
+            /** Valor */
+            valor?: string | null;
+            /** Unidad */
+            unidad?: string | null;
+            /** Marca */
+            marca?: string | null;
+            /**
+             * Fecha
+             * Format: date-time
+             */
+            fecha: string;
+        };
+        /**
+         * SummaryMedicalHistory
+         * @description Historia clínica vigente (versión ``current``). Sólo los bloques con contenido.
+         */
+        SummaryMedicalHistory: {
+            /** Antecedentes Familiares */
+            antecedentes_familiares?: string | null;
+            /** Antecedentes Patologicos */
+            antecedentes_patologicos?: string | null;
+            /** Antecedentes No Patologicos */
+            antecedentes_no_patologicos?: string | null;
+            /** Cirugias Previas */
+            cirugias_previas?: string | null;
+            /** Hospitalizaciones */
+            hospitalizaciones?: string | null;
+            /** Habitos */
+            habitos?: string | null;
+            /** Gineco Obstetricos */
+            gineco_obstetricos?: string | null;
+            /** Observaciones */
+            observaciones?: string | null;
+        };
+        /** SummaryMedication */
+        SummaryMedication: {
+            /** Medicamento */
+            medicamento: string;
+            /** Dosis */
+            dosis?: string | null;
+            /** Frecuencia */
+            frecuencia?: string | null;
+            /** Duracion */
+            duracion?: string | null;
+        };
+        /**
+         * SummaryNote
+         * @description Nota clínica (SOAP u otra): tipo, estado y su evaluación/plan si los tiene.
+         */
+        SummaryNote: {
+            /** Tipo */
+            tipo: string;
+            /** Estado */
+            estado: string;
+            /**
+             * Fecha
+             * Format: date-time
+             */
+            fecha: string;
+            /** Evaluacion */
+            evaluacion?: string | null;
+            /** Plan */
+            plan?: string | null;
+        };
+        /**
+         * SummaryPrescription
+         * @description Receta reciente (no anulada): estado, fecha y sus medicamentos.
+         */
+        SummaryPrescription: {
+            /** Estado */
+            estado: string;
+            /** Fecha */
+            fecha?: string | null;
+            /**
+             * Medicamentos
+             * @default []
+             */
+            medicamentos: components["schemas"]["SummaryMedication"][];
+        };
+        /** SummaryStudy */
+        SummaryStudy: {
+            /** Estudio */
+            estudio: string;
+            /** Estado */
+            estado: string;
+            /**
+             * Fecha
+             * Format: date-time
+             */
+            fecha: string;
+        };
+        /**
+         * SummaryTask
+         * @description Tarea de seguimiento abierta.
+         */
+        SummaryTask: {
+            /** Titulo */
+            titulo: string;
+            /** Prioridad */
+            prioridad: string;
+            /** Vence */
+            vence?: string | null;
+        };
+        /**
+         * SummaryVitals
+         * @description Últimos signos vitales (atados a su fecha de medición; sólo mediciones presentes).
+         */
+        SummaryVitals: {
+            /**
+             * Fecha
+             * Format: date-time
+             */
+            fecha: string;
+            /** Peso Kg */
+            peso_kg?: number | null;
+            /** Talla Cm */
+            talla_cm?: number | null;
+            /** Temperatura C */
+            temperatura_c?: number | null;
+            /** Presion Sistolica */
+            presion_sistolica?: number | null;
+            /** Presion Diastolica */
+            presion_diastolica?: number | null;
+            /** Frecuencia Cardiaca */
+            frecuencia_cardiaca?: number | null;
+            /** Frecuencia Respiratoria */
+            frecuencia_respiratoria?: number | null;
+            /** Saturacion O2 */
+            saturacion_o2?: number | null;
+            /** Glucosa Capilar */
+            glucosa_capilar?: number | null;
+            /** Dolor */
+            dolor?: number | null;
         };
         /**
          * SystemSettingsListItem
@@ -14705,6 +15049,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PatientImmunizationRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_patient_summary_api_v1_patients__patient_id__summary_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                patient_id: string;
+            };
+            cookie?: {
+                session_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PatientSummaryRead"];
                 };
             };
             /** @description Validation Error */
