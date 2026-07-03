@@ -111,15 +111,11 @@ export function PatientResourceList({
   const moduleHref = `/resources/${encodeURIComponent(resourceName)}`;
 
   if (state.status === "loading") {
-    return (
-      <div className="rounded-[14px] border border-[var(--border)] bg-[var(--panel)] p-4 text-[13px] text-[var(--tx3)]">
-        Cargando…
-      </div>
-    );
+    return <div className="text-[13px] text-[var(--tx3)]">Cargando…</div>;
   }
   if (state.status === "error") {
     return (
-      <div className="rounded-[14px] border border-[var(--border)] bg-[var(--panel)] p-4 text-[13px] text-[var(--tx2)]">
+      <div className="text-[13px] text-[var(--tx2)]">
         No se pudo cargar este apartado.{" "}
         <Link href={moduleHref} className="font-medium text-[var(--accent-tx)] hover:underline">
           Abrir módulo
@@ -129,7 +125,7 @@ export function PatientResourceList({
   }
   if (state.status === "unsupported") {
     return (
-      <div className="rounded-[14px] border border-[var(--border)] bg-[var(--panel)] p-4 text-[13px] text-[var(--tx2)]">
+      <div className="text-[13px] text-[var(--tx2)]">
         Este apartado no se puede acotar al paciente desde aquí.{" "}
         <Link href={moduleHref} className="font-medium text-[var(--accent-tx)] hover:underline">
           Abrir módulo
@@ -166,7 +162,7 @@ export function PatientResourceList({
   };
 
   return (
-    <div className="rounded-[14px] border border-[var(--border)] bg-[var(--panel)] p-4 shadow-[var(--soft)]">
+    <div>
       <div className="mb-3 flex items-center justify-between gap-3">
         <span className="text-[13.5px] font-semibold text-[var(--tx)]">{capability.label}</span>
         <div className="flex items-center gap-2">

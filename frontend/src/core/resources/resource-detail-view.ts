@@ -181,6 +181,14 @@ function selectLabel(field: DisplayField, value: unknown): string {
  * nunca lanza ni produce HTML. El modo ``relation`` se resuelve aparte (etiqueta async vía
  * ``fetchRelationItem``), así que aquí cae a su UUID como respaldo honesto.
  */
+/**
+ * ``true`` si el valor ya formateado NO aporta información (vacío o el guion largo de "sin dato").
+ * Sirve para OMITIR el campo en vistas donde no queremos dejar el "—" (p. ej. Datos generales).
+ */
+export function isBlankDisplay(formatted: string): boolean {
+  return formatted.trim() === "" || formatted === DASH;
+}
+
 export function formatDisplayValue(field: DisplayField, value: unknown): string {
   if (value === null || value === undefined) {
     return DASH;

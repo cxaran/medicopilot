@@ -241,7 +241,11 @@ export function PatientRecordPanel({
             })}
           </div>
 
-          <div className="flex flex-col gap-3 p-4">
+          {/* Contenido de la pestaña en UNA sola superficie blanca (el ``section`` es el marco). Los
+              recursos van aplanados —sin card propia ni divisor— separados sólo por el espacio y el
+              título de cada apartado (el nuevo título ya da a entender el corte), para no anidar
+              cards y recuperar espacio. La tabla de cada lista conserva su borde (marco de la tabla). */}
+          <div className="flex flex-col gap-5 rounded-b-[16px] bg-[var(--panel)] p-4">
             {tab.resources.map((resource) =>
               resource.scope === "detail" ? (
                 <PatientDetailCard key={resource.resourceName} patientId={patientId} />

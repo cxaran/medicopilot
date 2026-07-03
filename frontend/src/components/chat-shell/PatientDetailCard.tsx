@@ -11,7 +11,7 @@ import { fillPlaceholder } from "@/core/resources/item-reference";
 import {
   displayFields,
   formatDisplayValue,
-  type DisplayField,
+  isBlankDisplay,
 } from "@/core/resources/resource-detail-view";
 
 /**
@@ -65,15 +65,11 @@ export function PatientDetailCard({ patientId }: Readonly<{ patientId: string }>
   const fichaHref = `/resources/patients/${encodeURIComponent(patientId)}`;
 
   if (state.status === "loading") {
-    return (
-      <div className="rounded-[14px] border border-[var(--border)] bg-[var(--panel)] p-4 text-[13px] text-[var(--tx3)]">
-        Cargando…
-      </div>
-    );
+    return <div className="text-[13px] text-[var(--tx3)]">Cargando…</div>;
   }
   if (state.status === "error" || state.status === "unsupported") {
     return (
-      <div className="rounded-[14px] border border-[var(--border)] bg-[var(--panel)] p-4 text-[13px] text-[var(--tx2)]">
+      <div className="text-[13px] text-[var(--tx2)]">
         No se pudieron cargar los datos del paciente.{" "}
         <Link href={fichaHref} className="font-medium text-[var(--accent-tx)] hover:underline">
           Abrir ficha
@@ -83,10 +79,14 @@ export function PatientDetailCard({ patientId }: Readonly<{ patientId: string }>
   }
 
   const { capability, detail } = state;
-  const fields = displayFields(capability);
+  // Sólo los campos CON dato: si no existe, no se muestra (no se deja el "—"). Se formatea una vez y
+  // se descartan los vacíos (null/undefined/cadena vacía/guion), ahorrando espacio y ruido visual.
+  const shown = displayFields(capability)
+    .map((field) => ({ field, value: formatDisplayValue(field, detail[field.name]) }))
+    .filter((entry) => !isBlankDisplay(entry.value));
 
   return (
-    <div className="rounded-[14px] border border-[var(--border)] bg-[var(--panel)] p-4 shadow-[var(--soft)]">
+    <div>
       <div className="mb-3 flex items-center justify-between gap-3">
         <span className="text-[13.5px] font-semibold text-[var(--tx)]">Datos generales</span>
         <Link
@@ -97,18 +97,14 @@ export function PatientDetailCard({ patientId }: Readonly<{ patientId: string }>
         </Link>
       </div>
 
-      {fields.length === 0 ? (
-        <p className="text-[13px] text-[var(--tx3)]">
-          El contrato no declara campos para mostrar.
-        </p>
+      {shown.length === 0 ? (
+        <p className="text-[13px] text-[var(--tx3)]">Sin datos generales registrados.</p>
       ) : (
         <dl className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
-          {fields.map((field: DisplayField) => (
+          {shown.map(({ field, value }) => (
             <div key={field.name} className="min-w-0">
               <dt className="text-[12px] font-medium text-[var(--tx3)]">{field.label}</dt>
-              <dd className="mt-0.5 break-words text-[13.5px] text-[var(--tx)]">
-                {formatDisplayValue(field, detail[field.name])}
-              </dd>
+              <dd className="mt-0.5 break-words text-[13.5px] text-[var(--tx)]">{value}</dd>
             </div>
           ))}
         </dl>

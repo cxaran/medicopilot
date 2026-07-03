@@ -6,6 +6,7 @@ import {
   displayFields,
   fieldDisplayKind,
   formatDisplayValue,
+  isBlankDisplay,
   type DisplayField,
 } from "@/core/resources/resource-detail-view";
 
@@ -87,6 +88,18 @@ test("formatDisplayValue: cada tipo de widget rinde su valor de lectura", () => 
     "2026-06-28 14:30 UTC",
   );
   assert.equal(formatDisplayValue(field({ widget: "time" }), "08:15:00"), "08:15");
+});
+
+test("isBlankDisplay: detecta vacíos para omitir el campo (sin dejar el '—')", () => {
+  // El guion de "sin dato" y las cadenas vacías se consideran en blanco.
+  assert.equal(isBlankDisplay(formatDisplayValue(field({ widget: "text" }), null)), true);
+  assert.equal(isBlankDisplay(formatDisplayValue(field({ widget: "text" }), undefined)), true);
+  assert.equal(isBlankDisplay(""), true);
+  assert.equal(isBlankDisplay("   "), true);
+  assert.equal(isBlankDisplay("—"), true);
+  // Un valor real NO está en blanco.
+  assert.equal(isBlankDisplay(formatDisplayValue(field({ widget: "text" }), "Hola")), false);
+  assert.equal(isBlankDisplay(formatDisplayValue(field({ widget: "switch" }), false)), false);
 });
 
 test("formatDisplayValue: select muestra la etiqueta de la opción, no el valor crudo", () => {
