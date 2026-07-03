@@ -89,10 +89,19 @@ class SystemSettingsApiTest(unittest.TestCase):
             cls.actor_id = actor.id
 
     def setUp(self) -> None:
+        # El checklist DERIVA de otras tablas (respaldos, médicos, credenciales de
+        # IA): se limpian aquí para aislar el estado de corridas previas de otras
+        # suites contra la misma base *_test.
+        from backend.app.models.ai_provider_credential import AiProviderCredential
+        from backend.app.models.doctor import Doctor
+
         with Session(self.engine) as session:
             session.execute(delete(AuditEvent))
             session.execute(delete(SystemSettings))
             session.execute(delete(PlatformSetup))
+            session.execute(delete(BackupSettings))
+            session.execute(delete(Doctor))
+            session.execute(delete(AiProviderCredential))
             session.add(SystemSettings())
             session.add(PlatformSetup(id=1, status="completed"))
             session.commit()

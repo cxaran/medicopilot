@@ -4,7 +4,7 @@ from fastapi.security import OAuth2PasswordBearer
 from sqlmodel import select
 
 from backend.app.core.database import SessionDep
-from backend.app.models.user import RoleAccess, User, UserRole
+from backend.app.models.user import Role, RoleAccess, User, UserRole
 from backend.app.schemas.user import SessionUser
 
 from .security import decode_jwt
@@ -33,10 +33,23 @@ def build_current_user(
     session: SessionDep,
     user: User,
 ) -> SessionUser:
+    """Materializa los permisos EFECTIVOS de la sesión.
+
+    Sólo cuentan los accesos de roles ACTIVOS y con el acceso ACTIVO: desactivar un
+    rol (o un acceso puntual) revoca sus permisos de inmediato en toda sesión nueva
+    o reconstruida. Misma regla que ``security/admin_survival.effective_coverage``
+    — mantener ambas queries alineadas (la validez del USUARIO activo la garantiza
+    ``get_current_user_orm`` antes de llegar aquí).
+    """
     stmt = (
         select(RoleAccess.access)
         .join_from(RoleAccess, UserRole, RoleAccess.role_id == UserRole.role_id)
-        .where(UserRole.user_id == user.id)
+        .join(Role, Role.id == RoleAccess.role_id)
+        .where(
+            UserRole.user_id == user.id,
+            Role.is_active.is_(True),
+            RoleAccess.is_active.is_(True),
+        )
     )
     permissions = cast("list[str]", session.exec(stmt).all())
     base_user = SessionUser.model_validate(user, from_attributes=True)
