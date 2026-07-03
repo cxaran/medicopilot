@@ -28,7 +28,7 @@ import {
   type ExportColumn,
 } from "./build-export-rows";
 import { buildWorkbookBlob, downloadBlob, exportFilename } from "./excel-export";
-import { pdfBlob, pdfPreviewUrl, type PdfConfig } from "./pdf-export";
+import { pdfBlob, pdfPreviewUrl, type PdfConfig, type PdfPageSize } from "./pdf-export";
 import { fetchAllRows } from "./export-download";
 
 /**
@@ -121,6 +121,7 @@ export function ExportDialog({
   const [qText, setQText] = useState("");
   const [editingField, setEditingField] = useState<string | null>(null);
   const [pdfOrientation, setPdfOrientation] = useState<"portrait" | "landscape">("landscape");
+  const [pdfPageSize, setPdfPageSize] = useState<PdfPageSize>("a4");
   const [pdfFontSize, setPdfFontSize] = useState(8);
   const [pdfTableStyle, setPdfTableStyle] = useState<"striped" | "grid" | "plain">("striped");
   const [headerText, setHeaderText] = useState("");
@@ -244,6 +245,7 @@ export function ExportDialog({
             {
               title,
               orientation: pdfOrientation,
+              pageSize: pdfPageSize,
               fontSize: pdfFontSize,
               tableStyle: pdfTableStyle,
               headerText,
@@ -270,7 +272,7 @@ export function ExportDialog({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [ready, effectiveFormat, sample, title, pdfOrientation, pdfFontSize, pdfTableStyle, headerText, footerText, exportTotal]);
+  }, [ready, effectiveFormat, sample, title, pdfOrientation, pdfPageSize, pdfFontSize, pdfTableStyle, headerText, footerText, exportTotal]);
 
   // Revocar el bloburl al desmontar.
   useEffect(() => {
@@ -349,6 +351,7 @@ export function ExportDialog({
         const config: PdfConfig = {
           title,
           orientation: pdfOrientation,
+          pageSize: pdfPageSize,
           fontSize: pdfFontSize,
           tableStyle: pdfTableStyle,
           headerText,
@@ -572,6 +575,21 @@ export function ExportDialog({
               {effectiveFormat === "pdf" ? (
                 <section className="space-y-2.5 rounded-[10px] border border-dashed border-[var(--border2)] p-3">
                   <p className={SECTION_TITLE}>Opciones de PDF</p>
+                  <div>
+                    <label htmlFor="pdf-pagesize" className={LABEL_CLASS}>
+                      Tamaño de página
+                    </label>
+                    <select
+                      id="pdf-pagesize"
+                      value={pdfPageSize}
+                      onChange={(event) => setPdfPageSize(event.target.value as PdfPageSize)}
+                      className={INPUT_CLASS}
+                    >
+                      <option value="a4">A4 (210 × 297 mm)</option>
+                      <option value="letter">Carta (216 × 279 mm)</option>
+                      <option value="legal">Oficio (216 × 356 mm)</option>
+                    </select>
+                  </div>
                   <div>
                     <label htmlFor="pdf-orientation" className={LABEL_CLASS}>
                       Orientación

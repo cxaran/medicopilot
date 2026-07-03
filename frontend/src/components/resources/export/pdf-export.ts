@@ -10,9 +10,14 @@ import { numericColumnIndexes } from "./build-export-rows";
  * alimenta la VISTA PREVIA (bloburl → iframe) y la descarga.
  */
 
+/** Tamaños de página soportados (nombres que jsPDF entiende como ``format``). */
+export type PdfPageSize = "a4" | "letter" | "legal";
+
 export type PdfConfig = {
   title: string;
   orientation: "portrait" | "landscape";
+  /** Tamaño de hoja; por omisión A4 (comportamiento previo). "letter" = Carta, "legal" = Oficio. */
+  pageSize?: PdfPageSize;
   fontSize: number;
   tableStyle: "striped" | "grid" | "plain";
   headerText?: string;
@@ -46,7 +51,11 @@ async function buildDoc(
     import("jspdf-autotable"),
   ]);
 
-  const doc = new JsPdf(config.orientation);
+  const doc = new JsPdf({
+    orientation: config.orientation,
+    unit: "mm",
+    format: config.pageSize ?? "a4",
+  });
   const marginLeft = 14;
   const pageWidth = doc.internal.pageSize.getWidth();
   const usableWidth = pageWidth - marginLeft * 2;
