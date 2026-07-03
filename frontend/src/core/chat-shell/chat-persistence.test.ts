@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   approvedPlanNotesOf,
+  MAX_IMAGE_PAYLOAD_CHARS,
   MAX_UI_PAYLOAD_CHARS,
   MAX_UI_SPECS_PER_MESSAGE,
   messagesToTranscript,
@@ -521,4 +522,116 @@ test("notas de herramientas: sobre inválido se descarta gobernadamente", () => 
   assert.equal(restored.length, 2);
   assert.equal(restored[0].toolNotes, undefined);
   assert.equal(restored[1].toolNotes, undefined);
+});
+
+test("imagen adjunta: round-trip por payload.image con dataUrl derivado", () => {
+  const message: TranscriptMessage = {
+    id: "m-img",
+    role: "user",
+    text: "mira esta radiografía",
+    image: {
+      dataUrl: "data:image/png;base64,QUJD",
+      mimeType: "image/png",
+      base64: "QUJD",
+      name: "rx-torax.png",
+    },
+  };
+  const body = toMessagePayload("conv-1", message);
+  assert.deepEqual(body.payload?.image, {
+    version: UI_PAYLOAD_VERSION,
+    mimeType: "image/png",
+    base64: "QUJD",
+    name: "rx-torax.png",
+  });
+
+  const restored = messagesToTranscript([
+    {
+      id: "row-img",
+      conversation_id: "conv-1",
+      role: "user",
+      content: "mira esta radiografía",
+      sequence_index: 0,
+      payload: body.payload,
+    },
+  ]);
+  assert.equal(restored.length, 1);
+  assert.deepEqual(restored[0].image, {
+    dataUrl: "data:image/png;base64,QUJD",
+    mimeType: "image/png",
+    base64: "QUJD",
+    name: "rx-torax.png",
+  });
+});
+
+test("imagen adjunta: la que excede el tope se descarta del payload (el texto persiste)", () => {
+  const message: TranscriptMessage = {
+    id: "m-img-big",
+    role: "user",
+    text: "adjunto",
+    image: {
+      dataUrl: "data:image/png;base64,…",
+      mimeType: "image/png",
+      base64: "x".repeat(MAX_IMAGE_PAYLOAD_CHARS + 1),
+      name: "gigante.png",
+    },
+  };
+  const body = toMessagePayload("conv-1", message);
+  assert.equal(body.payload, undefined);
+  assert.equal(body.content, "adjunto");
+});
+
+test("imagen adjunta: mensaje SOLO imagen se persiste y se restaura sin texto", () => {
+  const onlyImage: TranscriptMessage = {
+    id: "m-only-img",
+    role: "user",
+    text: "",
+    image: {
+      dataUrl: "data:image/jpeg;base64,REVG",
+      mimeType: "image/jpeg",
+      base64: "REVG",
+      name: "foto.jpg",
+    },
+  };
+  assert.deepEqual(selectUnpersisted([onlyImage], new Set()), [onlyImage]);
+
+  const body = toMessagePayload("conv-1", onlyImage);
+  const restored = messagesToTranscript([
+    {
+      id: "row-only-img",
+      conversation_id: "conv-1",
+      role: "user",
+      content: "",
+      sequence_index: 0,
+      payload: body.payload,
+    },
+  ]);
+  assert.equal(restored.length, 1);
+  assert.equal(restored[0].text, "");
+  assert.equal(restored[0].image?.mimeType, "image/jpeg");
+});
+
+test("imagen adjunta: sobre inválido (mime no imagen / versión desconocida) se descarta", () => {
+  const restored = messagesToTranscript([
+    {
+      id: "row-bad-img-1",
+      conversation_id: "conv-1",
+      role: "user",
+      content: "texto",
+      sequence_index: 0,
+      payload: {
+        image: { version: UI_PAYLOAD_VERSION, mimeType: "text/html", base64: "PGI+", name: "x" },
+      },
+    },
+    {
+      id: "row-bad-img-2",
+      conversation_id: "conv-1",
+      role: "user",
+      content: "otro",
+      sequence_index: 1,
+      payload: { image: { version: 99, mimeType: "image/png", base64: "QUJD", name: "x" } },
+    },
+  ]);
+  assert.equal(restored.length, 2);
+  assert.equal(restored[0].image, undefined);
+  assert.equal(restored[1].image, undefined);
 });

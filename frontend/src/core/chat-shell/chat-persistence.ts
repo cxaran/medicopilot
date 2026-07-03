@@ -40,20 +40,25 @@ export const MAX_UI_PAYLOAD_CHARS = 100_000;
 
 // Topes del sobre de PLANES APROBADOS (notas deterministas de escrituras P1 ejecutadas): son
 // líneas cortas generadas por código; los topes sólo acotan lo patológico.
-export const MAX_PLAN_NOTES_PER_MESSAGE = 20;
-export const MAX_PLAN_NOTE_CHARS = 2_000;
+const MAX_PLAN_NOTES_PER_MESSAGE = 20;
+const MAX_PLAN_NOTE_CHARS = 2_000;
 
 // Topes del sobre de NOTAS DE HERRAMIENTAS (resumen determinista del uso de tools del turno:
 // lecturas, meta-tools, MCP, sandbox y escrituras rechazadas). Telegráficas por construcción.
-export const MAX_TOOL_NOTES_PER_MESSAGE = 30;
-export const MAX_TOOL_NOTE_CHARS = 600;
+const MAX_TOOL_NOTES_PER_MESSAGE = 30;
+const MAX_TOOL_NOTE_CHARS = 600;
 
 // Topes del sobre de TOOL CALLS (estado FINAL de las herramientas del turno, para restaurar el
 // hilo tal cual quedó). Los textos ya vienen acotados en vivo (previews); los topes acotan lo
 // patológico. Una call que exceda el presupuesto total se DESCARTA (el resto persiste igual).
-export const MAX_TOOL_CALLS_PER_MESSAGE = 30;
-export const MAX_TOOL_CALL_TEXT_CHARS = 4_000;
-export const MAX_TOOLS_PAYLOAD_CHARS = 60_000;
+const MAX_TOOL_CALLS_PER_MESSAGE = 30;
+const MAX_TOOL_CALL_TEXT_CHARS = 4_000;
+const MAX_TOOLS_PAYLOAD_CHARS = 60_000;
+
+// Tope del sobre de IMAGEN (``payload.image``, base64): el hilo se restaura tal cual quedó,
+// imagen incluida. ~2M chars ≈ 1.5 MB binario; una imagen que exceda el tope se descarta del
+// payload (el texto del mensaje persiste igual) — mismo criterio best-effort que los demás sobres.
+export const MAX_IMAGE_PAYLOAD_CHARS = 2_000_000;
 
 /** Estado FINAL de una tool call persistida (subset estructural del ``ToolCallView`` del panel).
  *  Sólo estados TERMINALES: al cerrarse un turno no quedan calls corriendo ni esperando
@@ -134,14 +139,25 @@ export function isPersistedToolCall(value: unknown): value is PersistedToolCall 
   );
 }
 
+/** Imagen adjunta a un mensaje, misma forma que ``AttachedImage`` del panel. Se persiste en
+ *  ``payload.image`` (mimeType + base64 + nombre); el ``dataUrl`` es DERIVADO (se reconstruye al
+ *  restaurar) y nunca se serializa. */
+export interface TranscriptImage {
+  dataUrl: string;
+  mimeType: string;
+  base64: string;
+  name: string;
+}
+
 /**
  * Subconjunto ESTRUCTURAL del ``ChatMessage`` del CopilotPanel que se persiste/restaura.
- * (El ``ChatMessage`` real tiene además ``image``, que no se persiste en esta rebanada.)
  */
 export interface TranscriptMessage {
   id: string;
   role: TranscriptRole;
   text: string;
+  /** Imagen adjunta del mensaje (se persiste en ``payload.image`` con tope; ver arriba). */
+  image?: TranscriptImage;
   isError?: boolean;
   reasoning?: string;
   // "note" = nota de contexto (acción humana inline). Se persiste como metadato para restaurar su
@@ -211,6 +227,42 @@ function uiSpecsFromPayload(payload: Record<string, unknown> | null | undefined)
     return [];
   }
   return specs.filter(isUiSpec).slice(0, MAX_UI_SPECS_PER_MESSAGE);
+}
+
+/**
+ * Extrae la imagen del sobre versionado ``payload.image``. Mismo criterio gobernado: versión
+ * conocida, strings válidos y tope de tamaño; lo demás degrada a "sin imagen". El ``dataUrl`` se
+ * reconstruye (derivado, nunca persistido).
+ */
+function imageFromPayload(
+  payload: Record<string, unknown> | null | undefined,
+): TranscriptImage | undefined {
+  const envelope = payload?.image;
+  if (typeof envelope !== "object" || envelope === null) {
+    return undefined;
+  }
+  const { version, mimeType, base64, name } = envelope as {
+    version?: unknown;
+    mimeType?: unknown;
+    base64?: unknown;
+    name?: unknown;
+  };
+  if (
+    version !== UI_PAYLOAD_VERSION ||
+    typeof mimeType !== "string" ||
+    !mimeType.startsWith("image/") ||
+    typeof base64 !== "string" ||
+    base64.length === 0 ||
+    base64.length > MAX_IMAGE_PAYLOAD_CHARS
+  ) {
+    return undefined;
+  }
+  return {
+    dataUrl: `data:${mimeType};base64,${base64}`,
+    mimeType,
+    base64,
+    name: typeof name === "string" && name ? name : "imagen",
+  };
 }
 
 /**
@@ -285,9 +337,13 @@ function toolCallsFromPayload(
 /**
  * Notas de planes aprobados de TODO el hilo restaurado, en orden. El panel las re-siembra como
  * segmentos ``preserve`` de la compactación (paridad con la sesión en vivo, donde los planes
- * aprobados se conservan verbatim en el contexto de cada turno).
+ * aprobados se conservan verbatim en el contexto de cada turno). Acepta cualquier mensaje que
+ * exponga ``approvedPlanNotes`` (TranscriptMessage al restaurar, ChatMessage al sembrar el panel):
+ * sólo lee ese campo, así que no se acopla a una interfaz concreta.
  */
-export function approvedPlanNotesOf(messages: readonly TranscriptMessage[]): string[] {
+export function approvedPlanNotesOf(
+  messages: readonly { approvedPlanNotes?: readonly string[] }[],
+): string[] {
   return messages.flatMap((message) => message.approvedPlanNotes ?? []);
 }
 
@@ -345,10 +401,13 @@ export function messagesToTranscript(rows: readonly PersistedMessageRow[]): Tran
 
       const planNotes = planNotesFromPayload(payload);
       const toolNotes = toolNotesFromPayload(payload);
-      // El mensaje base se restaura con texto o, aun vacío, si porta notas o tool calls: el turno
-      // que sólo usó herramientas persiste su rastro; el render suprime la burbuja vacía.
+      const image = imageFromPayload(payload);
+      // El mensaje base se restaura con texto o, aun vacío, si porta imagen, notas o tool calls:
+      // el turno que sólo usó herramientas (o sólo adjuntó imagen) persiste su rastro; el render
+      // suprime la burbuja vacía.
       if (
         row.content.trim().length > 0 ||
+        image !== undefined ||
         planNotes.length > 0 ||
         toolNotes.length > 0 ||
         toolCalls.length > 0
@@ -358,6 +417,9 @@ export function messagesToTranscript(rows: readonly PersistedMessageRow[]): Tran
           role: row.role as TranscriptRole,
           text: row.content,
         };
+        if (image) {
+          message.image = image;
+        }
         if (planNotes.length > 0) {
           message.approvedPlanNotes = planNotes;
         }
@@ -385,8 +447,12 @@ export function messagesToTranscript(rows: readonly PersistedMessageRow[]): Tran
     });
 }
 
-/** ¿El mensaje lleva contenido persistible además del texto (UI generativa, notas o tool calls)? */
+/** ¿El mensaje lleva contenido persistible además del texto (imagen, UI generativa, notas o
+ *  tool calls)? */
 function carriesUiSpecs(message: TranscriptMessage): boolean {
+  if (message.image) {
+    return true;
+  }
   if (message.kind === "ui" && message.uiSpec) {
     return true;
   }
@@ -521,6 +587,20 @@ export function toMessagePayload(
   }
   if (message.kind === "note") {
     meta.note = true;
+  }
+  // Imagen adjunta: base64 + mime + nombre (el dataUrl es derivado). Si excede el tope se
+  // descarta del payload — el texto persiste igual (best effort, como los demás sobres).
+  if (
+    message.image &&
+    message.image.base64.length > 0 &&
+    message.image.base64.length <= MAX_IMAGE_PAYLOAD_CHARS
+  ) {
+    meta.image = {
+      version: UI_PAYLOAD_VERSION,
+      mimeType: message.image.mimeType,
+      base64: message.image.base64,
+      name: message.image.name,
+    };
   }
   const { envelope: ui, indexMap } = toUiEnvelope(message);
   if (ui) {
