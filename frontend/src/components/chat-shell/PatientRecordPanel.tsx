@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
+import { PatientDetailCard } from "@/components/chat-shell/PatientDetailCard";
 import { PatientResourceList } from "@/components/chat-shell/PatientResourceList";
 import { useChatNav } from "@/components/chat-shell/ChatNavProvider";
 import { avatarColor } from "@/components/ui/avatar-color";
@@ -242,18 +243,13 @@ export function PatientRecordPanel({
 
           <div className="flex flex-col gap-3 p-4">
             {tab.resources.map((resource) =>
-              resource.scope === "patient" ? (
+              resource.scope === "detail" ? (
+                <PatientDetailCard key={resource.resourceName} patientId={patientId} />
+              ) : (
                 <PatientResourceList
                   key={resource.resourceName}
                   resourceName={resource.resourceName}
                   patientId={patientId}
-                />
-              ) : (
-                <ConsultationScopedNotice
-                  key={resource.resourceName}
-                  resourceName={resource.resourceName}
-                  tabLabel={tab.label}
-                  onGoConsultas={() => setActiveTab("consultas")}
                 />
               ),
             )}
@@ -264,36 +260,3 @@ export function PatientRecordPanel({
   );
 }
 
-/**
- * Aviso para recursos que el contrato acota por CONSULTA (signos vitales, recetas): no se listan sin
- * acotar para no fugar datos de otros pacientes; se dirige a las consultas del paciente o al módulo.
- */
-function ConsultationScopedNotice({
-  resourceName,
-  tabLabel,
-  onGoConsultas,
-}: Readonly<{ resourceName: string; tabLabel: string; onGoConsultas: () => void }>) {
-  return (
-    <div className="rounded-[14px] border border-[var(--border)] bg-[var(--panel)] p-4 text-[13px] text-[var(--tx2)]">
-      <p>
-        {tabLabel} se registran <strong>por consulta</strong>. Abre una consulta del paciente para
-        ver o capturar este apartado.
-      </p>
-      <div className="mt-3 flex items-center gap-2">
-        <button
-          type="button"
-          onClick={onGoConsultas}
-          className="rounded-[10px] border border-[var(--accent-bd)] bg-[var(--accent-dim)] px-3 py-1.5 text-[12.5px] font-semibold text-[var(--accent-tx)] transition hover:bg-[var(--panel2)]"
-        >
-          Ir a Consultas
-        </button>
-        <Link
-          href={`/resources/${encodeURIComponent(resourceName)}`}
-          className="rounded-[10px] border border-[var(--border)] bg-[var(--panel)] px-3 py-1.5 text-[12.5px] font-medium text-[var(--tx2)] transition hover:text-[var(--accent-tx)]"
-        >
-          Abrir módulo
-        </Link>
-      </div>
-    </div>
-  );
-}

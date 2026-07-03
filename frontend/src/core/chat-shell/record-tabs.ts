@@ -2,14 +2,13 @@
 // rebanada 5 del rediseño. Cada pestaña del diseño mapea a su(s) recurso(s) del CONTRATO
 // (RESOURCE_REGISTRY), con su ámbito de filtrado real. NO hardcodea columnas/forms/acciones: sólo
 // dice QUÉ recurso(s) renderizar; la UI los pinta con los componentes genéricos existentes
-// (ResourceTable) ya scoped por paciente. Verificado contra el registry:
-//   - patient_id es filtro EQ en: medical_history_versions, patient_history_items, consultations,
-//     clinical_documents, appointments.
-//   - vital_signs y prescriptions se filtran por consultation_id (NO por paciente): se marcan
-//     "consultation" y la UI explica que se registran por consulta (sin filtrar, para no fugar
-//     datos de otros pacientes).
+// (ResourceTable) ya scoped por paciente. Verificado contra el registry: patient_id es filtro EQ
+// en todos los recursos "patient" — incluidos vital_signs y prescriptions, cuyo paciente se
+// DERIVA de la consulta en el backend (subconsulta del modelo), así que la pestaña reúne los
+// registros de TODAS las consultas del paciente.
 
 export type RecordTabId =
+  | "general"
   | "historia"
   | "consultas"
   | "notas"
@@ -20,8 +19,9 @@ export type RecordTabId =
   | "archivos"
   | "citas";
 
-/** Ámbito de filtrado de un recurso dentro del expediente. */
-export type RecordResourceScope = "patient" | "consultation";
+/** Ámbito de filtrado de un recurso dentro del expediente. ``detail`` = ficha de UN registro
+ *  (el propio paciente), no una lista filtrada. */
+export type RecordResourceScope = "patient" | "detail";
 
 export interface RecordTabResource {
   /** Nombre REGISTRADO del recurso en /api/v1/resources (no inventar). */
@@ -36,10 +36,16 @@ export interface RecordTabDef {
 }
 
 // Recursos por-paciente (patient_id es filtro EQ en el registry): historia, antecedentes, items
-// clínicos (alergias/problemas/medicación actual), inmunizaciones, notas, laboratorio, estudios,
-// escalas, tareas, eventos, documentos, citas. vital_signs y prescriptions se filtran por
-// consultation_id → scope "consultation" (la UI explica que se registran por consulta).
+// clínicos (alergias/problemas/medicación actual), inmunizaciones, notas, signos vitales,
+// recetas, laboratorio, estudios, escalas, tareas, eventos, documentos, citas.
 export const RECORD_TABS: readonly RecordTabDef[] = [
+  {
+    // Ficha del PACIENTE (detalle del recurso patients, no una lista): primera pestaña
+    // y default, para que abrir el expediente muestre los datos generales de inmediato.
+    id: "general",
+    label: "Datos generales",
+    resources: [{ resourceName: "patients", scope: "detail" }],
+  },
   {
     id: "historia",
     label: "Historia clínica",
@@ -63,12 +69,12 @@ export const RECORD_TABS: readonly RecordTabDef[] = [
   {
     id: "signos",
     label: "Signos vitales",
-    resources: [{ resourceName: "vital_signs", scope: "consultation" }],
+    resources: [{ resourceName: "vital_signs", scope: "patient" }],
   },
   {
     id: "recetas",
     label: "Recetas",
-    resources: [{ resourceName: "prescriptions", scope: "consultation" }],
+    resources: [{ resourceName: "prescriptions", scope: "patient" }],
   },
   {
     id: "laboratorio",
@@ -99,7 +105,7 @@ export const RECORD_TABS: readonly RecordTabDef[] = [
   },
 ];
 
-export const DEFAULT_RECORD_TAB: RecordTabId = "historia";
+export const DEFAULT_RECORD_TAB: RecordTabId = "general";
 
 const VALID_TAB_IDS = new Set<string>(RECORD_TABS.map((tab) => tab.id));
 
