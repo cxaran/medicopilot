@@ -358,7 +358,7 @@ class PermissionsCatalogTest(unittest.TestCase):
         with _As("permissions:read"):
             groups = client.get("/api/v1/permissions").json()
         names = [group["name"] for group in groups]
-        self.assertEqual(names, ["users", "roles", "doctors", "medication_templates", "patients", "patient_clinical_items", "patient_history_items", "patient_immunizations", "medical_history_versions", "consultations", "consultation_diagnoses", "conversations", "messages", "vital_signs", "lab_results", "clinical_events", "study_orders", "clinical_tasks", "prescriptions", "appointments", "clinical_documents", "population", "reports", "institutional_settings", "clinical_codes", "clinical_scales", "scale_results", "clinical_notes", "quality_checks", "medication_reconciliation", "follow_ups", "audit_events", "permissions"])
+        self.assertEqual(names, ["users", "roles", "doctors", "medication_templates", "patients", "patient_clinical_items", "patient_history_items", "patient_immunizations", "medical_history_versions", "consultations", "consultation_diagnoses", "conversations", "messages", "vital_signs", "lab_results", "clinical_events", "study_orders", "system_settings", "clinical_tasks", "prescriptions", "appointments", "clinical_documents", "population", "reports", "institutional_settings", "clinical_codes", "clinical_scales", "scale_results", "clinical_notes", "quality_checks", "medication_reconciliation", "follow_ups", "patient_summary", "audit_events", "backups", "permissions"])
         for group in groups:
             self.assertTrue(group["label"])
             for permission in group["permissions"]:
@@ -582,6 +582,34 @@ class MedicalHistoryAndConsultationsCapabilityTest(unittest.TestCase):
         # vacío explícito para que el cliente envíe JSON válido) y nunca input_schema.
         self.assertEqual(finalize["request"]["fixed_body"], {})
         self.assertNotIn("input_schema", finalize)
+
+    def test_related_lists_follow_target_read_permission(self) -> None:
+        # Consultas publica navegación a los registros de la MISMA consulta (signos
+        # vitales y recetas), pero cada lista relacionada exige el permiso de LECTURA
+        # del recurso DESTINO, no el del recurso dueño.
+        with _As("consultations:read"):
+            cap = client.get("/api/v1/resources/consultations").json()
+        self.assertEqual(cap.get("related_lists", []), [])
+
+        with _As("consultations:read", "vital_signs:read"):
+            cap = client.get("/api/v1/resources/consultations").json()
+        self.assertEqual(
+            cap["related_lists"],
+            [
+                {
+                    "resource": "vital_signs",
+                    "label": "Signos vitales",
+                    "parameter_name": "consultation_id",
+                }
+            ],
+        )
+
+        with _As("consultations:read", "vital_signs:read", "prescriptions:read"):
+            cap = client.get("/api/v1/resources/consultations").json()
+        self.assertEqual(
+            [(r["resource"], r["parameter_name"]) for r in cap["related_lists"]],
+            [("vital_signs", "consultation_id"), ("prescriptions", "consultation_id")],
+        )
 
     def test_medical_history_finalize_publishes_empty_body(self) -> None:
         with _As("medical_history_versions:read", "medical_history_versions:finalize"):

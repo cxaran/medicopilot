@@ -21,6 +21,7 @@ from backend.app.query.operators import Operator, parameter_name_for
 from backend.app.query.plans import CompiledQueryPlan
 from backend.app.resources.registry import (
     ActionDef,
+    RelatedListDef,
     RelationDef,
     ResourceDefinition,
     get_resource,
@@ -52,6 +53,7 @@ from backend.app.schemas.capabilities import (
     ResourceFormFieldCapability,
     ResourceFormsCapability,
     ResourceListCapability,
+    ResourceRelatedListCapability,
     ResourceRelationCapability,
     ResourceView,
     SearchCapability,
@@ -769,6 +771,44 @@ def _relation_capability(relation: RelationDef) -> ResourceRelationCapability:
     )
 
 
+def _related_list_capability(
+    related: RelatedListDef, user: SessionUser
+) -> Optional[ResourceRelatedListCapability]:
+    """Proyecta una lista relacionada, o ``None`` si el actor no puede leer el destino.
+
+    Valida la configuración contra el registry (recurso destino registrado y
+    ``filter_field`` declarado en sus ``filter_fields``): un error aquí es un bug de
+    definición, no una condición de runtime."""
+    target = get_resource(related.resource)
+    if target is None or target.list_query is None:
+        raise CapabilityConfigError(
+            f"related_lists: el recurso destino '{related.resource}' no está "
+            "registrado o no tiene list_query."
+        )
+    # Param EQ REAL del plan compilado del destino (no se asume el nombre del campo).
+    eq_parameter = next(
+        (
+            parameter.parameter_name
+            for parameter in target.list_query.plan.filter_parameters
+            if parameter.field_name == related.filter_field
+            and parameter.operator is Operator.EQ
+        ),
+        None,
+    )
+    if eq_parameter is None:
+        raise CapabilityConfigError(
+            f"related_lists: '{related.filter_field}' no tiene filtro EQ en "
+            f"'{related.resource}'."
+        )
+    if not target.read_permission.check(user):
+        return None
+    return ResourceRelatedListCapability(
+        resource=related.resource,
+        label=related.label,
+        parameter_name=eq_parameter,
+    )
+
+
 def _build_capability(definition: ResourceDefinition, user: SessionUser) -> ResourceCapability:
     list_cap: Optional[ResourceListCapability] = None
     forms_cap: Optional[ResourceFormsCapability] = None
@@ -789,6 +829,14 @@ def _build_capability(definition: ResourceDefinition, user: SessionUser) -> Reso
         _relation_capability(relation)
         for relation in definition.relations
         if relation.permission.check(user)
+    ]
+
+    # Listas relacionadas navegables: solo las de recursos destino que el actor
+    # puede leer (RBAC del destino, no del recurso dueño).
+    related_lists = [
+        capability
+        for related in definition.related_lists
+        if (capability := _related_list_capability(related, user)) is not None
     ]
 
     # ``item_reference`` y ``detail`` se publican juntos cuando el recurso declara
@@ -832,6 +880,7 @@ def _build_capability(definition: ResourceDefinition, user: SessionUser) -> Reso
         forms=forms_cap,
         actions=actions,
         relations=relations,
+        related_lists=related_lists,
     )
 
 

@@ -454,6 +454,21 @@ class ResourceFileDownloadCapability(ApiReadSchema):
     url_template: str
 
 
+class ResourceRelatedListCapability(ApiReadSchema):
+    """Lista RELACIONADA navegable por item (p. ej. signos vitales de una consulta).
+
+    Es navegación de solo lectura, no un editor: el frontend enlaza a la lista del
+    recurso destino con ``parameter_name=<valor de la referencia del item>`` (el
+    filtro EQ ya publicado por ``filterable_fields`` del destino). Se proyecta solo
+    si el actor tiene el permiso de LECTURA del recurso destino."""
+
+    # Nombre REGISTRADO del recurso destino (clave de /api/v1/resources).
+    resource: str
+    label: str
+    # Query param del filtro EQ del recurso destino que recibe el id del item.
+    parameter_name: str
+
+
 class ResourceCapability(ApiReadSchema):
     name: str
     label: str
@@ -470,3 +485,6 @@ class ResourceCapability(ApiReadSchema):
     forms: Optional[ResourceFormsCapability] = None
     actions: list[ResourceActionCapability] = []
     relations: list[ResourceRelationCapability] = []
+    # Listas relacionadas navegables por item, filtradas por permiso de lectura del
+    # recurso destino.
+    related_lists: list[ResourceRelatedListCapability] = []
