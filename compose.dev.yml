@@ -227,6 +227,8 @@ services:
     image: nginx:1.27-alpine
     ports:
       - "${FRONTEND_PORT:-3000}:80"
+      # Aterrizaje del OAuth de ChatGPT/Codex (redirect fijo del cliente suplantado).
+      - "1455:1455"
     volumes:
       - ./nginx/nginx.dev.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
