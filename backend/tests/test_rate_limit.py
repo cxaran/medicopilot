@@ -192,6 +192,9 @@ class RateLimitRouteTest(unittest.TestCase):
                 "_policies",
                 lambda: {"bootstrap_ip": BucketPolicy(limit=2, window_seconds=900)},
             ),
+            # Aislar del entorno del proceso: con BOOTSTRAP_SETUP_TOKEN definido (dev),
+            # el initialize sin header respondería 403 antes de llegar al limiter.
+            patch.object(settings, "bootstrap_setup_token", None),
         ]
         for item in self._patches:
             item.start()
