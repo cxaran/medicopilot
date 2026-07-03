@@ -272,10 +272,10 @@ describe("ResumeTurnAfterTool", () => {
     expect(telemetry.errors[0]?.fields?.code).toBe("TURN_NOT_FOUND");
   });
 
-  it("rechaza el resume si el turno no esta esperando tool (TURN_NOT_WAITING_FOR_TOOL)", async () => {
+  it("descarta EN SILENCIO un resultado tardio de un turno ya terminal (sin doble fallo)", async () => {
     const { startTurn, resume, container } = setup();
 
-    // Un turno sin tools queda 'completed', no 'waiting_for_tool'.
+    // Un turno sin tools queda 'completed' (terminal), no 'waiting_for_tool'.
     const startSink = createSink();
     await startTurn.execute(browserSession(), startRequest(), startSink);
     const started = startSink.events.find((event) => event.type === "turn.started");
@@ -291,8 +291,8 @@ describe("ResumeTurnAfterTool", () => {
       resumeSink
     );
 
-    expect(resumeSink.events).toEqual([
-      expect.objectContaining({ type: "turn.failed", code: "TURN_NOT_WAITING_FOR_TOOL" })
-    ]);
+    // Un resultado tardio/duplicado sobre un turno ya cerrado NO es un error del medico: se
+    // descarta en silencio (nada de turn.failed que ensucie el hilo con un segundo fallo).
+    expect(resumeSink.events).toEqual([]);
   });
 });

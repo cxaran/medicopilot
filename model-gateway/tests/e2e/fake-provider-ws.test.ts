@@ -262,49 +262,63 @@ describe("fake provider websocket flow", () => {
     await expect(setup.container.turnStore.get(turnId)).resolves.toMatchObject({ status: "cancelled" });
   });
 
-  it("rejects tool resume after a timeout terminal state", async () => {
+  it("con timeout finito: expira y luego DESCARTA en silencio el resultado tardio", async () => {
+    // Timeout finito EXPLICITO (el default es 0 = desactivado): verifica que cuando se configura,
+    // el turno expira; y que un resultado que llega DESPUES de expirar se descarta en silencio
+    // (sin un segundo turn.failed), en vez del antiguo TURN_NOT_WAITING_FOR_TOOL en cascada.
     const setup = await createTestApp({ toolResultTimeoutMs: 25 });
     app = setup.app;
 
-    const failedEvents = await new Promise<Record<string, unknown>[]>((resolve, reject) => {
-      const seen: Record<string, unknown>[] = [];
-      let pendingTurnId = "";
-      let pendingCallId = "";
-      const ws = new WebSocket(`ws://127.0.0.1:${setup.port}/model-gateway/v1/ws`, {
-        headers: { Cookie: setup.cookie }
-      });
+    const outcome = await new Promise<{ first: Record<string, unknown>; secondArrived: boolean }>(
+      (resolve, reject) => {
+        let pendingTurnId = "";
+        let pendingCallId = "";
+        let firstFailed: Record<string, unknown> | null = null;
+        let secondArrived = false;
+        const ws = new WebSocket(`ws://127.0.0.1:${setup.port}/model-gateway/v1/ws`, {
+          headers: { Cookie: setup.cookie }
+        });
 
-      ws.on("open", () => ws.send(JSON.stringify(startMessage())));
-      ws.on("message", (data) => {
-        const event = JSON.parse(data.toString()) as Record<string, unknown>;
-        if (event.type === "turn.tool_call.ready" && typeof event.turn_id === "string" && typeof event.call_id === "string") {
-          pendingTurnId = event.turn_id;
-          pendingCallId = event.call_id;
-        }
-
-        if (event.type === "turn.failed") {
-          seen.push(event);
-          if (seen.length === 1) {
-            ws.send(
-              JSON.stringify({
-                type: "turn.tool_result",
-                turn_id: pendingTurnId,
-                call_id: pendingCallId,
-                result: { status: "success", content: {} }
-              })
-            );
-            return;
+        ws.on("open", () => ws.send(JSON.stringify(startMessage())));
+        ws.on("message", (data) => {
+          const event = JSON.parse(data.toString()) as Record<string, unknown>;
+          if (
+            event.type === "turn.tool_call.ready" &&
+            typeof event.turn_id === "string" &&
+            typeof event.call_id === "string"
+          ) {
+            pendingTurnId = event.turn_id;
+            pendingCallId = event.call_id;
           }
 
-          ws.close();
-          resolve(seen);
-        }
-      });
-      ws.on("error", reject);
-      setTimeout(() => reject(new Error("Timed out waiting for invalid resume rejection")), 1000).unref();
-    });
+          if (event.type === "turn.failed") {
+            if (!firstFailed) {
+              firstFailed = event;
+              // Resultado TARDIO tras la expiracion: debe descartarse en silencio.
+              ws.send(
+                JSON.stringify({
+                  type: "turn.tool_result",
+                  turn_id: pendingTurnId,
+                  call_id: pendingCallId,
+                  result: { status: "success", content: {} }
+                })
+              );
+              // Ventana para confirmar que NO llega un segundo fallo.
+              setTimeout(() => {
+                ws.close();
+                resolve({ first: firstFailed!, secondArrived });
+              }, 150).unref();
+              return;
+            }
+            secondArrived = true;
+          }
+        });
+        ws.on("error", reject);
+        setTimeout(() => reject(new Error("Timed out waiting for timeout failure")), 1000).unref();
+      }
+    );
 
-    expect(failedEvents[0]).toMatchObject({ code: "TOOL_RESULT_TIMEOUT" });
-    expect(failedEvents[1]).toMatchObject({ code: "TURN_NOT_WAITING_FOR_TOOL" });
+    expect(outcome.first).toMatchObject({ code: "TOOL_RESULT_TIMEOUT" });
+    expect(outcome.secondArrived).toBe(false);
   });
 });

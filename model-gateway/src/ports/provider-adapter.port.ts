@@ -36,7 +36,10 @@ export type ProviderEvent =
   | { type: "text.delta"; delta: string }
   | { type: "tool_call.ready"; call: ToolCallRequest; continuationState?: unknown }
   | { type: "reasoning.summary"; summary: string }
-  | { type: "completed"; usage: TurnUsage };
+  // ``truncated``: la respuesta quedó INCOMPLETA (el proveedor cortó por límite de longitud o el
+  // stream terminó a media respuesta sin señal de fin). El cliente lo marca para que el médico
+  // sepa que el mensaje no está completo y pueda pedir continuar. Ausente/false = respuesta íntegra.
+  | { type: "completed"; usage: TurnUsage; truncated?: boolean };
 
 export interface ProviderAdapter {
   readonly protocol: ProviderProtocol;

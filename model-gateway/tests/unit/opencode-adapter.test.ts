@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   OpencodeProviderAdapter,
   createOpencodeModel,
+  normalizeToolSequence,
   opencodeSupportsVision,
   OPENCODE_PROVIDER_ID,
   OPENCODE_GO_PROVIDER_ID
@@ -646,5 +647,99 @@ describe("opencode: forma exacta del request a /chat/completions (pin)", () => {
     expect(details.providerError).toContain("stream_options");
     // El mensaje del error también lleva la pista upstream (para QA).
     expect(gatewayError.message).toContain("stream_options");
+  });
+});
+
+type WireMsg = Parameters<typeof normalizeToolSequence>[0][number];
+
+describe("normalizeToolSequence: repara el invariante tool_calls↔tool antes de enviar (Fix 400)", () => {
+  const assistant = (calls: { id: string; name?: string }[], content: string | null = null): WireMsg => ({
+    role: "assistant",
+    content,
+    tool_calls: calls.map((c) => ({ id: c.id, type: "function", function: { name: c.name ?? "t", arguments: "{}" } }))
+  });
+  const toolMsg = (id: string): WireMsg => ({ role: "tool", tool_call_id: id, content: "{}" });
+
+  it("no-op en el camino feliz (cada tool_call tiene su tool)", () => {
+    const messages: WireMsg[] = [
+      { role: "user", content: "hola" },
+      assistant([{ id: "call_a" }, { id: "call_b" }]),
+      toolMsg("call_a"),
+      toolMsg("call_b")
+    ];
+    expect(normalizeToolSequence(messages)).toEqual(messages);
+  });
+
+  it("descarta un tool_call SIN respuesta (turno muerto a mitad del drenado paralelo)", () => {
+    // assistant declara 2 tool_calls pero sólo llegó 1 mensaje tool → 400 en DeepSeek.
+    const out = normalizeToolSequence([
+      assistant([{ id: "call_a" }, { id: "call_b" }]),
+      toolMsg("call_a")
+    ]);
+    const asst = out.find((m) => m.role === "assistant")!;
+    expect(asst.tool_calls!.map((c) => c.id)).toEqual(["call_a"]);
+    expect(out.filter((m) => m.role === "tool")).toHaveLength(1);
+  });
+
+  it("deduplica tool_calls con id repetido (conserva el primero y su único tool)", () => {
+    const out = normalizeToolSequence([
+      assistant([{ id: "call_a" }, { id: "call_a" }]),
+      toolMsg("call_a")
+    ]);
+    const asst = out.find((m) => m.role === "assistant")!;
+    expect(asst.tool_calls!).toHaveLength(1);
+    expect(out.filter((m) => m.role === "tool")).toHaveLength(1);
+  });
+
+  it("si ningún tool_call quedó respondido conserva el assistant como texto (o lo descarta)", () => {
+    // Con texto: se conserva como mensaje de texto (sin tool_calls).
+    const withText = normalizeToolSequence([assistant([{ id: "call_a" }], "Voy a buscar…")]);
+    expect(withText).toEqual([{ role: "assistant", content: "Voy a buscar…" }]);
+    // Sin texto: se descarta entero (no deja un assistant vacío con tool_calls colgando).
+    const noText = normalizeToolSequence([assistant([{ id: "call_a" }], null)]);
+    expect(noText).toEqual([]);
+  });
+
+  it("descarta mensajes tool HUÉRFANOS (sin assistant con tool_calls que los preceda)", () => {
+    const out = normalizeToolSequence([{ role: "user", content: "hola" }, toolMsg("call_x")]);
+    expect(out).toEqual([{ role: "user", content: "hola" }]);
+  });
+});
+
+describe("opencode: señal de truncamiento (Fix mensaje cortado)", () => {
+  async function completedEventFor(finishReason: string | null): Promise<ProviderEvent> {
+    const chunks = [JSON.stringify({ choices: [{ delta: { content: "Permítame retomar. U" } }] })];
+    if (finishReason !== null) {
+      chunks.push(JSON.stringify({ choices: [{ delta: {}, finish_reason: finishReason }] }));
+    }
+    const { adapter } = adapterWith([sseResponse(chunks)]);
+    const events = await collect(
+      adapter.startTurn({
+        turnId: "tt",
+        model,
+        credential: lease,
+        messages: userMessage,
+        tools: [],
+        options,
+        signal: new AbortController().signal
+      })
+    );
+    return events.at(-1)!;
+  }
+
+  it("marca truncated=true con finish_reason 'length'", async () => {
+    const completed = await completedEventFor("length");
+    expect(completed).toMatchObject({ type: "completed", truncated: true });
+  });
+
+  it("marca truncated=true si el stream terminó con texto y SIN finish_reason", async () => {
+    const completed = await completedEventFor(null);
+    expect(completed).toMatchObject({ type: "completed", truncated: true });
+  });
+
+  it("no marca truncated en un cierre limpio (finish_reason 'stop')", async () => {
+    const completed = await completedEventFor("stop");
+    expect(completed.type).toBe("completed");
+    expect("truncated" in completed).toBe(false);
   });
 });

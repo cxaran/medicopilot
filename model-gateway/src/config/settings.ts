@@ -121,7 +121,12 @@ export function loadSettings(): GatewaySettings {
     // un esquema de descubrimiento.
     maxToolsPerTurn: numberFromEnv("GATEWAY_MAX_TOOLS_PER_TURN", 200),
     maxToolResultBytes: numberFromEnv("GATEWAY_MAX_TOOL_RESULT_BYTES", 64 * 1024),
-    toolResultTimeoutMs: numberFromEnv("GATEWAY_TOOL_RESULT_TIMEOUT_MS", 30_000),
+    // 0 = SIN timeout de resultado de tool (default). En MedicoPilot toda tool de ESCRITURA
+    // espera una aprobación HUMANA (P1) de duración ilimitada: un timeout fijo mataría el turno
+    // mientras el médico revisa el borrador. La fuga de turnos abandonados ya la cubre el cierre
+    // del socket (``cancelByBrowserSession``). Se puede fijar un timeout finito en ms con
+    // GATEWAY_TOOL_RESULT_TIMEOUT_MS para entornos que lo requieran.
+    toolResultTimeoutMs: numberFromEnv("GATEWAY_TOOL_RESULT_TIMEOUT_MS", 0),
     fakeEnabled: process.env.GATEWAY_FAKE_ENABLED === "true",
     devTicket: process.env.GATEWAY_DEV_TICKET ?? "dev-ticket",
     agentTicketSecret: process.env.GATEWAY_AGENT_TICKET_SECRET ?? "",

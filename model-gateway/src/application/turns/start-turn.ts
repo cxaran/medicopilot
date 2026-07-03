@@ -23,7 +23,7 @@ export type TurnEvent =
   | { type: "turn.text.delta"; turn_id: string; delta: string; snapshot: string }
   | { type: "turn.reasoning.summary"; turn_id: string; summary: string }
   | { type: "turn.tool_call.ready"; turn_id: string; call_id: string; tool_name: string; arguments: unknown }
-  | { type: "turn.completed"; turn_id: string; usage: { input_tokens: number | null; output_tokens: number | null; cached_input_tokens: number | null; cache_write_tokens: number | null } }
+  | { type: "turn.completed"; turn_id: string; usage: { input_tokens: number | null; output_tokens: number | null; cached_input_tokens: number | null; cache_write_tokens: number | null }; truncated?: boolean }
   | { type: "turn.cancelled"; turn_id: string }
   | { type: "turn.failed"; turn_id?: string; code: string; message: string; details?: unknown };
 
@@ -207,10 +207,15 @@ export class StartTurn {
       return;
     }
 
-    await this.completeTurn(turnId, event.usage, sink, authorization);
+    await this.completeTurn(turnId, event.usage, sink, authorization, event.truncated ?? false);
   }
 
   private scheduleToolResultTimeout(turnId: string, sink: TurnEventSink): void {
+    // 0 (o menos) = timeout desactivado: la espera de una aprobación humana P1 es ilimitada y no
+    // debe expirar el turno. La fuga de turnos abandonados la cubre el cierre del socket.
+    if (this.dependencies.settings.toolResultTimeoutMs <= 0) {
+      return;
+    }
     const timeout = setTimeout(() => {
       void (async () => {
         const turn = await this.dependencies.turnStore.get(turnId);
@@ -235,7 +240,8 @@ export class StartTurn {
     turnId: string,
     usage: TurnUsage,
     sink: TurnEventSink,
-    authorization: TurnAuthorization
+    authorization: TurnAuthorization,
+    truncated = false
   ): Promise<void> {
     await this.dependencies.turnStore.setUsage(turnId, usage);
     await this.dependencies.turnStore.transition(turnId, "completed");
@@ -259,7 +265,8 @@ export class StartTurn {
         output_tokens: usage.outputTokens,
         cached_input_tokens: usage.cachedInputTokens,
         cache_write_tokens: usage.cacheWriteTokens
-      }
+      },
+      truncated
     });
   }
 }

@@ -156,4 +156,42 @@ describe("ModelDiscoveryService", () => {
     expect(model.id).toBe("opencode_zen/claude-haiku-4-5");
     expect(model.source).toBe("curated");
   });
+
+  it("resolveForUser usa el ÚLTIMO catálogo bueno si un discovery posterior falla (blip de red)", async () => {
+    // 1er discovery OK: puebla el cache "último bueno" con un modelo NO curado.
+    const discovered = [
+      createOpencodeModel({
+        baseUrl: BASE,
+        modelId: "deepseek-v4-flash-free",
+        row: { id: "deepseek-v4-flash-free", context_length: 65_536, supports_tools: true }
+      })
+    ];
+    let shouldFail = false;
+    const service = new ModelDiscoveryService({
+      controlPlane: controlPlane(() => lease),
+      providerRegistry: registry({
+        discoverModels: async () => {
+          if (shouldFail) {
+            throw new GatewayError("PROVIDER_DISCOVERY_FAILED", "fetch failed");
+          }
+          return discovered;
+        }
+      }),
+      modelCatalog: catalog(),
+      telemetry,
+      discoverableProviderIds: ["opencode_zen"],
+      // TTL 0: fuerza a re-descubrir en cada resolve (sin usar el cache rápido).
+      cacheTtlMs: 0
+    });
+
+    const first = await service.resolveForUser("user-1", "opencode_zen", "deepseek-v4-flash-free");
+    expect(first.id).toBe("opencode_zen/deepseek-v4-flash-free");
+
+    // 2do discovery FALLA: el modelo no está en el curado, pero el "último bueno" lo rescata en
+    // vez de matar el turno con MODEL_NOT_FOUND.
+    shouldFail = true;
+    const salvaged = await service.resolveForUser("user-1", "opencode_zen", "deepseek-v4-flash-free");
+    expect(salvaged.id).toBe("opencode_zen/deepseek-v4-flash-free");
+    expect(salvaged.capabilities.contextWindowTokens).toBe(65_536);
+  });
 });

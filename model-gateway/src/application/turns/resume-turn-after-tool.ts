@@ -1,4 +1,5 @@
 import { GatewayError, toGatewayError } from "../../kernel/errors.js";
+import { isTerminalStatus } from "./turn-state-machine.js";
 import type { ModelCatalogPort } from "../../ports/model-catalog.port.js";
 import type { ProviderCredentialLease } from "../../ports/provider-adapter.port.js";
 import type { ProviderRegistryPort } from "../../ports/provider-registry.port.js";
@@ -31,6 +32,16 @@ export class ResumeTurnAfterTool {
       }
 
       if (current.status !== "waiting_for_tool") {
+        // Resultado TARDÍO o DUPLICADO: llegó cuando el turno ya terminó (expiró, se canceló, falló
+        // o completó) o ya avanzó. No es un error del médico: se DESCARTA en silencio (sin emitir un
+        // turn.failed que ensucie el hilo con un doble fallo). Sólo se registra a nivel debug.
+        if (isTerminalStatus(current.status)) {
+          this.dependencies.telemetry.info("late tool result discarded", {
+            turnId,
+            status: current.status
+          });
+          return;
+        }
         throw new GatewayError("TURN_NOT_WAITING_FOR_TOOL", "Turn is not waiting for a tool result", {
           turnId,
           status: current.status
@@ -103,7 +114,8 @@ export class ResumeTurnAfterTool {
               output_tokens: event.usage.outputTokens,
               cached_input_tokens: event.usage.cachedInputTokens,
               cache_write_tokens: event.usage.cacheWriteTokens
-            }
+            },
+            truncated: event.truncated ?? false
           });
         }
       }
@@ -125,6 +137,11 @@ export class ResumeTurnAfterTool {
   }
 
   private scheduleToolResultTimeout(turnId: string, sink: TurnEventSink): void {
+    // 0 (o menos) = timeout desactivado: la espera de una aprobación humana P1 es ilimitada y no
+    // debe expirar el turno. La fuga de turnos abandonados la cubre el cierre del socket.
+    if (this.dependencies.settings.toolResultTimeoutMs <= 0) {
+      return;
+    }
     const timeout = setTimeout(() => {
       void (async () => {
         const turn = await this.dependencies.turnStore.get(turnId);

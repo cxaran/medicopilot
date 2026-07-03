@@ -127,11 +127,16 @@ export type ServerEvent =
   | { type: "turn.text.delta"; turn_id: string; delta: string; snapshot: string }
   | { type: "turn.reasoning.summary"; turn_id: string; summary: string }
   | { type: "turn.tool_call.ready"; turn_id: string; call_id: string; tool_name: string; arguments: unknown }
-  | { type: "turn.completed"; turn_id: string; usage: TurnUsage }
+  // ``truncated``: la respuesta quedó incompleta (corte por longitud o stream cortado a media
+  // respuesta). El cliente anexa un aviso para que el médico sepa que puede pedir continuar.
+  | { type: "turn.completed"; turn_id: string; usage: TurnUsage; truncated?: boolean }
   | { type: "turn.cancelled"; turn_id: string }
   | { type: "turn.failed"; turn_id?: string; code: string; message: string; details?: unknown }
   | { type: "models.list.result"; request_id: string; view: string; models: WireModel[] }
   | { type: "provider.status.result"; request_id: string; providers: WireProviderStatus[] }
+  // Confirmación de cancelación: espeja el protocolo del gateway. El cliente la IGNORA a propósito
+  // (cae en el ``default`` del reducer): tras enviar ``agent.cancel_turn`` no espera feedback; el
+  // fin del turno lo marca ``turn.cancelled``. Declarada para tipar el cable, no para consumirse.
   | { type: "agent.cancel_turn.result"; request_id: string; cancelled_turn_ids: string[] }
   | { type: "rpc.error"; request_id: string; code: string; message: string }
   | { type: "protocol.error"; code: string; message: string };

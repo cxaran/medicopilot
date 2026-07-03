@@ -262,9 +262,15 @@ export class OpencodeProviderAdapter implements ProviderAdapter {
     signal: AbortSignal;
   }): AsyncGenerator<ProviderEvent> {
     const compat = params.model.capabilities.compat;
+    // Red de seguridad del cable: garantiza el invariante tool_calls↔tool ANTES de enviar. Si un
+    // turno murió a mitad del drenado de tool calls paralelas (timeout, resume fuera de orden) o el
+    // modelo emitió ids duplicados, el historial podría llevar un assistant con N tool_calls sin sus
+    // N mensajes tool → upstreams estrictos (DeepSeek vía opencode) responden 400 "insufficient tool
+    // messages following tool_calls message". Idempotente: en el camino feliz no cambia nada.
+    const wireMessages = normalizeToolSequence(params.messages);
     const body: Record<string, unknown> = {
       model: params.model.route.providerModelId,
-      messages: params.messages,
+      messages: wireMessages,
       stream: true,
       max_tokens: params.options.maxOutputTokens
     };
@@ -422,7 +428,13 @@ export class OpencodeProviderAdapter implements ProviderAdapter {
       return;
     }
 
-    yield { type: "completed", usage };
+    // Truncamiento: el proveedor cortó por límite de longitud (``finish_reason: "length"``) o el
+    // stream terminó SIN señal de fin dejando texto a medias (conexión caída / [DONE] prematuro).
+    // En ambos casos el mensaje quedó incompleto y el cliente debe avisarlo (Fix: mensajes cortados
+    // que antes se persistían como respuesta normal, p. ej. "Permítame retomar. U").
+    const truncated = finishReason === "length" || (finishReason === null && assistantText.length > 0);
+    // Sólo se anexa ``truncated`` cuando es true: el camino feliz emite el evento tal cual.
+    yield truncated ? { type: "completed", usage, truncated: true } : { type: "completed", usage };
   }
 
   private toDescriptor(row: OpenAIModelRow): ModelDescriptor {
@@ -570,6 +582,84 @@ function toOpenAITools(tools: ModelToolDefinition[]): OpenAITool[] {
       ...(tool.strict ? { strict: true } : {})
     }
   }));
+}
+
+/**
+ * Repara la secuencia de mensajes OpenAI para que cumpla el invariante del cable ANTES de
+ * enviarla al proveedor: cada ``tool_call`` declarado por un mensaje ``assistant`` tiene
+ * EXACTAMENTE un mensaje ``tool`` que lo responde, y no quedan mensajes ``tool`` huérfanos.
+ * Los upstreams estrictos (DeepSeek vía opencode) devuelven 400 si el invariante se rompe,
+ * cosa que puede pasar cuando un turno muere a mitad del drenado de tool calls paralelas o
+ * el modelo emite ids duplicados. Reglas:
+ *   - Los ``tool_calls`` de un assistant se deduplican por id (se conserva el primero).
+ *   - Un ``tool_call`` sin su mensaje ``tool`` de respuesta se DESCARTA (no se pudo completar).
+ *   - Si tras la poda el assistant se queda sin ``tool_calls``, se conserva sólo si tiene texto
+ *     (como mensaje de texto); si no, se descarta entero.
+ *   - Los mensajes ``tool`` que no casan con ningún ``tool_call`` conservado se descartan.
+ * Idempotente y no-op en el camino feliz. No muta la entrada.
+ */
+export function normalizeToolSequence(messages: OpenAIMessage[]): OpenAIMessage[] {
+  const result: OpenAIMessage[] = [];
+  let i = 0;
+  while (i < messages.length) {
+    const msg = messages[i]!;
+
+    if (msg.role === "assistant" && msg.tool_calls && msg.tool_calls.length > 0) {
+      // Agrupa los mensajes ``tool`` que siguen inmediatamente a este assistant.
+      let j = i + 1;
+      const following: OpenAIMessage[] = [];
+      while (j < messages.length && messages[j]!.role === "tool") {
+        following.push(messages[j]!);
+        j += 1;
+      }
+      const answeredIds = new Set(
+        following.map((tool) => tool.tool_call_id).filter((id): id is string => Boolean(id))
+      );
+
+      // Dedup por id + conserva sólo los tool_calls que tengan respuesta.
+      const seen = new Set<string>();
+      const keptCalls: OpenAITextToolCall[] = [];
+      for (const call of msg.tool_calls) {
+        if (seen.has(call.id) || !answeredIds.has(call.id)) {
+          continue;
+        }
+        seen.add(call.id);
+        keptCalls.push(call);
+      }
+
+      if (keptCalls.length === 0) {
+        // Ningún tool_call quedó respondido: conserva el assistant como texto si lo tiene.
+        if (typeof msg.content === "string" ? msg.content.length > 0 : msg.content !== null) {
+          result.push({ role: "assistant", content: msg.content });
+        }
+      } else {
+        result.push({ ...msg, tool_calls: keptCalls });
+        // Conserva un solo mensaje tool por id conservado, en orden; descarta huérfanos/duplicados.
+        const keptIds = new Set(keptCalls.map((call) => call.id));
+        const used = new Set<string>();
+        for (const tool of following) {
+          const id = tool.tool_call_id;
+          if (!id || !keptIds.has(id) || used.has(id)) {
+            continue;
+          }
+          used.add(id);
+          result.push(tool);
+        }
+      }
+      i = j;
+      continue;
+    }
+
+    // Mensaje ``tool`` sin un assistant con tool_calls que lo preceda: huérfano, se descarta.
+    if (msg.role === "tool") {
+      i += 1;
+      continue;
+    }
+
+    result.push(msg);
+    i += 1;
+  }
+  return result;
 }
 
 function toolResultContent(result: ToolCallResult): string {
