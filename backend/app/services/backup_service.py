@@ -312,32 +312,27 @@ def missing_configuration(settings_row: BackupSettings) -> list[str]:
 # --------------------------------------------------------------------------------
 
 
-def _fernet():  # type: ignore[no-untyped-def]
-    from cryptography.fernet import Fernet
-
-    key = settings.backup_token_encryption_key
-    if key is None:
-        raise BackupPermanentError(
-            "token_key_missing",
-            "Falta BACKUP_TOKEN_ENCRYPTION_KEY para cifrar/descifrar el token de Drive.",
-        )
-    return Fernet(key.get_secret_value().encode("utf-8"))
-
-
 def encrypt_refresh_token(token: str) -> str:
-    return _fernet().encrypt(token.encode("utf-8")).decode("utf-8")
+    """Cifra el refresh token con el cifrador consolidado (clave maestra única)."""
+    from backend.app.services.secret_cipher import encrypt_secret
+
+    return encrypt_secret(token)
 
 
 def decrypt_refresh_token(ciphertext: str) -> str:
-    from cryptography.fernet import InvalidToken
+    """Descifra el refresh token (cadena de claves con transición). Un material que
+    no corresponde a ninguna clave es un estado terminal de reauth."""
+    from backend.app.services.secret_cipher import decrypt_secret
 
-    try:
-        return _fernet().decrypt(ciphertext.encode("utf-8")).decode("utf-8")
-    except InvalidToken as error:
+    value = decrypt_secret(ciphertext)
+    if value is None:
         raise BackupPermanentError(
-            "token_undecryptable",
-            "El token de Drive guardado no puede descifrarse; reconecta Google Drive.",
-        ) from error
+            "drive_token_undecryptable",
+            "El token de Drive no pudo descifrarse; reconecta Google Drive.",
+        )
+    return value
+
+
 
 
 # --------------------------------------------------------------------------------
@@ -533,7 +528,9 @@ def generate_encryption_key(session: Session, user_id: uuid.UUID) -> str:
     config = get_backup_settings(session, for_update=True)
     config.age_recipient = recipient
     config.age_recipient_fingerprint = age_recipient_fingerprint(recipient)
-    config.age_identity_ciphertext = _fernet().encrypt(identity.encode("utf-8")).decode("utf-8")
+    from backend.app.services.secret_cipher import encrypt_secret
+
+    config.age_identity_ciphertext = encrypt_secret(identity)
     config.updated_by = user_id
     session.add(config)
     return identity
@@ -544,16 +541,9 @@ def stored_identity_plain(config: BackupSettings) -> Optional[str]:
     reenviarla por correo. ``None`` si no hay o si no puede descifrarse."""
     if not config.age_identity_ciphertext:
         return None
-    from cryptography.fernet import InvalidToken
+    from backend.app.services.secret_cipher import decrypt_secret
 
-    try:
-        return (
-            _fernet()
-            .decrypt(config.age_identity_ciphertext.encode("utf-8"))
-            .decode("utf-8")
-        )
-    except (InvalidToken, BackupPermanentError):
-        return None
+    return decrypt_secret(config.age_identity_ciphertext)
 
 
 def backup_settings_email(config: BackupSettings, identity_plain: Optional[str]) -> tuple[str, str]:

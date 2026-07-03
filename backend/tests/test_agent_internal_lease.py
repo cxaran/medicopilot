@@ -60,6 +60,9 @@ PLAINTEXT = "sk-real-provider-key-9999"
 
 class CredentialLeaseEndpointTest(unittest.TestCase):
     def setUp(self) -> None:
+        # Se fija POR TEST (otra suite del mismo proceso puede haberlo reasignado —
+        # test_agent_oauth lo hace en su setUp con su propio valor).
+        settings.agent_gateway_internal_secret = SecretStr(INTERNAL_SECRET)
         self.engine = create_engine(
             "sqlite://",
             connect_args={"check_same_thread": False},

@@ -244,6 +244,28 @@ class Settings(BaseSettings):
     # archivo del respaldo, que se cifra con age y la clave pública del administrador).
     backup_token_encryption_key: SecretStr | None = None
 
+    # CLAVE MAESTRA ÚNICA de cifrado de secretos de configuración (Fernet). Escribe
+    # todo lo nuevo; las claves legadas (backup_token/ai_credential) siguen
+    # descifrando material viejo (re-cifrado perezoso al reescribir). Generar:
+    #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    app_encryption_key: SecretStr | None = None
+
+    @model_validator(mode="after")
+    def _require_encryption_key_in_production(self) -> Self:
+        if self.environment == "production" and not any(
+            key is not None
+            for key in (
+                self.app_encryption_key,
+                self.backup_token_encryption_key,
+                self.ai_credential_key,
+            )
+        ):
+            raise ValueError(
+                "Producción requiere APP_ENCRYPTION_KEY (clave Fernet) para cifrar "
+                "secretos de configuración en reposo."
+            )
+        return self
+
     postgres_user: str
     postgres_password: str
     postgres_server: str

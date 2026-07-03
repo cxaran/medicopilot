@@ -1,9 +1,12 @@
 """Cifrado simétrico reversible para secretos de credenciales de proveedor de IA.
 
 FastAPI es la autoridad que guarda las credenciales de proveedor de IA CIFRADAS en
-reposo (el navegador no las guarda; el Gateway las arrendará en B4). Aquí solo vive
-la primitiva de cifrado: Fernet (AES-128-CBC + HMAC) con una clave DEDICADA
-(``settings.ai_credential_key``). El secreto en claro nunca se persiste ni se loguea.
+reposo (el navegador no las guarda; el Gateway las arrienda por turno). CONSOLIDADO
+sobre el cifrador único de secretos (``services/secret_cipher``): se escribe con la
+clave maestra ``APP_ENCRYPTION_KEY`` y se descifra con la cadena completa — las
+credenciales cifradas con la antigua ``AI_CREDENTIAL_KEY`` siguen abriéndose y
+migran de clave al reescribirse (re-cifrado perezoso). El secreto en claro nunca se
+persiste ni se loguea.
 
 Generar una clave válida (urlsafe base64 de 32 bytes)::
 
@@ -12,25 +15,29 @@ Generar una clave válida (urlsafe base64 de 32 bytes)::
 
 from __future__ import annotations
 
-from cryptography.fernet import Fernet
-
-from backend.app.core.settings import settings
-
-
-def _fernet() -> Fernet:
-    key = settings.ai_credential_key
-    if key is None or not key.get_secret_value().strip():
-        raise RuntimeError(
-            "ai_credential_key no está configurada: define AI_CREDENTIAL_KEY (clave Fernet)."
-        )
-    return Fernet(key.get_secret_value().encode("utf-8"))
+from backend.app.services.secret_cipher import (
+    SecretCipherError,
+    decrypt_secret as _decrypt,
+    encrypt_secret as _encrypt,
+)
 
 
 def encrypt_secret(plaintext: str) -> str:
     """Cifra ``plaintext`` y devuelve el token Fernet (texto) para guardar en reposo."""
-    return _fernet().encrypt(plaintext.encode("utf-8")).decode("utf-8")
+    try:
+        return _encrypt(plaintext)
+    except SecretCipherError as error:
+        # Contrato histórico de este módulo: RuntimeError con causa accionable.
+        raise RuntimeError(
+            "No hay clave de cifrado configurada: define APP_ENCRYPTION_KEY (Fernet)."
+        ) from error
 
 
 def decrypt_secret(token: str) -> str:
     """Descifra un token Fernet y devuelve el secreto en claro (uso efímero)."""
-    return _fernet().decrypt(token.encode("utf-8")).decode("utf-8")
+    value = _decrypt(token)
+    if value is None:
+        raise RuntimeError(
+            "La credencial guardada no puede descifrarse con las claves configuradas."
+        )
+    return value
