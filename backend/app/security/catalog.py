@@ -39,6 +39,7 @@ from backend.app.security.groups.patient_history_items import (
 from backend.app.security.groups.patient_immunizations import (
     PatientImmunizationPermissions,
 )
+from backend.app.security.groups.patient_summary import PatientSummaryPermissions
 from backend.app.security.groups.patients import PatientPermissions
 from backend.app.security.groups.permissions import PermissionPermissions
 from backend.app.security.groups.population import PopulationPermissions
@@ -87,6 +88,7 @@ SECURITY_GROUPS: list[type[SecurityGroup]] = [
     QualityCheckPermissions,
     MedicationReconciliationPermissions,
     FollowUpPermissions,
+    PatientSummaryPermissions,
     AuditEventPermissions,
     BackupPermissions,
     PermissionPermissions,

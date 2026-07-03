@@ -423,18 +423,20 @@ def list_child_values(
     owner_field: str,
     owner_id: Any,
     value_field: str,
+    active_field: str | None = None,
 ) -> list[Any]:
     """Lee los valores escalares de un hijo para un dueño.
 
     Lado lectura simétrico a ``replace_child_values`` (p. ej. los permisos
-    ``RoleAccess.access`` de un rol). Devuelve la lista de valores.
+    ``RoleAccess.access`` de un rol). Con ``active_field`` sólo devuelve las filas
+    activas — misma regla que los checks de sesión, para que lo que la UI muestra
+    coincida con lo que la sesión otorga.
     """
     column = getattr(child_model, value_field)
-    return list(
-        session.exec(
-            select(column).where(getattr(child_model, owner_field) == owner_id)
-        ).all()
-    )
+    statement = select(column).where(getattr(child_model, owner_field) == owner_id)
+    if active_field is not None:
+        statement = statement.where(getattr(child_model, active_field).is_(True))
+    return list(session.exec(statement).all())
 
 
 def ensure_allowed_values(

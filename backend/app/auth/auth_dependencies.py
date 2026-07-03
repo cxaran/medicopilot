@@ -63,10 +63,11 @@ def get_current_user_orm(
 ) -> User:
     """Resuelve y valida el usuario ORM de la sesión actual (cookie o bearer).
 
-    Misma validación que ``get_current_user`` (sesión presente, usuario activo y
-    versión de sesión vigente), pero devuelve la instancia ORM ``User`` para los
-    consumidores que necesitan campos no expuestos en ``SessionUser`` (p. ej. el
-    versionado de sesión ``User.token``)."""
+    AQUÍ vive TODA la validación de sesión (token presente y decodificable, usuario
+    activo y versión de sesión vigente ``User.token == jti``); ``get_current_user``
+    depende de esta función y sólo materializa los permisos encima. Devuelve la
+    instancia ORM ``User`` para consumidores que necesitan campos no expuestos en
+    ``SessionUser``."""
     if not token:
         raise _unauthorized_error()
 

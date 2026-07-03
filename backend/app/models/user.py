@@ -194,7 +194,12 @@ class RoleAccess(Base):
     is_active: Mapped[bool] = mapped_column(
         Boolean,
         default=True,
-        comment="Desactivación lógica: false inhabilita el permiso sin borrar el registro.",
+        comment=(
+            "Desactivación lógica: false inhabilita el permiso sin borrar el registro "
+            "(la sesión y las lecturas del rol lo respetan). Nota: editar los permisos "
+            "del rol desde la UI REEMPLAZA el conjunto completo, descartando filas "
+            "suspendidas."
+        ),
     )
 
     role: Mapped["Role"] = relationship(back_populates="accesses")

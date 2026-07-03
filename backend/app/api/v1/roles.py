@@ -58,7 +58,13 @@ def get_role(
 ) -> RoleDetailRead:
     role = get_or_404(session, Role, role_id, "Rol no encontrado")
     permissions = list_child_values(
-        session, RoleAccess, owner_field="role_id", owner_id=role_id, value_field="access"
+        session,
+        RoleAccess,
+        owner_field="role_id",
+        owner_id=role_id,
+        value_field="access",
+        # Misma regla que la sesión (build_current_user): sólo accesos activos.
+        active_field="is_active",
     )
     return serialize_with(RoleDetailRead, role, {"permissions": permissions})
 
@@ -160,7 +166,13 @@ def get_role_permissions(
     """Selección actual de permisos del rol (lectura para el editor relacional)."""
     get_or_404(session, Role, role_id, "Rol no encontrado")
     permissions = list_child_values(
-        session, RoleAccess, owner_field="role_id", owner_id=role_id, value_field="access"
+        session,
+        RoleAccess,
+        owner_field="role_id",
+        owner_id=role_id,
+        value_field="access",
+        # Misma regla que la sesión (build_current_user): sólo accesos activos.
+        active_field="is_active",
     )
     return RolePermissionsRead(permissions=permissions)
 

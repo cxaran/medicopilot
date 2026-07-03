@@ -74,13 +74,16 @@ class ClinicalRoleProfileTest(unittest.TestCase):
             "patients", "consultations", "appointments", "consultation_diagnoses",
             "prescriptions", "lab_results", "study_orders", "clinical_tasks",
             "patient_clinical_items",
+            # Antecedentes e inmunizaciones: el copiloto los compone como borrador
+            # que el médico aprueba — el perfil debe poder crearlos.
+            "patient_history_items", "patient_immunizations",
         ):
             self.assertIn(f"{resource}:create", perms, resource)
 
     def test_restricted_resources_are_read_only(self) -> None:
         perms = clinical_role_permissions()
         for resource in (
-            "scale_results", "patient_history_items", "patient_immunizations", "clinical_notes",
+            "scale_results", "clinical_notes",
         ):
             self.assertIn(f"{resource}:read", perms, resource)
             self.assertNotIn(f"{resource}:create", perms, resource)

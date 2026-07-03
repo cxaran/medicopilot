@@ -40,6 +40,13 @@ _CREATABLE_CLINICAL: set[str] = {
     "appointments:read", "appointments:create", "appointments:update",
     "patient_clinical_items:read", "patient_clinical_items:create",
     "patient_clinical_items:update",
+    # Antecedentes estructurados e inmunizaciones: el copiloto los COMPONE como
+    # borrador y el médico los aprueba (P1) — sin :create el flujo moría en 403 al
+    # confirmar (mismo patrón que patients:create en MP-CTRL-0119).
+    "patient_history_items:read", "patient_history_items:create",
+    "patient_history_items:update",
+    "patient_immunizations:read", "patient_immunizations:create",
+    "patient_immunizations:update",
     "medical_history_versions:read", "medical_history_versions:create",
     "medical_history_versions:update", "medical_history_versions:finalize",
     "clinical_documents:read", "clinical_documents:create", "clinical_documents:update",
@@ -49,16 +56,16 @@ _CREATABLE_CLINICAL: set[str] = {
 # Recursos clínicos RESTRINGIDOS a sólo lectura (NO creables por este rol).
 _RESTRICTED_READ_ONLY: set[str] = {
     "scale_results:read",
-    "patient_history_items:read",
-    "patient_immunizations:read",
     "clinical_notes:read",
 }
 
 # Persistencia del chat del copiloto (chat-first): leer y crear conversaciones/mensajes. Persistir
 # el hilo NO es una escritura clínica; habilita que el rol Médico tenga historial por paciente.
-# EXCEPCIÓN a la regla "sin *:delete": ``messages:delete``/``conversations:reset`` borran (baja
-# lógica) HISTORIAL DE CHAT del propio copiloto, nunca datos clínicos; permiten limpiar mensajes
-# sueltos y reiniciar un hilo (completo o desde un punto).
+# EXCEPCIÓN a la regla "sin *:delete": ``messages:delete``/``conversations:reset`` borran (FÍSICO;
+# el chat no es expediente) HISTORIAL DE CHAT del propio usuario, nunca datos clínicos; permiten
+# limpiar mensajes sueltos y reiniciar un hilo (completo o desde un punto). Se mantienen como
+# permisos SEPARADOS, pero todo perfil de rol por defecto los trae seleccionados: cada usuario
+# gestiona su propio historial (los hilos son por usuario; el backend exige pertenencia).
 _CHAT_PERSISTENCE: set[str] = {
     "conversations:read", "conversations:create", "conversations:reset",
     "messages:read", "messages:create", "messages:update", "messages:delete",
@@ -72,6 +79,7 @@ _SUPPORT_READ_ONLY: set[str] = {
     "medication_reconciliation:read",
     "quality_checks:read",
     "follow_ups:read",
+    "patient_summary:read",
     "reports:read",
     "population:read",
     "audit_events:read",
