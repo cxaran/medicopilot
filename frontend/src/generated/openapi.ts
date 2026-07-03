@@ -8643,6 +8643,8 @@ export interface components {
             dismissed: boolean;
             /** Pending Count */
             pending_count: number;
+            /** Environment */
+            environment: string;
         };
         /**
          * Sex

@@ -1,6 +1,12 @@
 import { ChatShell } from "@/components/chat-shell/ChatShell";
+import {
+  EnvironmentBadge,
+  SetupChecklistBanner,
+} from "@/components/system/SetupChecklistBanner";
 import { requireSession } from "@/core/auth/session";
 import { getDashboardData } from "@/core/chat-shell/dashboard-data";
+import { getSetupChecklist } from "@/core/system-settings/checklist-data";
+import { shouldShowBanner } from "@/core/system-settings/setup-checklist";
 
 /**
  * Inicio CHAT-FIRST (MP-CTRL-0122; barra lateral unificada en 0128): el home es el agente global con
@@ -15,5 +21,17 @@ export default async function HomePage() {
   // consultas recientes, pendientes de seguimiento). Degrada a vacío si el rol no tiene permiso.
   const dashboard = await getDashboardData();
 
-  return <ChatShell dashboard={dashboard} />;
+  // Checklist de puesta en marcha (derivado; null degrada sin banner) + chip de
+  // entorno no productivo. Flotantes: no tocan el layout del shell.
+  const checklist = await getSetupChecklist();
+
+  return (
+    <>
+      <ChatShell dashboard={dashboard} />
+      {checklist ? <EnvironmentBadge environment={checklist.environment} /> : null}
+      {shouldShowBanner(checklist) && checklist ? (
+        <SetupChecklistBanner checklist={checklist} />
+      ) : null}
+    </>
+  );
 }

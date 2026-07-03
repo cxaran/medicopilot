@@ -236,3 +236,5 @@ class SetupChecklistRead(ApiReadSchema):
     items: list[SetupChecklistItemRead]
     dismissed: bool
     pending_count: int
+    # Para el banner visual de entorno (dev/staging/producción).
+    environment: str

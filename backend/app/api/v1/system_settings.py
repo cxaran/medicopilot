@@ -97,7 +97,12 @@ def get_setup_checklist(
         for i in items
     ]
     pending = sum(1 for i in items if i.status == "pending")
-    return SetupChecklistRead(items=serialized, dismissed=dismissed, pending_count=pending)
+    return SetupChecklistRead(
+        items=serialized,
+        dismissed=dismissed,
+        pending_count=pending,
+        environment=settings.environment,
+    )
 
 
 @router.post("/system-settings/setup-checklist/dismiss", status_code=status.HTTP_204_NO_CONTENT)
