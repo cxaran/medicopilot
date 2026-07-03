@@ -111,6 +111,16 @@ class SystemSettingsUpdate(ApiPatchSchema):
         title="SSL directo",
         json_schema_extra={"ui": {"form": True, "widget": "switch"}},
     )
+    enabled_ai_providers: Optional[list[str]] = Field(
+        default=None,
+        title="Proveedores de IA permitidos",
+        description=(
+            "Allowlist global (política de datos). Permitir no cuesta: usar exige "
+            "la credencial PERSONAL de cada usuario — sin IA por defecto."
+        ),
+        # Sin control en el formulario genérico (no hay widget multiselect); se
+        # edita por API y tendrá control propio en el checklist/panel.
+    )
     # Secretos WRITE-ONLY: enviar un valor lo reemplaza, enviar null lo borra,
     # omitirlo lo conserva. JAMÁS existen en el schema de lectura.
     email_smtp_password: Optional[str] = Field(
@@ -158,6 +168,7 @@ class SystemSettingsRead(ApiReadSchema):
     email_last_test_error: Optional[str] = None
     # Derivado con la MISMA regla que usa el envío (None = transporte utilizable).
     email_transport_reason: Optional[str] = None
+    enabled_ai_providers: list[str]
     environment: str
     created_at: datetime
     updated_at: Optional[datetime] = None

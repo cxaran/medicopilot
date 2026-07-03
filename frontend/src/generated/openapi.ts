@@ -2861,6 +2861,10 @@ export interface components {
             language_locale?: string | null;
             /** Consultation Style */
             consultation_style?: string | null;
+            /** Preferred Provider */
+            preferred_provider?: string | null;
+            /** Preferred Model */
+            preferred_model?: string | null;
             /** Updated At */
             updated_at?: string | null;
         };
@@ -2881,6 +2885,13 @@ export interface components {
             language_locale?: string | null;
             /** Estilo de consulta */
             consultation_style?: string | null;
+            /**
+             * Proveedor preferido
+             * @description Tu proveedor de IA por defecto (tus credenciales, tu costo).
+             */
+            preferred_provider?: string | null;
+            /** Modelo preferido */
+            preferred_model?: string | null;
         };
         /**
          * AgentTemplate
@@ -9147,6 +9158,8 @@ export interface components {
             email_last_test_error?: string | null;
             /** Email Transport Reason */
             email_transport_reason?: string | null;
+            /** Enabled Ai Providers */
+            enabled_ai_providers: string[];
             /** Environment */
             environment: string;
             /**
@@ -9201,6 +9214,11 @@ export interface components {
             email_smtp_tls?: boolean | null;
             /** SSL directo */
             email_smtp_ssl?: boolean | null;
+            /**
+             * Proveedores de IA permitidos
+             * @description Allowlist global (política de datos). Permitir no cuesta: usar exige la credencial PERSONAL de cada usuario — sin IA por defecto.
+             */
+            enabled_ai_providers?: string[] | null;
             /**
              * Contraseña SMTP (write-only)
              * @description Se guarda cifrada; nunca vuelve a mostrarse.

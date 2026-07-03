@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from backend.app.schemas.base import ApiPatchSchema, ApiReadSchema
 
@@ -20,6 +20,30 @@ class AgentPersonaUpdate(ApiPatchSchema):
     consultation_style: Optional[str] = Field(default=None, max_length=1000, title="Estilo de consulta")
 
 
+    preferred_provider: Optional[str] = Field(
+        default=None,
+        max_length=40,
+        title="Proveedor preferido",
+        description="Tu proveedor de IA por defecto (tus credenciales, tu costo).",
+    )
+    preferred_model: Optional[str] = Field(
+        default=None,
+        max_length=160,
+        title="Modelo preferido",
+    )
+
+    @field_validator("preferred_provider")
+    @classmethod
+    def _validate_preferred_provider(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        from backend.app.models.enums import AiProvider
+
+        if value not in {provider.value for provider in AiProvider}:
+            raise ValueError("Proveedor de IA desconocido.")
+        return value
+
+
 class AgentPersonaRead(ApiReadSchema):
     """Persona del copiloto para su dueño (config en claro, owner-only)."""
 
@@ -27,4 +51,6 @@ class AgentPersonaRead(ApiReadSchema):
     specialty_focus: Optional[str] = None
     language_locale: Optional[str] = None
     consultation_style: Optional[str] = None
+    preferred_provider: Optional[str] = None
+    preferred_model: Optional[str] = None
     updated_at: Optional[datetime] = None

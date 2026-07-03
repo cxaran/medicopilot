@@ -123,5 +123,21 @@ class AgentPersonaRoutesTest(unittest.TestCase):
         self.assertEqual(self.client.put(self.BASE, json={"foo": "bar"}).status_code, 422)
 
 
+
+class PreferredProviderTest(unittest.TestCase):
+    """La preferencia proveedor/modelo del usuario persiste en su persona (deja el
+    localStorage): sin IA por defecto, cada usuario elige y paga la suya."""
+
+    def test_update_schema_validates_provider(self) -> None:
+        from pydantic import ValidationError
+
+        from backend.app.schemas.agent_persona import AgentPersonaUpdate
+
+        ok = AgentPersonaUpdate(preferred_provider="openai", preferred_model="gpt-4o")
+        self.assertEqual(ok.preferred_provider, "openai")
+        with self.assertRaises(ValidationError):
+            AgentPersonaUpdate(preferred_provider="skynet")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -26,10 +26,13 @@ from sqlalchemy import (
     Text,
     func,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy.types import JSON
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.app.models.base import Base
+from backend.app.models.enums import AiProvider
 
 
 class SystemSettings(Base):
@@ -152,6 +155,19 @@ class SystemSettings(Base):
         nullable=True,
         comment="Resultado del último test: ok o failed (estado derivado, no editable).",
     )
+    # Allowlist GLOBAL de proveedores de IA permitidos (política de datos del
+    # administrador). Regla del producto: SIN IA por defecto — permitir un proveedor
+    # no cuesta nada; usarlo exige la credencial PERSONAL de cada usuario.
+    enabled_ai_providers: Mapped[list] = mapped_column(
+        JSON().with_variant(JSONB, "postgresql"),
+        nullable=False,
+        default=lambda: [provider.value for provider in AiProvider],
+        comment=(
+            "Allowlist GLOBAL de proveedores de IA permitidos (política del "
+            "administrador). Permitir no cuesta: usar exige credencial PERSONAL."
+        ),
+    )
+
     email_last_test_error: Mapped[Optional[str]] = mapped_column(
         String(255),
         nullable=True,

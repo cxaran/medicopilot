@@ -58,6 +58,18 @@ class AgentPersona(Base):
         nullable=True,
         comment="Estilo de consulta por defecto (estructura, nivel de detalle).",
     )
+    # Preferencia de proveedor/modelo del USUARIO (sus credenciales, su costo): la
+    # instalación no trae IA por defecto ni credenciales compartidas.
+    preferred_provider: Mapped[Optional[str]] = mapped_column(
+        String(40),
+        nullable=True,
+        comment="Proveedor de IA preferido del usuario (sus credenciales, su costo).",
+    )
+    preferred_model: Mapped[Optional[str]] = mapped_column(
+        String(160),
+        nullable=True,
+        comment="Modelo preferido del usuario dentro de su proveedor.",
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         server_default=func.now(),

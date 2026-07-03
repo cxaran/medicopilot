@@ -49,6 +49,12 @@ def is_password_reset_enabled(session: Session) -> bool:
     return get_system_settings(session).password_reset_enabled
 
 
+def is_ai_provider_allowed(session: Session, provider: str) -> bool:
+    """¿El proveedor está en la allowlist global? (Política de datos del admin;
+    permitir no cuesta — usar exige credencial PERSONAL del usuario.)"""
+    return provider in set(get_system_settings(session).enabled_ai_providers or [])
+
+
 ChecklistStatus = Literal["complete", "pending", "not_applicable"]
 
 
@@ -150,24 +156,29 @@ def build_setup_checklist(
         )
     )
 
-    has_ai_credential = (
+    # IA: SIN proveedor por defecto — cada usuario aporta sus credenciales (la
+    # institución no asume costos de modelos). El ítem es por USUARIO actual.
+    own_credential = (
         session.exec(
             select(AiProviderCredential).where(
+                AiProviderCredential.user_id == current_user_id,
                 AiProviderCredential.is_active == True,  # noqa: E712
                 AiProviderCredential.deleted_at == None,  # noqa: E711
             )
         ).first()
-        is not None
+        if current_user_id is not None
+        else None
     )
     items.append(
         ChecklistItem(
             key="ai_providers",
-            title="Proveedor de IA del copiloto",
-            status="complete" if has_ai_credential else "pending",
+            title="Tu proveedor de IA del copiloto",
+            status="complete" if own_credential is not None else "pending",
             detail=(
-                "Hay al menos una credencial de proveedor activa."
-                if has_ai_credential
-                else "Agrega una credencial de proveedor en tu cuenta para usar el copiloto."
+                "Tienes una credencial de proveedor activa."
+                if own_credential is not None
+                else "Agrega TU credencial de proveedor en tu cuenta (sin IA por "
+                "defecto: cada usuario usa y paga la suya)."
             ),
         )
     )

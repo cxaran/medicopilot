@@ -64,6 +64,7 @@ def _serialize_read(session: SessionDep, row: SystemSettings) -> SystemSettingsR
         email_last_test_status=row.email_last_test_status,
         email_last_test_error=row.email_last_test_error,
         email_transport_reason=transport_unavailable_reason(row),
+        enabled_ai_providers=list(row.enabled_ai_providers or []),
         environment=settings.environment,
         created_at=row.created_at,
         updated_at=row.updated_at,
@@ -278,6 +279,21 @@ def update_system_settings(
             "El despliegue no permite registro público (REGISTRATION_ALLOWED). "
             "Actívalo en el entorno antes de habilitarlo aquí.",
         )
+
+    # Allowlist de IA: solo valores del catálogo de proveedores, sin duplicados.
+    if "enabled_ai_providers" in data:
+        from backend.app.models.enums import AiProvider
+
+        raw = data["enabled_ai_providers"] or []
+        valid = {provider.value for provider in AiProvider}
+        unknown = [value for value in raw if value not in valid]
+        if unknown:
+            api_error(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "unknown_ai_provider",
+                f"Proveedores desconocidos: {', '.join(sorted(set(unknown)))}.",
+            )
+        data["enabled_ai_providers"] = sorted(set(raw))
 
     # Secretos WRITE-ONLY: valor -> cifrar y reemplazar; null -> borrar; omitido ->
     # conservar. Nunca pasan por setattr (no existen como columnas en claro).

@@ -13,6 +13,7 @@ from sqlmodel import select
 
 from backend.app.agent.crypto import encrypt_secret
 from backend.app.api.resource_actions import (
+    api_error,
     commit_or_conflict,
     get_owned_or_404,
     serialize,
@@ -55,6 +56,17 @@ def create_credential(
     session: SessionDep,
     current_user: CurrentUser,
 ) -> AiProviderCredentialRead:
+    # Allowlist GLOBAL (política de datos del admin): sin IA por defecto — cada
+    # usuario aporta su credencial, pero solo de proveedores permitidos.
+    from backend.app.services.system_settings_service import is_ai_provider_allowed
+
+    if not is_ai_provider_allowed(session, payload.provider.value):
+        api_error(
+            status.HTTP_409_CONFLICT,
+            "provider_not_allowed",
+            "Ese proveedor de IA no está permitido por la configuración del sistema.",
+        )
+
     credential = AiProviderCredential(
         user_id=current_user.id,
         provider=payload.provider,

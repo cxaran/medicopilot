@@ -118,6 +118,19 @@ class AiProviderCredentialRoutesTest(unittest.TestCase):
         with Session(self.engine) as session:
             return session.get(AiProviderCredential, uuid.UUID(credential_id))
 
+    def test_create_blocked_when_provider_not_in_allowlist(self) -> None:
+        from unittest import mock
+
+        # Allowlist global restringida (política del admin): la credencial personal
+        # de un proveedor vetado no puede crearse.
+        with mock.patch(
+            "backend.app.services.system_settings_service.is_ai_provider_allowed",
+            return_value=False,
+        ):
+            blocked = self._create()
+        self.assertEqual(blocked.status_code, 409, blocked.text)
+        self.assertIn("provider_not_allowed", blocked.text)
+
     def test_create_encrypts_and_never_returns_plaintext(self) -> None:
         created = self._create(secret="sk-top-secret-xyz", default_model="gpt-4o")
         self.assertEqual(created.status_code, 201, created.text)
