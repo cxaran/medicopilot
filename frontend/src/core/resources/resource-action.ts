@@ -205,6 +205,18 @@ export function visibleActionsForRow(
   return actions.filter((action) => isActionVisible(action, item));
 }
 
+/** Acciones ACCIONABLES en un row: visibles Y habilitadas. Para superficies
+ * compactas (agenda) donde un botón deshabilitado no aporta; la tabla, en cambio,
+ * muestra las visibles-deshabilitadas con motivo (``enabled_when``). */
+export function actionableActionsForRow(
+  actions: readonly ResourceActionCapability[],
+  item: Record<string, unknown>,
+): ResourceActionCapability[] {
+  return actions.filter(
+    (action) => isActionVisible(action, item) && isActionEnabled(action, item),
+  );
+}
+
 /** Mensaje de error seguro (de negocio), nunca detalle técnico. */
 export function actionErrorMessage(status: number, code: string | undefined): string {
   if (status === 409 && code === "admin_coverage_required") {

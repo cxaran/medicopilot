@@ -8,7 +8,7 @@
 
 import type { ResourceRow } from "@/core/resources/list-types";
 import type { ResourceActionCapability } from "@/core/api/contracts";
-import { visibleActionsForRow } from "@/core/resources/resource-action";
+import { actionableActionsForRow } from "@/core/resources/resource-action";
 
 export type AgendaMode = "day" | "week" | "month";
 
@@ -397,7 +397,8 @@ export function avatarColor(seed: string): string {
 
 /**
  * Acciones de transición aplicables a una cita SEGÚN SU ESTADO, derivadas del CONTRATO (no
- * hardcodeadas): delega en ``visibleActionsForRow`` (evalúa ``visible_when`` contra ``status``), el
+ * hardcodeadas): delega en ``actionableActionsForRow`` (evalúa ``visible_when`` Y ``enabled_when``
+ * contra ``status`` — las transiciones de cita usan enabled_when), el
  * MISMO filtrado que usa la tabla genérica. El RBAC ya lo aplicó el backend (sólo proyecta las
  * acciones cuyo permiso tiene el rol); ``enabled_when`` lo resuelve después ``ResourceRowActions``. No
  * hay ruta de acción paralela: las escrituras siguen pasando por ese cliente (diálogo + P1 + auditoría).
@@ -406,5 +407,5 @@ export function applicableAppointmentActions(
   actions: readonly ResourceActionCapability[],
   statusKey: string,
 ): ResourceActionCapability[] {
-  return visibleActionsForRow(actions, { status: statusKey });
+  return actionableActionsForRow(actions, { status: statusKey });
 }

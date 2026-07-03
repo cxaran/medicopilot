@@ -748,14 +748,14 @@ class PrescriptionsAndAppointmentsCapabilityTest(unittest.TestCase):
         self.assertEqual(
             actions["confirm"]["url_template"], "/api/v1/appointments/{id}/confirm"
         )
-        self.assertEqual(actions["confirm"]["visible_when"]["all"][0]["value"], "pending")
+        self.assertEqual(actions["confirm"]["enabled_when"]["all"][0]["value"], "pending")
         # confirm/no_show son POST sin parámetros: cuerpo vacío explícito ({}).
         self.assertEqual(actions["confirm"]["request"]["fixed_body"], {})
         self.assertNotIn("input_schema", actions["confirm"])
         self.assertEqual(actions["no_show"]["request"]["fixed_body"], {})
         self.assertNotIn("input_schema", actions["no_show"])
         self.assertEqual(
-            actions["cancel"]["visible_when"]["all"][0]["operator"], "in"
+            actions["cancel"]["enabled_when"]["all"][0]["operator"], "in"
         )
         self.assertEqual(
             [f["name"] for f in actions["cancel"]["input_schema"]["fields"]], ["reason"]

@@ -2074,7 +2074,10 @@ RESOURCE_REGISTRY: tuple[ResourceDefinition, ...] = (
         detail_url_template="/api/v1/appointments/{id}",
         actions=(
             # Las transiciones de cita reutilizan appointments:update (no hay permisos
-            # dedicados); el backend revalida cada transición de estado.
+            # dedicados); el backend revalida cada transición de estado. Usan
+            # enabled_when (no visible_when): el botón queda visible pero
+            # deshabilitado con motivo cuando el estado no aplica — el médico
+            # descubre qué transiciones existen.
             ActionDef(
                 name="confirm",
                 label="Confirmar",
@@ -2086,7 +2089,7 @@ RESOURCE_REGISTRY: tuple[ResourceDefinition, ...] = (
                 # POST sin parámetros: cuerpo vacío explícito ({}) para que el cliente
                 # capability-driven envíe un JSON válido y el endpoint no responda 422.
                 fixed_body={},
-                visible_when=ActionCondition(
+                enabled_when=ActionCondition(
                     all=[
                         ActionConditionPredicate(
                             field="status",
@@ -2112,7 +2115,7 @@ RESOURCE_REGISTRY: tuple[ResourceDefinition, ...] = (
                 danger=True,
                 permission=AppointmentPermissions.UPDATE,
                 input_schema=AppointmentCancel,
-                visible_when=ActionCondition(
+                enabled_when=ActionCondition(
                     all=[
                         ActionConditionPredicate(
                             field="status",
@@ -2139,7 +2142,7 @@ RESOURCE_REGISTRY: tuple[ResourceDefinition, ...] = (
                 # POST sin parámetros: cuerpo vacío explícito ({}) para que el cliente
                 # capability-driven envíe un JSON válido y el endpoint no responda 422.
                 fixed_body={},
-                visible_when=ActionCondition(
+                enabled_when=ActionCondition(
                     all=[
                         ActionConditionPredicate(
                             field="status",
@@ -2164,7 +2167,7 @@ RESOURCE_REGISTRY: tuple[ResourceDefinition, ...] = (
                 danger=False,
                 permission=AppointmentPermissions.UPDATE,
                 input_schema=AppointmentReschedule,
-                visible_when=ActionCondition(
+                enabled_when=ActionCondition(
                     all=[
                         ActionConditionPredicate(
                             field="status",
