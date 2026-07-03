@@ -36,7 +36,7 @@ async def send_password_reset_token(
     return token
 
 
-def get_password_reset_user(
+def _get_password_reset_user(
     session: SessionDep,
     token: str,
 ) -> User | None:
@@ -57,7 +57,7 @@ def reset_password(
     password: SecretStr,
 ) -> User | None:
     try:
-        user = get_password_reset_user(session, token)
+        user = _get_password_reset_user(session, token)
         if not user or not user.is_active or user.email != email:
             return None
 

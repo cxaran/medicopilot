@@ -51,7 +51,7 @@ class ForgotPasswordTest(unittest.TestCase):
         engine = self._engine()
         with Session(engine) as session:
             with patch.object(forgot_password, "get_subject", return_value="not-a-uuid"):
-                self.assertIsNone(forgot_password.get_password_reset_user(session, "token"))
+                self.assertIsNone(forgot_password._get_password_reset_user(session, "token"))
 
     def test_reset_password_rotates_token_unlocks_user_and_deletes_reset_token(self) -> None:
         engine = self._engine()
@@ -85,6 +85,7 @@ class ForgotPasswordTest(unittest.TestCase):
                 )
 
             self.assertIsNotNone(updated)
+            assert updated is not None  # narrowing para el type-checker
             self.assertEqual(updated.token, "new-version")
             self.assertIsNone(updated.locked_until)
             self.assertTrue(verify_password(new_password, updated.hashed_password))

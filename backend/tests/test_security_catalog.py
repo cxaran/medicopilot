@@ -299,7 +299,6 @@ class SecurityCatalogTest(unittest.TestCase):
     def test_permission_members_expose_control_and_description(self) -> None:
         permission = UserPermissions.READ
 
-        self.assertIsInstance(permission.access, SecurityControl)
         self.assertEqual(permission.permission, "users:read")
         self.assertEqual(permission.description, "Listar usuarios")
         self.assertTrue(callable(permission.check))

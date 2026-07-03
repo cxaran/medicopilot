@@ -36,10 +36,6 @@ class SecurityGroup(Enum):
 
     # ----- Permiso específico (miembro del Enum) -----
     @property
-    def access(self) -> SecurityControl:
-        return self._control
-
-    @property
     def permission(self) -> str:
         return self._control.access
 
