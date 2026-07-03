@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 
 import { AudioTranscriptionPanel } from "@/components/audio/AudioTranscriptionPanel";
 import { BackLink } from "@/components/layout/BackLink";
+import { RecetaPrintButton } from "@/components/recetas/RecetaPrintButton";
 import { ResourceDetailFields } from "@/components/resources/ResourceDetailFields";
 import { ResourceRowActions } from "@/components/resources/ResourceRowActions";
 import { shouldShowAudioTranscription } from "@/core/audio-transcription/panel-view";
@@ -74,15 +75,9 @@ export default async function ResourceDetailPage({ params }: PageProps) {
           <h1 className="text-xl font-semibold text-slate-900">Detalle</h1>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          {/* Receta: acceso a la vista de impresión SÓLO LECTURA (no emite/finaliza; eso es P1). */}
-          {resourceName === "prescriptions" ? (
-            <Link
-              href={`/recetas/${encodeURIComponent(id)}/imprimir`}
-              className="text-sm font-medium text-slate-700 underline-offset-2 hover:text-slate-900 hover:underline"
-            >
-              Imprimir receta
-            </Link>
-          ) : null}
+          {/* Receta: abre el diálogo con la vista previa del PDF construido + opciones, SÓLO LECTURA
+              (no emite/finaliza; eso es P1). */}
+          {resourceName === "prescriptions" ? <RecetaPrintButton prescriptionId={id} /> : null}
           {editEnabled ? (
             <Link
               href={`${base}/edit`}
