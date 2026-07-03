@@ -70,6 +70,7 @@ from backend.app.models.setup import PlatformSetup
 from backend.app.models.study_order import StudyOrder
 from backend.app.models.system_settings import SystemSettings
 from backend.app.models.user import Role, RoleAccess, User, UserRole
+from backend.app.models.user_identity import UserIdentity
 from backend.app.models.vital_sign import VitalSign
 
 __all__ = [
@@ -148,6 +149,7 @@ __all__ = [
     "StudyOrderStatus",
     "SystemSettings",
     "User",
+    "UserIdentity",
     "UserRole",
     "VitalSign",
 ]
