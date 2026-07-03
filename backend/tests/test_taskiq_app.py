@@ -142,6 +142,10 @@ class TaskiqPostgresIntegrationTest(unittest.TestCase):
                 await broker.startup()
                 await broker.shutdown()
 
+            # psycopg async no soporta el ProactorEventLoop por defecto de Windows;
+            # en Linux/Docker (donde corre el worker real) no cambia nada.
+            if sys.platform == "win32":
+                asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
             asyncio.run(cycle())
             # El startup materializa la tabla de mensajes del broker (y nada más).
             self.assertIn(table_name, inspect(engine).get_table_names())

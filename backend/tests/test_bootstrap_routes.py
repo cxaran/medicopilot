@@ -260,18 +260,26 @@ class BootstrapRoutesTest(unittest.TestCase):
 
         with mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop("BOOTSTRAP_SETUP_TOKEN", None)
+            # La clave de cifrado se pasa explícita: producción también la exige y
+            # este test valida el TOKEN, no la clave (hermético, sin leer el env).
             with self.assertRaises(ValidationError):
-                Settings(environment="production", **BASE_SETTINGS)
+                Settings(
+                    environment="production",
+                    app_encryption_key=SecretStr("x" * 44),
+                    **BASE_SETTINGS,
+                )
             with self.assertRaises(ValidationError):
                 Settings(
                     environment="production",
                     bootstrap_setup_token=SecretStr("short"),
+                    app_encryption_key=SecretStr("x" * 44),
                     **BASE_SETTINGS,
                 )
 
             configured = Settings(
                 environment="production",
                 bootstrap_setup_token=SecretStr("valid-bootstrap-token-123"),
+                app_encryption_key=SecretStr("x" * 44),
                 **BASE_SETTINGS,
             )
             assert configured.bootstrap_setup_token is not None

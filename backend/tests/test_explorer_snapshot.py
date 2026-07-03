@@ -157,14 +157,25 @@ class ValueConversionTest(unittest.TestCase):
     _is_test_url(_TEST_PG_URL),
     "TEST_POSTGRES_URL no definida o no apunta a una base *_test.",
 )
+@unittest.skipUnless(
+    __import__("shutil").which("pg_dump"),
+    "pg_dump no está instalado en este host (la imagen Docker sí lo trae).",
+)
 class ExplorerIntegrationTest(unittest.TestCase):
     """Esquema propio con SQL crudo + snapshot compartido, sin modelos actuales."""
 
     @classmethod
     def setUpClass(cls) -> None:
         import psycopg
+        from sqlalchemy.engine import make_url
 
-        cls.dsn = _TEST_PG_URL
+        # psycopg v3 no acepta el sufijo de driver de SQLAlchemy (+psycopg2): se
+        # normaliza igual que hace el broker de Taskiq con el DSN del proyecto.
+        cls.dsn = (
+            make_url(_TEST_PG_URL)
+            .set(drivername="postgresql")
+            .render_as_string(hide_password=False)
+        )
         with psycopg.connect(cls.dsn, autocommit=True) as conn:
             conn.execute("DROP TABLE IF EXISTS explorer_test_children")
             conn.execute("DROP TABLE IF EXISTS explorer_test_patients")

@@ -14,6 +14,7 @@ estados, no Google.
 """
 
 import os
+import shutil
 import unittest
 import uuid
 from datetime import datetime, time, timedelta
@@ -586,6 +587,10 @@ class BackupApiAndTickTest(unittest.TestCase):
         self.assertIn("9 diarias", kwargs["message"])
         self.assertIn("SIN CIFRAR", kwargs["message"])
 
+    @unittest.skipUnless(
+        shutil.which("age-keygen"),
+        "age-keygen no está instalado en este host (la imagen Docker sí lo trae).",
+    )
     def test_generate_encryption_key_stores_encrypted_and_mails_private_key(self) -> None:
         sid = self._settings_id()
         with self._with_fernet_key(), mock.patch(
@@ -614,6 +619,10 @@ class BackupApiAndTickTest(unittest.TestCase):
             assert row.age_identity_ciphertext is not None
             self.assertNotIn("AGE-SECRET-KEY-", row.age_identity_ciphertext)
 
+    @unittest.skipUnless(
+        shutil.which("age-keygen"),
+        "age-keygen no está instalado en este host (la imagen Docker sí lo trae).",
+    )
     def test_patch_resends_private_key_while_system_generated(self) -> None:
         sid = self._settings_id()
         with self._with_fernet_key():
