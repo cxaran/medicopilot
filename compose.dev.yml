@@ -1,5 +1,10 @@
 name: medicopilot-dev
 
+# OJO precedencia: las variables de este anchor (environment:) GANAN sobre las del
+# .env (env_file:) en cada servicio que lo mezcla. Es intencional en dev — el stack
+# funciona sin .env — pero si defines aquí una variable (SECRET_KEY, SMTP_*...) el
+# valor del .env NO se aplica. Lo que no está en el anchor (BACKUP_*, GOOGLE_*,
+# BOOTSTRAP_*) sí llega del .env.
 x-backend-environment: &backend-environment
   ENVIRONMENT: local
   # uvicorn --reload usa watchfiles, que no recibe eventos por el bind mount de Windows:
@@ -81,6 +86,11 @@ services:
       - "${MAILPIT_WEB_PORT:-8025}:8025"
     expose:
       - "1025"
+    healthcheck:
+      test: [ "CMD", "/mailpit", "readyz" ]
+      interval: 15s
+      timeout: 5s
+      retries: 3
     restart: unless-stopped
 
   migrate:

@@ -12,6 +12,25 @@ services:
       retries: 5
     restart: unless-stopped
 
+  # Base de datos del stack (despliegue self-hosted autocontenido). Si usas una DB
+  # gestionada externa, apunta POSTGRES_SERVER del .env a ella y retira este
+  # servicio (y las dependencias postgres de abajo).
+  postgres:
+    image: postgres:16-alpine
+    env_file: ${APP_ENV_FILE:-.env}
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-medicopilot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?define POSTGRES_PASSWORD en el .env}
+      POSTGRES_DB: ${POSTGRES_DB:-medicopilot}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
   backend:
     build:
       context: ./backend
@@ -24,6 +43,8 @@ services:
       - "8000"
     depends_on:
       redis:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     restart: unless-stopped
 
@@ -54,6 +75,9 @@ services:
     profiles: [ "migrate" ]
     env_file: ${APP_ENV_FILE:-.env}
     command: [ "alembic", "-c", "backend/alembic.ini", "upgrade", "head" ]
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   # Tareas en segundo plano (Taskiq sobre PostgreSQL): worker y scheduler en procesos
   # PROPIOS con profile explícito "taskiq"; `docker compose up` normal no los levanta.
@@ -77,3 +101,4 @@ services:
 
 volumes:
   redis_data:
+  postgres_data:

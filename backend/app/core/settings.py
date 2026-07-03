@@ -114,7 +114,9 @@ class Settings(BaseSettings):
     # está deshabilitado por defecto y debe habilitarse explícitamente por ambiente.
     # Al completarse un registro, el usuario queda ACTIVO pero SIN roles (sin acceso
     # hasta que un administrador le asigne uno) y SIN sesión automática.
-    registration_enabled: bool = False
+    # (registration_enabled se retiró de Settings: la política de registro vive en
+    # system_settings —editable por administradores— y la migración de siembra
+    # importó el valor del entorno una única vez leyendo os.environ directamente.)
     # Gate de DESPLIEGUE del registro público: si es False, la política persistida en
     # system_settings no puede activarse (candado de infraestructura que la UI no
     # salta). Sin valor explícito: permitido sólo en entorno local. La política
